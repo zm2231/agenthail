@@ -183,15 +183,17 @@ fn a_reread_that_finds_the_same_sessions_does_not_rebuild_the_overview() {
     rt.frame(DT);
     let before = rt.state.rebuilds;
 
-    send(&rt, snapshot(3, sessions(&["a", "b"]), None));
-    send(&rt, Bg::Unchanged);
+    send(&rt, Bg::Snapshot("2026-11-27T10:02:40Z".into(), EPOCH.into(), 3, sessions(&["a", "b"]), None));
     rt.frame(DT);
     assert_eq!(rt.state.rebuilds, before, "nothing the overview shows moved");
-    assert_eq!(rt.state.status, "live");
 
-    send(&rt, snapshot(4, sessions(&["a", "b", "c"]), None));
+    send(&rt, snapshot(3, sessions(&["a", "b"]), None));
     rt.frame(DT);
-    assert_eq!(rt.state.rebuilds, before + 1, "a real change still rebuilds in the same frame");
+    assert_eq!(rt.state.rebuilds, before + 1, "a new minute rebuilds so ages and time windows move on");
+
+    send(&rt, Bg::Snapshot("2026-11-27T10:03:20Z".into(), EPOCH.into(), 4, sessions(&["a", "b", "c"]), None));
+    rt.frame(DT);
+    assert_eq!(rt.state.rebuilds, before + 2, "a real change still rebuilds in the same frame");
     assert!(rt.state.ov.d.session("c").is_some());
 }
 

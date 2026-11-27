@@ -37,7 +37,6 @@ use crate::transcript::{Pane, Replay};
 
 pub enum Bg {
     Snapshot(String, String, u64, Vec<Session>, Option<Vec<String>>),
-    Unchanged,
     DecisionsRev(String),
     Changed(feed::watch::Wants),
     Reopened,
@@ -1339,11 +1338,6 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                         selected_moved(s, &id);
                     }
                 }
-            }
-            Bg::Unchanged => {
-                s.now = OffsetDateTime::now_utc();
-                s.status = "live".into();
-                ui::connect::up(s);
             }
             Bg::Changed(wants) => changed_elsewhere(s, wants),
             Bg::Reopened => reopened(s),

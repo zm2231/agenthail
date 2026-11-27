@@ -68,6 +68,14 @@ fn a_change_to_one_known_session_rereads_the_snapshot_but_not_the_overview() {
     let mut both = session.clone();
     both.merge(e(Value::Null));
     assert!(both.overview_unless(known), "a burst that includes an unscoped change still rereads it");
+    let mut two = Wants::default();
+    two.merge(e(json!({"entityId": "s9"})));
+    two.merge(e(json!({"entityId": "s1"})));
+    assert!(two.overview_unless(known), "changes to two sessions, one not held yet");
+    let mut same = Wants::default();
+    same.merge(e(json!({"entityId": "s1"})));
+    same.merge(e(json!({"entityId": "s1"})));
+    assert!(!same.overview_unless(known));
 }
 
 #[test]

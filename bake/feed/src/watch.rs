@@ -61,12 +61,16 @@ pub struct Wants {
 
 impl Wants {
     pub fn merge(&mut self, other: Wants) {
+        if *self == Wants::default() {
+            *self = other;
+            return;
+        }
+        self.scoped = self.scoped && other.scoped && self.session == other.session;
         self.snapshot |= other.snapshot;
         self.overview |= other.overview;
         self.hosts |= other.hosts;
         self.extensions |= other.extensions;
         self.reset |= other.reset;
-        self.scoped &= other.scoped;
         if other.session.is_some() {
             self.session = other.session;
         }

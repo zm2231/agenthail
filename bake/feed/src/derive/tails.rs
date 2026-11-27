@@ -77,11 +77,11 @@ impl Resume {
         (tail, self)
     }
 
-    fn kept(&self, event: &Event) -> bool {
+    fn reaches_back(&self, event: &Event) -> bool {
         match event {
-            Event::Upsert(item) => !self.dropped.contains(&item.id),
-            Event::Remove(id) => !self.dropped.contains(id),
-            _ => true,
+            Event::Upsert(item) => self.dropped.contains(&item.id),
+            Event::Remove(id) => self.dropped.contains(id),
+            _ => false,
         }
     }
 }
@@ -95,6 +95,9 @@ pub fn resume(lines: impl Iterator<Item = std::io::Result<String>>, mut at: Resu
     for line in lines {
         let line = line.map_err(|e| e.to_string())?;
         if line == LIVE {
+            if !at.dropped.is_empty() && at.transcript.items().len() < TAIL_ITEMS {
+                return Err(RESYNC.into());
+            }
             return Ok(at.settle());
         }
         let Some(json) = sse.line(&line) else { continue };
@@ -102,7 +105,9 @@ pub fn resume(lines: impl Iterator<Item = std::io::Result<String>>, mut at: Resu
         at.seq = at.seq.max(wire.seq);
         match at.rebuild.apply(wire) {
             Outcome::Events(seq, events) => {
-                let events = events.into_iter().filter(|e| at.kept(e)).collect();
+                if events.iter().any(|e| at.reaches_back(e)) {
+                    return Err(RESYNC.into());
+                }
                 at.transcript.apply(seq, events);
             }
             Outcome::Skip => {}

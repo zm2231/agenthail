@@ -845,20 +845,8 @@ impl Client {
     }
 
     pub fn snapshot(&self) -> Result<Snapshot> {
-        self.snapshot_since(None)?.map(|(snap, _)| snap).ok_or_else(|| anyhow!("the daemon sent no snapshot"))
-    }
-
-    pub fn snapshot_since(&self, tag: Option<&str>) -> Result<Option<(Snapshot, Option<String>)>> {
-        let mut request = self.agent.get(&format!("{}/api/v1/snapshot", self.base)).set("Authorization", &format!("Bearer {}", self.token)).set("Accept", "application/json");
-        if let Some(tag) = tag {
-            request = request.set("If-None-Match", tag);
-        }
-        let response = request.call().map_err(|e| anyhow!(e.to_string()))?;
-        if response.status() == 304 {
-            return Ok(None);
-        }
-        let tag = response.header("ETag").filter(|t| !t.is_empty()).map(String::from);
-        Ok(Some((response.into_json()?, tag)))
+        let response = self.agent.get(&format!("{}/api/v1/snapshot", self.base)).set("Authorization", &format!("Bearer {}", self.token)).set("Accept", "application/json").call().map_err(|e| anyhow!(e.to_string()))?;
+        Ok(response.into_json()?)
     }
 
     pub fn work_item(&self, project: &str, id: &str) -> Result<WorkItem> {

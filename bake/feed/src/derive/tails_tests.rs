@@ -318,7 +318,7 @@ fn a_held_tail_keeps_only_its_recent_rows_and_still_knows_an_early_prompt() {
     let mut rows = vec![(1, said_row("p", "2026-11-24T09:00:00Z", "the first ask"))];
     rows.extend((2..=400u64).map(|seq| (seq, reply_row(&format!("r{seq}")))));
     let head = String::from_utf8(HEAD.to_vec()).unwrap();
-    let late = head.clone() + &journal(&[(401, reply_row("r401")), (402, reply_row("p"))]);
+    let late = head.clone() + &journal(&[(401, reply_row("r401"))]);
     let (client, _paths) = daemon(vec![head + &journal(&rows), late]);
     let (tail, at) = tails::fetch(&client, "a", BUDGET, None);
     let tail = tail.unwrap();
@@ -326,5 +326,43 @@ fn a_held_tail_keeps_only_its_recent_rows_and_still_knows_an_early_prompt() {
     let (tail, _) = tails::fetch(&client, "a", BUDGET, at);
     let tail = tail.unwrap();
     assert!(tail.prompted_before, "a prompt let go from the held rows still counts");
-    assert_eq!(tail.items.last().unwrap().id, "r401", "a late change to a row let go doesn't come back as a new one");
+    assert_eq!(tail.items.last().unwrap().id, "r401");
+}
+
+#[test]
+fn a_change_reaching_rows_a_held_tail_let_go_reads_the_whole_journal_again() {
+    let mut rows = vec![(1, said_row("p", "2026-11-24T09:00:00Z", "the first ask"))];
+    rows.extend((2..=400u64).map(|seq| (seq, reply_row(&format!("r{seq}")))));
+    let head = String::from_utf8(HEAD.to_vec()).unwrap();
+    let edit = head.clone() + &journal(&[(401, said_row("p", "2026-11-24T09:00:00Z", "the first ask, edited"))]);
+    let mut full = rows.clone();
+    full[0] = (1, said_row("p", "2026-11-24T09:00:00Z", "the first ask, edited"));
+    let (client, paths) = daemon(vec![head.clone() + &journal(&rows), edit, head + &journal(&full)]);
+    let (_, at) = tails::fetch(&client, "a", BUDGET, None);
+    let (tail, at) = tails::fetch(&client, "a", BUDGET, at);
+    let asked: Vec<String> = paths.try_iter().collect();
+    assert!(asked[1].ends_with("after=400") && asked[2].ends_with("after=0"), "{asked:?}");
+    let tail = tail.unwrap();
+    assert_eq!(tail.items.len(), TAIL_ITEMS);
+    assert!(tail.prompted_before && at.is_some());
+}
+
+#[test]
+fn removals_that_thin_a_held_tail_below_its_length_read_the_whole_journal_again() {
+    let rows: Vec<(u64, Value)> = (1..=400u64).map(|seq| (seq, reply_row(&format!("r{seq}")))).collect();
+    let head = String::from_utf8(HEAD.to_vec()).unwrap();
+    let mut gone = head.clone();
+    for (n, seq) in (200..=400u64).enumerate() {
+        gone.push_str(&format!("data: {}\n\n", json!({"seq": 401 + n as u64, "data": {"op": "remove", "itemId": format!("r{seq}")}})));
+    }
+    gone.push_str(": live\n\n");
+    let kept: Vec<(u64, Value)> = rows[..199].to_vec();
+    let (client, paths) = daemon(vec![head.clone() + &journal(&rows), gone, head + &journal(&kept)]);
+    let (_, at) = tails::fetch(&client, "a", BUDGET, None);
+    let (tail, _) = tails::fetch(&client, "a", BUDGET, at);
+    let asked: Vec<String> = paths.try_iter().collect();
+    assert!(asked[2].ends_with("after=0"), "{asked:?}");
+    let tail = tail.unwrap();
+    assert_eq!(tail.items.len(), TAIL_ITEMS, "the full read brings back rows the held tail had let go");
+    assert_eq!(tail.items.last().unwrap().id, "r199");
 }

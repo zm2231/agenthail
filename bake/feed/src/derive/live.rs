@@ -381,12 +381,14 @@ impl Overview {
         if !later(at, epoch, seq, &self.base, true) {
             return false;
         }
+        let minute = |at: &str| parse_time(at).map(|t| t.unix_timestamp().div_euclid(60));
+        let ticked = minute(at) != minute(&self.base.updated_at);
         self.base.updated_at = at.to_string();
         self.base.host_epoch = epoch.to_string();
         self.base.catalog_seq = seq;
         let before = std::mem::replace(&mut self.base.sessions, sessions);
         self.reconcile();
-        self.stale |= self.base.sessions != before;
+        self.stale |= ticked || self.base.sessions != before;
         true
     }
 
