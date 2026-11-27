@@ -11,6 +11,7 @@ pub const READ_ONLY: &str = "This session is closed. You can read it, but not me
 
 pub fn reply_refusal(row: &crate::subagents::RowRead) -> Option<String> {
     match row {
+        crate::subagents::RowRead::Found(x) if x.archived => Some("This session is archived. Unarchive it to message it.".into()),
         crate::subagents::RowRead::Found(x) => read_only(x),
         crate::subagents::RowRead::Gone => Some("This session no longer exists.".into()),
         crate::subagents::RowRead::Failed(error) => Some(format!("Couldn't check the session is still open: {error}")),
@@ -121,6 +122,8 @@ mod tests {
         assert_eq!(reply_refusal(&RowRead::Found(closed)).as_deref(), Some("Read-only here."));
         let open = detail_row(&json!({"session": {"id": "s1"}, "capabilities": {"send": true}})).unwrap();
         assert_eq!(reply_refusal(&RowRead::Found(open)), None);
+        let archived = detail_row(&json!({"session": {"id": "s1"}, "capabilities": {"send": true}, "archived": true})).unwrap();
+        assert_eq!(reply_refusal(&RowRead::Found(archived)).as_deref(), Some("This session is archived. Unarchive it to message it."));
         assert!(reply_refusal(&RowRead::Gone).is_some());
         assert_eq!(reply_refusal(&RowRead::Failed("timed out".into())).as_deref(), Some("Couldn't check the session is still open: timed out"));
         let error = refused("Read-only here.".into());

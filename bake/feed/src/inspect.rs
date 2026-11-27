@@ -241,7 +241,7 @@ impl Reads {
 
     pub fn landed(&mut self, id: &str, ticket: u64) -> bool {
         match self.rereading.get(id).copied() {
-            Some((asked, again)) if ticket >= asked => {
+            Some((asked, again)) if ticket == asked => {
                 self.rereading.remove(id);
                 again
             }
@@ -250,7 +250,6 @@ impl Reads {
     }
 
     pub fn keep_only(&mut self, id: &str) {
-        self.applied.retain(|k, _| k == id);
         self.rereading.retain(|k, _| k == id);
     }
 }
@@ -559,7 +558,10 @@ mod tests {
         reads.started("s", first);
         assert!(!reads.want("s") && !reads.want("s"), "events while a reread runs are coalesced");
         let before = first - 1;
+        let other = reads.ticket();
         assert!(!reads.landed("s", before), "an earlier read doesn't settle the reread");
+        assert!(!reads.landed("s", other), "nor does a newer read from somewhere else");
+        assert!(!reads.want("s"));
         assert!(reads.landed("s", first), "one more read follows the coalesced events");
         assert!(reads.want("s"));
         let second = reads.ticket();
@@ -569,6 +571,16 @@ mod tests {
         reads.started("s", reads.next + 1);
         reads.keep_only("other");
         assert!(reads.want("s"), "switching sessions forgets a pending reread");
+    }
+
+    #[test]
+    fn switching_away_and_back_still_refuses_an_older_read() {
+        let mut reads = Reads::default();
+        let (old, new) = (reads.ticket(), reads.ticket());
+        assert!(reads.accept("a", new));
+        reads.keep_only("b");
+        reads.keep_only("a");
+        assert!(!reads.accept("a", old));
     }
 
     #[test]
