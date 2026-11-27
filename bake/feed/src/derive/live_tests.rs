@@ -616,14 +616,14 @@ fn work_the_person_holds_is_their_move_whoever_logged_before() {
 #[test]
 fn a_search_finds_settled_work_after_the_active_work() {
     let mut ov = Overview::default();
-    let items = vec![work("w1 export", "in_progress"), work("w2 export", "closed"), work("w3 export", "done"), work("w4 export", "parked"), work("w5 other", "closed")];
+    let items = vec![work("w1 export", "in_progress"), work("w2 export", "closed"), work("w3 export", "done"), work("w4 export", "parked"), work("w5 other", "closed"), work("w6 export", "blocked")];
     ov.refresh(fetched("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")], vec![("p", Ok(items))]));
     let w = ov.world(&[]);
     let found: Vec<(String, String)> = w.jump("export", &[], &[]).into_iter().filter(|h| h.group == "Work").map(|h| (h.title, h.status.split(" · ").next().unwrap_or_default().to_string())).collect();
     assert_eq!(found[0].0, "w1 export");
     let mut settled: Vec<(String, String)> = found[1..].to_vec();
     settled.sort();
-    assert_eq!(settled, [("w2 export".into(), "Closed".into()), ("w3 export".into(), "Done".into()), ("w4 export".into(), "Parked".into())]);
+    assert_eq!(settled, [("w2 export".into(), "Closed".into()), ("w3 export".into(), "Done".into()), ("w4 export".into(), "Parked".into()), ("w6 export".into(), "Blocked".into())]);
     assert!(w.jump("", &[], &[]).iter().all(|h| h.title != "w2 export"), "an empty search lists only active work");
 }
 
@@ -634,4 +634,14 @@ fn parked_and_closed_work_is_no_ones_move() {
     let w = ov.world(&[]);
     assert_eq!(w.whose_move(&w.work["w1"]), "No one");
     assert_eq!(super::phase::move_of(&w.whose_move(&w.work["w2"])), "No one's move");
+}
+
+#[test]
+fn a_parked_step_shows_why_it_waits() {
+    let mut w = work("w1", "parked");
+    w.timeline.push(serde_json::from_value(json!({"at": "2026-11-24T11:30:00Z", "actor": "agenthail-person", "kind": "state", "state": "parked", "text": "parked (later): after the release"})).unwrap());
+    w.timeline.push(serde_json::from_value(json!({"at": "2026-11-24T11:40:00Z", "actor": "x", "kind": "state", "state": "parked", "text": "handoff: done []"})).unwrap());
+    let steps = super::timeline::timeline(&w, 5);
+    assert_eq!(steps[1].what, "Parked: after the release");
+    assert!(steps[0].what.starts_with("Moved to "), "{}", steps[0].what);
 }

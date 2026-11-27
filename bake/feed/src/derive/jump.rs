@@ -17,11 +17,12 @@ pub struct Hit {
     pub target: Target,
 }
 
-fn settled_word(state: &str) -> Option<&'static str> {
+fn quiet_word(state: &str) -> Option<&'static str> {
     match state {
         "done" => Some("Done"),
         "closed" => Some("Closed"),
         "parked" => Some("Parked"),
+        "blocked" => Some("Blocked"),
         _ => None,
     }
 }
@@ -52,9 +53,9 @@ impl World {
             out.push(Hit { group: "Work", title: plain(&w.text), status: format!("{} · {whose} · {project}", PHASES[ph]), badge: short_id(&w.id), avatar: project, target: Target::Work(w.id.clone()) });
         }
         if !q.is_empty() {
-            let mut settled: Vec<(&Work, &str)> = self.work.values().filter_map(|w| settled_word(&w.state).map(|s| (w, s))).filter(|(w, _)| has(&w.text) || has(&w.id)).collect();
-            settled.sort_by(|a, b| b.0.last_at().cmp(a.0.last_at()).then(a.0.id.cmp(&b.0.id)));
-            for (w, word) in settled {
+            let mut quiet: Vec<(&Work, &str)> = self.work.values().filter_map(|w| quiet_word(&w.state).map(|s| (w, s))).filter(|(w, _)| has(&w.text) || has(&w.id)).collect();
+            quiet.sort_by(|a, b| b.0.last_at().cmp(a.0.last_at()).then(a.0.id.cmp(&b.0.id)));
+            for (w, word) in quiet {
                 let project = self.project(&w.project).map(|p| p.name.clone()).unwrap_or_default();
                 out.push(Hit { group: "Work", title: plain(&w.text), status: format!("{word} · {project}"), badge: short_id(&w.id), avatar: project, target: Target::Work(w.id.clone()) });
             }
