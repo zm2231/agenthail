@@ -529,6 +529,9 @@ fn settled(s: &mut App, done: Done) {
             if !s.menus.fresh(&id, "context", seq) || super::inspect::is_streamed(s, &id, "context") {
                 return;
             }
+            if result.is_ok() {
+                super::inspect::caught_up(s, &id, "context", ticket);
+            }
             match result {
                 Ok(Some(usage)) => {
                     s.menus.context_error.remove(&id);

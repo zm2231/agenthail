@@ -30,6 +30,12 @@ struct Process {
 
 const CATCH_UP: std::time::Duration = std::time::Duration::from_secs(30);
 
+struct Missed {
+    after: u64,
+    asked: Option<std::time::Instant>,
+    kinds: std::collections::HashSet<&'static str>,
+}
+
 pub struct Editing {
     pub session: String,
     pub act: GoalAct,
@@ -44,7 +50,7 @@ pub struct Inspect {
     goal_note: HashMap<String, (bool, String)>,
     overlay: inspect::Overlay,
     expanded: std::collections::HashSet<String>,
-    missed: HashMap<String, (u64, Option<std::time::Instant>)>,
+    missed: HashMap<String, Missed>,
     pub editing: Option<Editing>,
     pub logs: Option<(String, String)>,
     seq: u64,
@@ -100,12 +106,20 @@ fn current(s: &App, id: &str) -> String {
 }
 
 fn catch_up(s: &mut App) {
-    let due: Vec<String> = s.inspect.missed.iter().filter(|(id, (_, at))| at.is_none_or(|at| at.elapsed() >= CATCH_UP) && showing(s, id)).map(|(id, _)| id.clone()).collect();
+    let due: Vec<String> = s.inspect.missed.iter().filter(|(id, m)| m.asked.is_none_or(|at| at.elapsed() >= CATCH_UP) && showing(s, id)).map(|(id, _)| id.clone()).collect();
     for id in due {
         if let Some(miss) = s.inspect.missed.get_mut(&id) {
-            miss.1 = Some(std::time::Instant::now());
+            miss.asked = Some(std::time::Instant::now());
         }
         metadata_moved(s, &id);
+    }
+}
+
+pub(crate) fn caught_up(s: &mut App, id: &str, kind: &str, ticket: u64) {
+    let Some(miss) = s.inspect.missed.get_mut(id).filter(|m| ticket > m.after) else { return };
+    miss.kinds.remove(kind);
+    if miss.kinds.is_empty() {
+        s.inspect.missed.remove(id);
     }
 }
 
@@ -132,10 +146,11 @@ pub(crate) fn read(s: &mut App, id: &str, ticket: u64, result: Result<Metadata, 
             Err(error) => Metadata::failed(old, error),
         };
         let data = if is_streamed(s, id, "goal") { data.keep_goal(s.inspect.meta.get(id)) } else { data };
-        if !data.goal_failed && s.inspect.missed.get(id).is_some_and(|(after, _)| ticket > *after) {
-            s.inspect.missed.remove(id);
-        }
+        let goal = !data.goal_failed;
         s.inspect.meta.insert(id.to_string(), data);
+        if goal {
+            caught_up(s, id, "goal", ticket);
+        }
     }
     if s.inspect.reads.landed(id, ticket) {
         metadata_moved(s, id);
@@ -151,10 +166,15 @@ pub(crate) fn streamed(s: &mut App, id: &str, x: feed::wire::Streamed) {
     if !s.inspect.overlay.stream(id, kind, shown) {
         if !shown && super::window::selected_anywhere(s).iter().any(|x| x == id) {
             let after = s.inspect.reads.issued();
-            s.inspect.missed.insert(id.to_string(), (after, None));
+            let miss = s.inspect.missed.entry(id.to_string()).or_insert_with(|| Missed { after, asked: None, kinds: Default::default() });
+            miss.after = after;
+            miss.asked = None;
+            miss.kinds.insert(kind);
         }
         return;
     }
+    let newest = s.inspect.reads.issued() + 1;
+    caught_up(s, id, kind, newest);
     match x {
         feed::wire::Streamed::Context(usage) => super::session_menu::streamed_context(s, id, usage),
         feed::wire::Streamed::Goal(goal) => {

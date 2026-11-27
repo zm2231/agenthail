@@ -261,10 +261,11 @@ impl Reads {
 
     pub fn rekey(&mut self, old: &str, new: &str) {
         if let Some(v) = self.applied.remove(old) {
-            self.applied.insert(new.to_string(), v);
+            let kept = self.applied.entry(new.to_string()).or_insert(v);
+            *kept = (*kept).max(v);
         }
         if let Some(v) = self.rereading.remove(old) {
-            self.rereading.insert(new.to_string(), v);
+            self.rereading.entry(new.to_string()).or_insert(v);
         }
     }
 
@@ -374,7 +375,7 @@ impl Overlay {
 
     pub fn rekey(&mut self, old: &str, new: &str) {
         if let Some(kinds) = self.sessions.remove(old) {
-            self.sessions.insert(new.to_string(), kinds);
+            self.sessions.entry(new.to_string()).or_default().extend(kinds);
         }
     }
 
@@ -690,6 +691,10 @@ mod tests {
         assert!(o.holds("a", "context"), "holding a session already followed keeps its streams");
         o.rekey("a", "a2");
         assert!(o.holds("a2", "context") && !o.holds("a", "context"));
+        o.stream("b", "goal", true);
+        o.open("c");
+        o.rekey("c", "b");
+        assert!(o.holds("b", "goal"), "rekeying onto a held session keeps what it streamed");
     }
 
     #[test]

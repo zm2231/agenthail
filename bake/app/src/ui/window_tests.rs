@@ -719,3 +719,24 @@ fn a_context_read_that_failed_for_a_shown_session_is_tried_again() {
     crate::ui::session_menu::drain(&mut s);
     assert!(crate::ui::session_menu::asked(&s, "b"), "the window's failed context is read again");
 }
+
+#[test]
+fn a_read_without_context_leaves_a_missed_context_to_catch_up() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Now;
+    let usage: feed::settings::ContextUsage = serde_json::from_value(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
+    crate::ui::inspect::streamed(&mut s, "a", feed::wire::Streamed::Context(Some(usage.clone())));
+    assert!(crate::ui::inspect::missed(&s, "a"));
+    let ticket = crate::ui::inspect::ticket(&mut s);
+    crate::ui::inspect::read(&mut s, "a", ticket, Ok(feed::inspect::Metadata::default()));
+    assert!(crate::ui::inspect::missed(&s, "a"), "a goal-only read doesn't settle the missed context");
+    crate::ui::inspect::caught_up(&mut s, "a", "context", ticket);
+    assert!(!crate::ui::inspect::missed(&s, "a"), "a context read asked after the miss does");
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "a", goal("first"));
+    s.screen = Screen::Now;
+    crate::ui::inspect::streamed(&mut s, "a", goal("unseen"));
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "a", goal("fresh"));
+    assert!(!crate::ui::inspect::missed(&s, "a"), "a fresh stream once shown is caught up too");
+}
