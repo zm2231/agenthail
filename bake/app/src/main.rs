@@ -139,6 +139,7 @@ pub struct App {
     pub limits: ui::limit::Limits,
     pub accounts: ui::accounts::Accounts,
     pub prs: ui::pr_link::Prs,
+    pub inspect: ui::inspect::Inspect,
     pub new_session: Option<ui::new_session::Sheet>,
     bar: menubar::Bar,
     pub attach: ui::attach::Attach,
@@ -252,6 +253,7 @@ fn init() -> App {
         limits: ui::limit::Limits::new(),
         accounts: ui::accounts::Accounts::new(),
         prs: ui::pr_link::Prs::new(),
+        inspect: ui::inspect::Inspect::new(),
         new_session: None,
         bar: menubar::Bar::default(),
         attach: ui::attach::Attach::default(),
@@ -341,6 +343,7 @@ pub fn select(s: &mut App, id: &str) {
     ui::session_menu::load(s, id);
     ui::queue::fetch(s, id);
     ui::subagents::load(s, id);
+    ui::inspect::load(s, id);
 }
 
 pub fn load_pane(s: &mut App, id: &str) {
@@ -1000,6 +1003,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                         ui::queue::fetch(s, &id);
                     }
                     ui::subagents::refresh(s, &id);
+                    ui::inspect::refresh(s, &id);
                     if let Some(work) = session(s, &id).and_then(|x| x.primary_work(s.work_pick.get(&id).map(String::as_str)).cloned()) {
                         fetch_item(s, &work.project_key, &work.item_id);
                     }
@@ -1177,7 +1181,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= over::search::drain(s);
     changed |= notify::tick(s);
     changed |= ui::gone::watch(s);
-    changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s);
+    changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s) | ui::inspect::drain(s);
     changed |= ui::attach::pump(s);
     changed |= over::extensions::drain(s);
     changed |= over::projects::drain(s);

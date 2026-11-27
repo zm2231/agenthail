@@ -194,6 +194,8 @@ pub struct Session {
     pub read_state: Option<crate::action::ReadState>,
     #[serde(default)]
     pub runtime: Option<Runtime>,
+    #[serde(default)]
+    pub runtime_kind: Option<String>,
     #[serde(default, deserialize_with = "capabilities_or_default")]
     pub capabilities: Capabilities,
     #[serde(default)]
@@ -232,6 +234,8 @@ pub struct Capabilities {
     #[serde(default)]
     pub attach: bool,
     #[serde(default)]
+    pub goal: bool,
+    #[serde(default)]
     pub goal_set: bool,
     #[serde(default)]
     pub steer_images: Option<bool>,
@@ -245,6 +249,12 @@ pub struct Capabilities {
 
 #[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq)]
 pub struct Lifecycle {
+    #[serde(default)]
+    pub status: bool,
+    #[serde(default)]
+    pub logs: bool,
+    #[serde(default)]
+    pub stop: bool,
     #[serde(default)]
     pub resume: bool,
     #[serde(default)]
@@ -266,7 +276,7 @@ fn capabilities_or_default<'de, D: serde::Deserializer<'de>>(d: D) -> std::resul
 
 impl Default for Capabilities {
     fn default() -> Self {
-        Capabilities { send: true, interrupt: true, steer: true, model: false, compact: false, commands: false, attach: false, goal_set: false, steer_images: None, lifecycle: Lifecycle::default(), reaches_as_note: false, remote_control: false }
+        Capabilities { send: true, interrupt: true, steer: true, model: false, compact: false, commands: false, attach: false, goal: false, goal_set: false, steer_images: None, lifecycle: Lifecycle::default(), reaches_as_note: false, remote_control: false }
     }
 }
 
