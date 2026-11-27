@@ -23,7 +23,7 @@ fn recorded(at: &str, sessions: Vec<Session>) -> Recorded {
 }
 
 fn fetched(at: &str, sessions: Vec<Session>, ledgers: Vec<(&str, Result<Vec<Work>, String>)>) -> Fetched {
-    Fetched { recorded: recorded(at, sessions), ledgers: ledgers.into_iter().map(|(k, r)| (k.to_string(), r)).collect(), held: Vec::new(), asked: Vec::new(), started: Instant::now() }
+    Fetched { recorded: recorded(at, sessions), ledgers: ledgers.into_iter().map(|(k, r)| (k.to_string(), r)).collect(), held: Vec::new(), asked: Vec::new(), started: Instant::now(), usage: None }
 }
 
 fn status(w: &World, id: &str) -> String {
@@ -518,4 +518,17 @@ fn a_project_whose_ledger_key_moved_is_read_again_even_when_its_stream_is_quiet(
     known.learn(&read);
     assert!(known.holds("p", "shared:x", settled), "the same key with a quiet stream keeps the rows it has");
     assert!(!known.holds("p", "repo:github.com/o/moved", settled), "a new key means the rows on screen belong to the old ledger");
+}
+
+#[test]
+fn usage_read_in_one_overview_is_kept_for_two_minutes() {
+    let mut known = super::live::Known::default();
+    let t0 = Instant::now();
+    assert_eq!(known.usage_kept(t0), None);
+    let meters = vec![serde_json::json!({"provider": "claude", "percent": 12})];
+    known.learn(&Fetched { started: t0, usage: Some(meters.clone()), ..fetched("2026-11-24T12:00:00Z", Vec::new(), Vec::new()) });
+    assert_eq!(known.usage_kept(t0 + std::time::Duration::from_secs(60)), Some(meters.clone()), "an overview a minute later, after an actor retry say, reuses it");
+    known.learn(&Fetched { started: t0 + std::time::Duration::from_secs(60), ..fetched("2026-11-24T12:01:00Z", Vec::new(), Vec::new()) });
+    assert_eq!(known.usage_kept(t0 + std::time::Duration::from_secs(90)), Some(meters), "an overview that reused it doesn't extend it");
+    assert_eq!(known.usage_kept(t0 + super::live::USAGE_EVERY), None);
 }

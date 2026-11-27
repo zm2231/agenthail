@@ -22,9 +22,11 @@ pub struct Fetched {
     pub held: Vec<String>,
     pub asked: Vec<String>,
     pub started: Instant,
+    pub usage: Option<Vec<Value>>,
 }
 
 pub const RETRY: std::time::Duration = std::time::Duration::from_secs(60);
+pub const USAGE_EVERY: std::time::Duration = std::time::Duration::from_secs(120);
 
 struct Held {
     read_at: Instant,
@@ -43,6 +45,7 @@ pub struct Known {
     ledgers: HashMap<String, Held>,
     keys: HashMap<String, String>,
     current: HashMap<String, String>,
+    usage: Option<(Instant, Vec<Value>)>,
     wanted: HashSet<String>,
     opened: HashSet<String>,
     changed: HashMap<String, Instant>,
@@ -64,6 +67,9 @@ impl Known {
                 continue;
             }
             self.hold(id, fetched.started, result.as_ref().ok());
+        }
+        if let Some(usage) = &fetched.usage {
+            self.usage = Some((fetched.started, usage.clone()));
         }
         self.current = fetched.recorded.projects.iter().filter(|p| !p.ledger_key.is_empty()).map(|p| (p.id.clone(), p.ledger_key.clone())).collect();
         for p in &fetched.recorded.projects {
@@ -105,6 +111,10 @@ impl Known {
         for id in asked {
             self.actors.insert(id.clone(), (!found.contains_key(id)).then(|| now + RETRY));
         }
+    }
+
+    pub fn usage_kept(&self, now: Instant) -> Option<Vec<Value>> {
+        self.usage.as_ref().filter(|(at, _)| now.saturating_duration_since(*at) < USAGE_EVERY).map(|(_, u)| u.clone())
     }
 
     pub fn ledger_key_of(&self, id: &str) -> String {
@@ -205,16 +215,20 @@ pub fn fetch(client: &Client, known: &Known, settled: Option<Instant>) -> Result
         let jobs: Vec<_> = keys.iter().map(|k| (k.clone(), scope.spawn(|| rows(client, key_of.get(k).unwrap_or(k), now)))).collect();
         jobs.into_iter().map(|(k, h)| (k, h.join().unwrap_or_else(|_| Err("the fetch stopped".into())))).collect()
     });
-    let usage: Vec<Value> = client
-        .get_json("/api/v1/usage")
-        .ok()
-        .and_then(|u| u["sets"].as_array().cloned())
-        .into_iter()
-        .flatten()
-        .flat_map(|st| {
-            st["meters"].as_array().cloned().unwrap_or_default().into_iter().map(move |m| json!({"provider": m["provider"], "label": m["label"], "percent": m["percent"], "resetsAt": m["resetsAt"], "name": st["name"]}))
+    let kept = known.usage_kept(started);
+    let fresh: Option<Vec<Value>> = if kept.is_some() {
+        None
+    } else {
+        client.get_json("/api/v1/usage").ok().map(|u| {
+            u["sets"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|st| st["meters"].as_array().cloned().unwrap_or_default().into_iter().map(move |m| json!({"provider": m["provider"], "label": m["label"], "percent": m["percent"], "resetsAt": m["resetsAt"], "name": st["name"]})))
+                .collect()
         })
-        .collect();
+    };
+    let usage = kept.or_else(|| fresh.clone()).unwrap_or_default();
     let hosts: Vec<Value> = client
         .get_json("/api/v1/hosts")
         .ok()
@@ -226,7 +240,7 @@ pub fn fetch(client: &Client, known: &Known, settled: Option<Instant>) -> Result
     let (found, asked) = actors(client, &sessions, |a| known.skips_actor(a), pool);
     recorded.actors = found;
     recorded.sessions = sessions;
-    Ok(Fetched { recorded, ledgers, held, asked, started })
+    Ok(Fetched { recorded, ledgers, held, asked, started, usage: fresh })
 }
 
 pub fn ledger(client: &Client, project: &str, known: &Known) -> Result<Ledger, String> {

@@ -53,7 +53,7 @@ fn tail(items: Vec<Item>) -> Tail {
 fn overview_with(sessions: Vec<Session>) -> Overview {
     let recorded: Recorded = serde_json::from_value(json!({"updatedAt": "2026-11-24T12:00:00Z", "projects": [{"id": "p", "displayName": "P"}]})).unwrap();
     let mut ov = Overview::default();
-    ov.refresh(Fetched { recorded: Recorded { sessions, ..recorded }, ledgers: Default::default(), held: Vec::new(), asked: Vec::new(), started: Instant::now() });
+    ov.refresh(Fetched { recorded: Recorded { sessions, ..recorded }, ledgers: Default::default(), held: Vec::new(), asked: Vec::new(), started: Instant::now(), usage: None });
     ov
 }
 
