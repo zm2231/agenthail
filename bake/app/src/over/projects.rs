@@ -94,7 +94,7 @@ enum Pick {
 pub enum Sheet {
     Add { host: String, folder: TextEdit, title: TextEdit },
     Rename { project: String, name: TextEdit },
-    Lead { project: String, checkout: usize, surface: &'static str, name: TextEdit },
+    Lead { project: String, checkout: String, surface: &'static str, name: TextEdit },
 }
 
 pub struct State {
@@ -219,7 +219,7 @@ fn choose(s: &mut App, key: &str, item: Item, tx: &mut Tx) {
         Item::NewConversation { host, folder } => crate::ui::new_session::open(s, crate::ui::new_session::Prefill { host, folder }, tx),
         Item::Rename => open_sheet(s, Sheet::Rename { project: p.id.clone(), name: focused(&name) }),
         Item::Lead { .. } => {
-            let first = p.lead_places().first().map(|c| p.checkouts.iter().position(|x| x == *c).unwrap_or(0)).unwrap_or(0);
+            let first = p.lead_places().first().map(|c| c.project_id.clone()).unwrap_or_default();
             open_sheet(s, Sheet::Lead { project: p.id.clone(), checkout: first, surface: "claude", name: focused("") });
         }
         Item::ClearLead => ask(s, projects::confirm_clear_lead(&name), Job::ClearLead { project: p.id.clone(), name }, None),
@@ -330,7 +330,7 @@ fn sheet_job(s: &App) -> Option<Job> {
         }
         Sheet::Lead { project, checkout, surface, name } => {
             let p = record(s, project)?;
-            let c = p.checkouts.get(*checkout).filter(|c| p.lead_places().contains(c))?;
+            let c = p.lead_places().into_iter().find(|c| c.project_id == *checkout)?;
             Some(Job::StartLead { surface: surface.to_string(), folder: c.root_path.clone(), host: c.host.target().to_string(), name: name.text.trim().trim_start_matches('@').to_string(), project: p.name().to_string(), replace: false })
         }
     }
@@ -603,9 +603,9 @@ fn pick_recent(s: &mut App, folder: String) {
     }
 }
 
-fn pick_checkout(s: &mut App, index: String) {
+fn pick_checkout(s: &mut App, id: String) {
     if let Some(Sheet::Lead { checkout, .. }) = s.ov.projects.sheet.as_mut() {
-        *checkout = index.parse().unwrap_or(0);
+        *checkout = id;
     }
 }
 
@@ -667,8 +667,8 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
             let mut body = col().w_full().gap(12.0);
             if places.len() > 1 {
                 let labels = projects::host_labels(p.checkouts.iter().map(|c| (c.host.id.as_str(), c.host.name.as_str())));
-                let choices = places.iter().map(|c| (format!("{}: {}", labels.get(&c.host.id).cloned().unwrap_or_else(|| c.host.name.clone()), c.root_path), p.checkouts.iter().position(|x| x == *c).unwrap_or(0).to_string())).collect();
-                body = body.child(field("Checkout", select("lead-checkout", Pick::Checkout, choices, &checkout.to_string(), "Choose…", open == Some(Pick::Checkout), pick_checkout, &mut popups)));
+                let choices = places.iter().map(|c| (format!("{}: {}", labels.get(&c.host.id).cloned().unwrap_or_else(|| c.host.name.clone()), c.root_path), c.project_id.clone())).collect();
+                body = body.child(field("Checkout", select("lead-checkout", Pick::Checkout, choices, checkout, "Choose…", open == Some(Pick::Checkout), pick_checkout, &mut popups)));
             }
             let at = SURFACES.iter().position(|(id, _)| id == surface);
             let agents = SegmentedControl::new(&SURFACES.map(|(_, l)| l), at)

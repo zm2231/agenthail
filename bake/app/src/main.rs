@@ -1179,7 +1179,7 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         settings::open();
         return true;
     }
-    ui::new_session::on_key(s, ev, tx) || over::on_key(s, ev, tx)
+    (!over::projects::open(s) && ui::new_session::on_key(s, ev, tx)) || over::on_key(s, ev, tx)
 }
 
 fn on_quit(s: &mut App, _: &mut Tx) {
