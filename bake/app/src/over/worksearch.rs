@@ -116,7 +116,8 @@ pub fn drain(s: &mut App) -> bool {
     while let Ok(reply) = s.ov.worksearch.rx.try_recv() {
         match reply {
             Reply::Search(seq, found) => {
-                if s.ov.worksearch.asked.as_ref().is_some_and(|(_, asked, _)| *asked == seq) {
+                let current = query(s);
+                if s.ov.worksearch.asked.as_ref().is_some_and(|(q, asked, _)| *asked == seq && current.as_ref() == Some(q)) {
                     if let Ok(search) = &found {
                         for f in search.items.iter().filter(|f| !f.project_name.is_empty()) {
                             s.ov.worksearch.names.insert(f.project_key.clone(), f.project_name.clone());

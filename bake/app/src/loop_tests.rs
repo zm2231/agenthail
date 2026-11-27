@@ -626,6 +626,18 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     assert_eq!(rt.state.ov.d.work["z-W8"].state, "parked", "a failed refresh keeps what it last had");
     assert_eq!(crate::over::worksearch::note(&rt.state, "z-W8").as_deref(), Some("Couldn't refresh this work item, so it may be out of date: the ledger store is busy"));
 
+    assert_eq!(asked(&paths).len(), 2, "z-W8 was read on open and again on reopen");
+
+    typed(&mut rt, "export");
+    rt.frame(0.2);
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    rt.state.ov.jump = Some(rune::TextEdit::new("exported"));
+    rt.state.ov.d.found_names.clear();
+    rt.frame(DT);
+    assert_eq!(asked(&paths), ["/api/v1/ledger/search?q=export&limit=20"]);
+    assert!(!rt.state.ov.d.found_names.contains_key("shared:z"), "a reply to text since changed is dropped whole");
+    assert!(work_found(&rt.state).is_none());
+
     send(&rt, overview(4, sessions(&["a", "exporter"])));
     rt.frame(DT);
     typed(&mut rt, "exporter");
