@@ -38,6 +38,7 @@ pub mod look;
 pub mod menu;
 pub mod notice;
 pub mod moves;
+pub mod native_queue;
 pub mod notify;
 #[cfg(test)]
 mod mock;
