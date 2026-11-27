@@ -170,6 +170,12 @@ impl Metadata {
         self
     }
 
+    pub fn keep_goal(mut self, shown: Option<&Metadata>) -> Metadata {
+        self.goal = shown.and_then(|m| m.goal.clone());
+        self.goal_failed = false;
+        self
+    }
+
     pub fn failed(old: Option<&Metadata>, error: String) -> Metadata {
         Metadata { goal: old.and_then(|m| m.goal.clone()), goal_failed: true, runs: old.and_then(|m| m.runs.clone()), warnings: vec![error] }
     }
@@ -339,8 +345,33 @@ pub fn can_save(act: GoalAct, text: &str, budget: Option<i64>) -> bool {
     }
 }
 
-pub fn moves_goal(events: &[crate::wire::Event]) -> bool {
-    events.iter().any(|e| matches!(e, crate::wire::Event::Upsert(item) if item.kind == "goal"))
+#[derive(Default)]
+pub struct Overlay {
+    session: String,
+    kinds: std::collections::HashSet<&'static str>,
+}
+
+impl Overlay {
+    pub fn select(&mut self, id: &str) {
+        self.session = id.to_string();
+        self.kinds.clear();
+    }
+
+    pub fn stream(&mut self, id: &str, kind: &'static str, shown: bool) -> bool {
+        if !shown || id != self.session {
+            return false;
+        }
+        self.kinds.insert(kind);
+        true
+    }
+
+    pub fn holds(&self, id: &str, kind: &str) -> bool {
+        id == self.session && self.kinds.contains(kind)
+    }
+}
+
+pub fn streamed(events: &[crate::wire::Event]) -> Vec<crate::wire::Streamed> {
+    events.iter().filter_map(|e| if let crate::wire::Event::State(x) = e { Some(x.clone()) } else { None }).collect()
 }
 
 pub fn lifecycle(x: &Session) -> Lifecycle {
@@ -594,10 +625,34 @@ mod tests {
     }
 
     #[test]
-    fn a_goal_event_in_the_stream_asks_for_a_reread() {
-        let item = |kind: &str| crate::wire::Event::Upsert(crate::Item { kind: kind.into(), ..Default::default() });
-        assert!(moves_goal(&[item("message"), item("goal")]));
-        assert!(!moves_goal(&[item("message"), crate::wire::Event::Done]));
+    fn only_the_shown_session_streams_over_its_reads() {
+        let mut o = Overlay::default();
+        o.select("a");
+        assert!(!o.stream("b", "goal", true), "another session's stream is ignored");
+        assert!(!o.stream("a", "goal", false), "a removed session's stream is ignored");
+        assert!(!o.holds("a", "goal"));
+        assert!(o.stream("a", "context", true));
+        assert!(o.holds("a", "context") && !o.holds("a", "goal") && !o.holds("b", "context"));
+        o.select("a");
+        assert!(!o.holds("a", "context"), "selecting again starts from the reads");
+    }
+
+    #[test]
+    fn a_read_keeps_the_streamed_goal_and_takes_the_rest() {
+        let shown = Metadata { goal: Some(Goal { objective: "streamed".into(), ..Default::default() }), ..Default::default() };
+        let read = Metadata { goal: Some(Goal { objective: "older".into(), ..Default::default() }), goal_failed: true, runs: Some(Vec::new()), warnings: vec!["Claude runs: slow".into()] };
+        let kept = read.keep_goal(Some(&shown));
+        assert_eq!(kept.goal.map(|g| g.objective).as_deref(), Some("streamed"));
+        assert!(!kept.goal_failed && kept.runs.is_some() && kept.warnings.len() == 1);
+    }
+
+    #[test]
+    fn streamed_context_and_goal_values_are_picked_out_of_a_batch() {
+        use crate::wire::{Event, Streamed};
+        let item = Event::Upsert(crate::Item { kind: "message".into(), ..Default::default() });
+        let goal = Streamed::Goal(Some(Goal { objective: "ship it".into(), ..Default::default() }));
+        assert_eq!(streamed(&[item.clone(), Event::State(goal.clone()), Event::State(Streamed::Context(None))]), vec![goal, Streamed::Context(None)]);
+        assert!(streamed(&[item, Event::Done]).is_empty());
     }
 
     #[test]

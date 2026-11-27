@@ -15,6 +15,7 @@ pub enum Listing {
     Found(Session),
     Absent,
     Unchecked(String),
+    Unsearchable(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -54,6 +55,7 @@ pub struct Gone {
     pub exchanges: Vec<Exchange>,
     pub read_error: Option<String>,
     pub history: History,
+    pub incomplete: bool,
 }
 
 pub const PAGE: usize = 50;
@@ -167,24 +169,39 @@ fn reachable(x: &Session) -> bool {
     matches!(x.host.state.as_str(), "" | "local" | "connected") && x.unavailable_reason.as_deref().is_none_or(str::is_empty)
 }
 
-pub fn classify(id: &str, detail: &Detail, listing: Listing, known: Option<&Session>) -> Result<Gone, String> {
+#[derive(Clone, Debug, PartialEq)]
+pub enum Lost {
+    Deleted(String),
+    Failed(String),
+}
+
+impl Lost {
+    pub fn message(&self) -> &str {
+        match self {
+            Lost::Deleted(m) | Lost::Failed(m) => m,
+        }
+    }
+}
+
+pub fn classify(id: &str, detail: &Detail, listing: Listing, known: Option<&Session>) -> Result<Gone, Lost> {
     let listed = match &listing {
         Listing::Found(r) => Some(r.clone()),
         _ => None,
     };
     match (detail, &listed) {
-        (Detail::Missing, _) => return Err("Agenthail has no session with this id any more.".into()),
-        (Detail::Failed(e), None) => return Err(format!("Couldn't look this session up: {e}")),
+        (Detail::Missing, _) => return Err(Lost::Deleted("Agenthail has no session with this id any more.".into())),
+        (Detail::Failed(e), None) => return Err(Lost::Failed(format!("Couldn't look this session up: {e}"))),
         _ => {}
     }
     let mut row = listed.clone().or_else(|| known.cloned()).or_else(|| detail.row(id)).unwrap_or_else(|| Session { id: id.to_string(), ..Session::default() });
     row.name = crate::search::one_line(&row.name);
     let archived = listed.as_ref().map_or(row.archived, |l| l.archived);
+    let incomplete = matches!(detail, Detail::Failed(_)) || detail.read_error().is_some() || matches!(listing, Listing::Unchecked(_));
     let why = if archived {
         Why::Archived
     } else if *detail == Detail::Unreachable || !reachable(&row) {
         Why::Offline(row.host.name.clone())
-    } else if let Listing::Unchecked(e) = listing {
+    } else if let Listing::Unchecked(e) | Listing::Unsearchable(e) = listing {
         Why::Unchecked(e)
     } else {
         Why::Unlisted
@@ -202,7 +219,7 @@ pub fn classify(id: &str, detail: &Detail, listing: Listing, known: Option<&Sess
     Ok(Gone { row, why, fix, exchanges: detail.exchanges(), read_error: match detail {
         Detail::Failed(e) => Some(e.clone()),
         _ => detail.read_error(),
-    }, history: detail.history() })
+    }, history: detail.history(), incomplete })
 }
 
 pub fn search_terms<'a>(rows: impl Iterator<Item = &'a Session>) -> Vec<String> {
@@ -219,11 +236,11 @@ pub fn search_terms<'a>(rows: impl Iterator<Item = &'a Session>) -> Vec<String> 
 }
 
 impl Client {
-    pub fn look_up(&self, id: &str, known: Option<&Session>) -> Result<Gone, String> {
+    pub fn look_up(&self, id: &str, known: Option<&Session>) -> Result<Gone, Lost> {
         let detail = Detail::read(self.get_coded(&format!("/api/v1/session?id={}&limit={PAGE}", enc(id))));
         let found = detail.row(id);
         let terms = search_terms([known, found.as_ref()].into_iter().flatten());
-        let mut listing = if terms.is_empty() { Listing::Unchecked("it has no name or folder to search by".into()) } else { Listing::Absent };
+        let mut listing = if terms.is_empty() { Listing::Unsearchable("it has no name or folder to search by".into()) } else { Listing::Absent };
         for term in &terms {
             match self.listed(id, term) {
                 Ok(Some(row)) => {
@@ -345,8 +362,8 @@ mod tests {
 
     #[test]
     fn a_session_the_daemon_never_heard_of_gives_an_error_not_a_spinner() {
-        assert!(classify("s1", &Detail::Missing, Listing::Absent, None).unwrap_err().contains("no session"));
-        assert!(classify("s1", &Detail::Failed("refused".into()), Listing::Absent, None).unwrap_err().contains("refused"));
+        assert!(matches!(classify("s1", &Detail::Missing, Listing::Absent, None), Err(Lost::Deleted(m)) if m.contains("no session")));
+        assert!(matches!(classify("s1", &Detail::Failed("refused".into()), Listing::Absent, None), Err(Lost::Failed(m)) if m.contains("refused")));
         let g = classify("s1", &Detail::Unreachable, Listing::Absent, None).unwrap();
         assert_eq!((g.row.id.as_str(), &g.why), ("s1", &Why::Offline(String::new())));
         assert!(g.note().contains("its computer"));
@@ -381,8 +398,8 @@ mod tests {
     #[test]
     fn a_lookup_that_fails_shows_the_error_even_with_a_remembered_row() {
         let known = row(json!({"id": "s1", "name": "Fix it", "host": {"state": "local"}}));
-        assert!(classify("s1", &Detail::Missing, Listing::Absent, Some(&known)).unwrap_err().contains("no session"));
-        assert!(classify("s1", &Detail::Failed("refused".into()), Listing::Unchecked("refused".into()), Some(&known)).unwrap_err().contains("refused"));
+        assert!(matches!(classify("s1", &Detail::Missing, Listing::Absent, Some(&known)), Err(Lost::Deleted(m)) if m.contains("no session")));
+        assert!(matches!(classify("s1", &Detail::Failed("refused".into()), Listing::Unchecked("refused".into()), Some(&known)), Err(Lost::Failed(m)) if m.contains("refused")));
     }
 
     #[test]
@@ -390,6 +407,17 @@ mod tests {
         let g = classify("s1", &detail(), Listing::Unchecked("timed out".into()), None).unwrap();
         assert_eq!(g.why, Why::Unchecked("timed out".into()));
         assert!(g.note().contains("couldn't check whether it was archived: timed out"));
+    }
+
+    #[test]
+    fn a_lookup_that_failed_part_way_is_incomplete() {
+        assert!(classify("s1", &detail(), Listing::Unchecked("timed out".into()), None).unwrap().incomplete);
+        let listed = Session { id: "s1".into(), archived: true, ..Session::default() };
+        assert!(classify("s1", &Detail::Failed("timeout".into()), Listing::Found(listed.clone()), None).unwrap().incomplete);
+        assert!(!classify("s1", &detail(), Listing::Found(listed), None).unwrap().incomplete);
+        assert!(!classify("s1", &detail(), Listing::Unsearchable("it has no name or folder to search by".into()), None).unwrap().incomplete);
+        assert!(!classify("s1", &Detail::Unreachable, Listing::Absent, None).unwrap().incomplete);
+        assert!(classify("s1", &Detail::Found(json!({"session": {"id": "s1"}, "readError": "transcript busy"})), Listing::Absent, None).unwrap().incomplete);
     }
 
     #[test]

@@ -207,6 +207,9 @@ fn settled(s: &mut App, done: Done) {
         }
         Done::Resumed(id, stop, now, result) => {
             s.limits.busy.remove(&id);
+            if result.is_ok() {
+                super::session_menu::changed(s, &id);
+            }
             let (text, bad) = match result {
                 Ok(()) if now => ("Asked it to continue".to_string(), false),
                 Ok(()) => ("It stays stopped when the limit resets".to_string(), false),
@@ -218,9 +221,11 @@ fn settled(s: &mut App, done: Done) {
             s.limits.busy.remove(&id);
             match result {
                 Ok(Moved::Done(None)) => {
+                    super::session_menu::changed(s, &id);
                     note(s, &id, stop, format!("Moved to {}", target.name), false);
                 }
                 Ok(Moved::Done(Some(detail))) => {
+                    super::session_menu::changed(s, &id);
                     note(s, &id, stop, format!("Moved to {}, but {detail}", target.name), true);
                 }
                 Ok(Moved::NeedsConsent(message)) => {

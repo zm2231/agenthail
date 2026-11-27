@@ -188,3 +188,12 @@ fn decisions_are_read_at_once_when_asked_now_and_otherwise_no_sooner_than_ten_se
     assert!(!p.ask(false, t0 + Duration::from_secs(4)));
     assert_eq!(p.wait(t0 + Duration::from_secs(4)), Some(Duration::from_secs(9)));
 }
+
+#[test]
+fn reconnects_back_off_to_twenty_seconds_and_reset_on_an_event() {
+    let mut r = Reconnect::default();
+    let delays: Vec<u64> = (0..7).map(|_| r.next().as_secs()).collect();
+    assert_eq!(delays, [1, 2, 4, 8, 16, 20, 20]);
+    r.reset();
+    assert_eq!(r.next().as_secs(), 1);
+}

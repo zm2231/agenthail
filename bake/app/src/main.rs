@@ -49,7 +49,7 @@ pub enum Bg {
     Requests(String, Vec<OpenRequest>, std::time::Instant),
     Answered(String, String, Result<(), feed::catalog::RespondError>),
     NewSession(ui::new_session::Loaded),
-    Looked(String, u64, Result<feed::gone::Gone, String>),
+    Looked(String, u64, Result<feed::gone::Gone, feed::gone::Lost>),
     Fixed(String, u64, feed::gone::Fix, Result<(), feed::catalog::RespondError>),
     Queue(String, u64, Result<feed::queue::Read, String>),
     QueueDone(String, (String, i64), feed::queue::Done),
@@ -492,6 +492,7 @@ pub fn fetch_ledger(s: &mut App, project: &str) {
 }
 
 fn selected_changed(s: &mut App, id: &str) {
+    ui::gone::changed(s, id);
     fetch_requests(s, id);
     if ui::queue::wants(s, id) {
         ui::queue::fetch(s, id);
@@ -1255,7 +1256,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     let mut counter = s.counter;
     let mut panes_moved = false;
     let mut caught: Vec<String> = Vec::new();
-    let mut goals: Vec<String> = Vec::new();
+    let mut streamed: Vec<(String, feed::wire::Streamed)> = Vec::new();
     for (id, pane) in s.panes.iter_mut() {
         let mut moved = false;
         if let Some(replay) = &mut pane.replay {
@@ -1272,9 +1273,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             for message in arrived {
                 match message {
                     Message::Batch(b) => {
-                        if feed::inspect::moves_goal(&b.events) {
-                            goals.push(id.clone());
-                        }
+                        streamed.extend(feed::inspect::streamed(&b.events).into_iter().map(|x| (id.clone(), x)));
                         history::batch_arrived(pane, t);
                         moved |= pane.transcript.apply(b.seq, b.events);
                     }
@@ -1305,8 +1304,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     for id in caught {
         history::caught_up(s, &id);
     }
-    for id in goals {
-        ui::inspect::goal_moved(s, &id);
+    changed |= !streamed.is_empty();
+    for (id, x) in streamed {
+        ui::inspect::streamed(s, &id, x);
     }
     if s.ov.live.stale() || (s.panes_moved && s.clock - s.built_at >= PANE_REBUILD_SECS) {
         rebuild(s);

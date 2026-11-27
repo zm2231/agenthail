@@ -1,10 +1,11 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
 use feed::catalog::Client;
+use feed::watch::Reconnect;
 use feed::look::{self as fl, Fit, Look, Rgb, Tint, View, Wallpaper};
 use rune::{Color, Cx, El, Pixels, PixelsWrap, SystemMaterial, Tx, el};
 use rune_kit::Kit;
@@ -13,7 +14,8 @@ use crate::theme::{self, Paint};
 
 const SAMPLE_SIDE: u32 = 512;
 const MIN_LAYOUT: (f32, f32) = (1440.0, 900.0);
-const RETRY: Duration = Duration::from_secs(5);
+const SIGN_IN_WAIT: Duration = Duration::from_secs(10);
+const FIRST_READ_RETRY: Duration = Duration::from_secs(10);
 
 type Raw = (u32, u32, Vec<u8>);
 
@@ -119,25 +121,14 @@ fn redecode(s: &mut State) {
     let (Some(tx), paths) = (s.tx.clone(), s.look.images()) else { return };
     let chosen = CHOSEN.load(Ordering::Relaxed);
     std::thread::spawn(move || {
-        let mut left = paths;
-        while !left.is_empty() && SCREEN.load(Ordering::Relaxed) == side && CHOSEN.load(Ordering::Relaxed) == chosen {
-            let Ok(client) = Client::from_env() else {
-                std::thread::sleep(RETRY);
-                continue;
-            };
-            let mut failed = Vec::new();
-            for path in left {
-                let got = client.ui_background(&path).and_then(|data| fl::decode(&data, side, SAMPLE_SIDE));
-                if got.is_err() {
-                    failed.push(path.clone());
-                }
-                if tx.send(Got::Image(path, side, got)).is_err() {
-                    return;
-                }
+        let Ok(client) = Client::from_env() else { return };
+        for path in paths {
+            if SCREEN.load(Ordering::Relaxed) != side || CHOSEN.load(Ordering::Relaxed) != chosen {
+                return;
             }
-            left = failed;
-            if !left.is_empty() {
-                std::thread::sleep(RETRY);
+            let got = client.ui_background(&path).and_then(|data| fl::decode(&data, side, SAMPLE_SIDE));
+            if tx.send(Got::Image(path, side, got)).is_err() {
+                return;
             }
         }
     });
@@ -147,15 +138,23 @@ fn screen_side() -> u32 {
     rune::displays().iter().map(|d| d.size.0.max(d.size.1)).max().unwrap_or(2880)
 }
 
+struct Reader {
+    class: &'static str,
+    device: String,
+    decoded_at: u32,
+    fetched: Vec<String>,
+    tx: Sender<Got>,
+}
+
 fn follow(tx: Sender<Got>) {
     let mut client = loop {
         match Client::from_env() {
             Ok(client) => break client,
             Err(e) => {
-                if tx.send(Got::Problem(Some(format!("Can't read appearance settings without Agenthail's sign-in ({e}); retrying.")))).is_err() {
+                if tx.send(Got::Problem(Some(format!("Can't read appearance settings without Agenthail's sign-in ({e}); waiting for it.")))).is_err() {
                     return;
                 }
-                std::thread::sleep(RETRY);
+                std::thread::sleep(SIGN_IN_WAIT);
             }
         }
     };
@@ -163,87 +162,84 @@ fn follow(tx: Sender<Got>) {
     if tx.send(Got::Device(device.clone())).is_err() {
         return;
     }
-    let class = fl::device_class();
-    let mut fetched: Vec<String> = Vec::new();
-    let mut decoded_at = 0u32;
+    let reader = RefCell::new(Reader { class: fl::device_class(), device, decoded_at: 0, fetched: Vec::new(), tx: tx.clone() });
+    let mut cursor: Option<u64> = None;
+    let mut reconnect = Reconnect::default();
     loop {
         if let Ok(fresh) = Client::from_env() {
             client = fresh;
         }
-        let cursor = client.base_settings().map(|b| b.event_cursor).unwrap_or(0);
-        match read(&client, class, &device, &mut decoded_at, &tx, &mut fetched) {
-            Read::Closed => return,
-            Read::Retry => {
-                std::thread::sleep(RETRY);
-                continue;
-            }
-            Read::Done => {}
-        }
-        let mut after = Read::Done;
-        let result = client.follow_events(cursor, || {}, |kind, _| {
-            if kind != "ui.changed" && kind != "stream.reset" {
-                return true;
-            }
-            after = read(&client, class, &device, &mut decoded_at, &tx, &mut fetched);
-            after == Read::Done
-        });
-        match after {
-            Read::Closed => return,
-            Read::Retry => std::thread::sleep(RETRY),
-            Read::Done => {
-                if let Err(e) = result
-                    && tx.send(Got::Problem(Some(format!("Can't follow appearance changes right now ({e}); retrying.")))).is_err()
-                {
-                    return;
+        let after = match cursor {
+            Some(after) => after,
+            None => match client.base_settings() {
+                Ok(base) => base.event_cursor,
+                Err(f) => {
+                    if tx.send(Got::Problem(Some(format!("Couldn't read appearance settings: {}", f.message)))).is_err() {
+                        return;
+                    }
+                    std::thread::sleep(FIRST_READ_RETRY);
+                    continue;
                 }
-                std::thread::sleep(Duration::from_secs(2));
-            }
+            },
+        };
+        let (open, last, heard) = (Cell::new(true), Cell::new(after), Cell::new(false));
+        let result = client.follow_events(
+            after,
+            || open.set(read(&client, &mut reader.borrow_mut())),
+            |kind, id| {
+                last.set(last.get().max(id));
+                heard.set(true);
+                if kind == "ui.changed" || kind == "stream.reset" {
+                    open.set(read(&client, &mut reader.borrow_mut()));
+                }
+                open.get()
+            },
+        );
+        if !open.get() {
+            return;
         }
+        cursor = Some(last.get());
+        if heard.get() {
+            reconnect.reset();
+        }
+        if let Err(e) = result
+            && tx.send(Got::Problem(Some(format!("Can't follow appearance changes right now ({e}); reconnecting.")))).is_err()
+        {
+            return;
+        }
+        std::thread::sleep(reconnect.next());
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Read {
-    Done,
-    Retry,
-    Closed,
-}
-
-fn read(client: &Client, class: &str, device: &str, decoded_at: &mut u32, tx: &Sender<Got>, fetched: &mut Vec<String>) -> Read {
+fn read(client: &Client, r: &mut Reader) -> bool {
     let ticket = ticket();
-    let view = match client.ui_view(class, device) {
+    let view = match client.ui_view(r.class, &r.device) {
         Ok(view) => view,
-        Err(f) => {
-            let sent = tx.send(Got::Problem(Some(format!("Couldn't read appearance settings: {}; retrying.", f.message))));
-            return if sent.is_ok() { Read::Retry } else { Read::Closed };
-        }
+        Err(f) => return r.tx.send(Got::Problem(Some(format!("Couldn't read appearance settings: {}", f.message)))).is_ok(),
     };
     let paths = Look::from_view(&view).images();
     let side = SCREEN.load(Ordering::Relaxed);
-    if side != *decoded_at {
-        *decoded_at = side;
-        fetched.clear();
+    if side != r.decoded_at {
+        r.decoded_at = side;
+        r.fetched.clear();
     }
-    fetched.retain(|p| paths.contains(p));
-    if tx.send(Got::View(ticket, Box::new(view))).is_err() {
-        return Read::Closed;
+    r.fetched.retain(|p| paths.contains(p));
+    if r.tx.send(Got::View(ticket, Box::new(view))).is_err() {
+        return false;
     }
-    let mut outcome = Read::Done;
     for path in paths {
-        if fetched.contains(&path) {
+        if r.fetched.contains(&path) {
             continue;
         }
         let got = client.ui_background(&path).and_then(|data| fl::decode(&data, side, SAMPLE_SIDE));
         if got.is_ok() {
-            fetched.push(path.clone());
-        } else {
-            outcome = Read::Retry;
+            r.fetched.push(path.clone());
         }
-        if tx.send(Got::Image(path, side, got)).is_err() {
-            return Read::Closed;
+        if r.tx.send(Got::Image(path, side, got)).is_err() {
+            return false;
         }
     }
-    outcome
+    true
 }
 
 fn picture(d: fl::Decoded) -> Picture {

@@ -132,6 +132,7 @@ impl Transcript {
                     self.error = Some(reason);
                     changed = true;
                 }
+                Event::State(_) => {}
             }
         }
         if changed {
