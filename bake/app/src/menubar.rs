@@ -190,7 +190,7 @@ fn on_event(app: &AppHandle<App>, event: TrayEvent) {
             "open" => app.open(),
             "quit" => app.quit(),
             "settings" => crate::settings::open(),
-            "talk" => crate::voice::open("", ""),
+            "talk" => app.update(|_, _| crate::voice::open("", "")),
             "restart" => app.update(|s, _| crate::ui::connect::start_daemon(s)),
             "notification-settings" => crate::open_settings(feed::notify::NOTIFICATION_SETTINGS),
             "new-session" => {
