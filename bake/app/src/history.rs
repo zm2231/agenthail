@@ -1,5 +1,5 @@
 use feed::history::{Miss, Older};
-use rune::{TextEdit, Tx};
+use rune::Tx;
 
 use crate::transcript::Pane;
 use crate::{App, Bg};
@@ -149,8 +149,8 @@ pub fn copy(text: String) -> impl Fn(&mut App, &mut Tx) + 'static {
 
 pub fn edit(text: String) -> impl Fn(&mut App) + 'static {
     move |s: &mut App| {
-        let merged = feed::composer::put_back(&s.composer.text, &text);
-        s.composer = TextEdit::new(merged.as_str());
+        let merged = feed::composer::put_back(&crate::ui::paste::draft(s), &text);
+        crate::ui::paste::set_composer(s, &merged);
         s.composer.focused = true;
     }
 }

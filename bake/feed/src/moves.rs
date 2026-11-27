@@ -7,6 +7,8 @@ use crate::catalog::{Client, RespondError, Session};
 
 const WAIT: Duration = Duration::from_secs(31 * 60);
 
+pub const COMPOSER_NOTE: &str = "Messages wait until the move finishes";
+
 pub const ABOUT: &str = "It stops here and continues on the computer you pick, in the same project. Messages sent during the move wait and follow it.";
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq, Eq)]

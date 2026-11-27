@@ -517,7 +517,7 @@ pub fn view(s: &App, id: &str) -> El {
     );
     let watch = id.to_string();
     let stack = stack.on_visible_rows(move |s: &mut App, rows| crate::history::seen_rows(s, &watch, rows.start));
-    let mut scroll = col().key(format!("transcript-{id}")).w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: true }).on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_view(r));
+    let mut scroll = col().key(format!("transcript-{id}")).w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: true }).on_scroll_offset(crate::trace::scroll).on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_view(r));
     if let Some(earlier) = earlier_el(s, id) {
         scroll = scroll.child(earlier);
     }

@@ -166,10 +166,17 @@ fn line_end(t: &str, caret: usize) -> bool {
     !t[caret.min(t.len())..].contains('\n')
 }
 
+pub fn browse_origins(s: &App) -> Vec<(String, String)> {
+    let shown = |id: &str| if s.composer_for.as_deref() == Some(id) { super::paste::draft(s) } else { s.drafts.get(id).to_string() };
+    s.complete
+        .history
+        .iter()
+        .filter_map(|(id, h)| (super::paste::expand(h.current()?) == super::paste::expand(&shown(id))).then(|| (id.clone(), h.origin().unwrap_or_default().to_string())))
+        .collect()
+}
+
 pub(super) fn replace_composer(s: &mut App, text: &str) {
-    let focused = s.composer.focused;
-    s.composer = TextEdit::new(text);
-    s.composer.focused = focused;
+    super::paste::set_composer(s, text);
 }
 
 pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
@@ -216,13 +223,14 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         return false;
     }
     let id = x.id.clone();
-    if let Some(h) = s.complete.history.get_mut(&id).filter(|h| h.browsing() && h.current() != Some(s.composer.text.as_str())) {
+    let draft = super::paste::draft(s);
+    if let Some(h) = s.complete.history.get_mut(&id).filter(|h| h.browsing() && h.current() != Some(draft.as_str())) {
         h.stop();
         return false;
     }
     match ev.key {
         Key::Up if line_start(&s.composer.text, s.composer.focus) => {
-            let current = s.composer.text.clone();
+            let current = draft;
             let history = s.complete.history.entry(id).or_default();
             match history.older(&current) {
                 Some(text) => {
@@ -242,7 +250,7 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 }
 
 pub(super) fn clear_into_history(s: &mut App, id: &str) -> bool {
-    let text = s.composer.text.clone();
+    let text = super::paste::draft(s);
     if !s.complete.history.entry(id.to_string()).or_default().clear(&text) {
         return false;
     }
@@ -365,11 +373,24 @@ pub fn pump(s: &mut App) -> bool {
 
 fn leave_history(s: &mut App, left: &str) {
     let Some(h) = s.complete.history.get_mut(left) else { return };
-    let recalled = h.current().map(str::to_string);
+    let recalled = h.current().map(super::paste::expand);
     if let Some(draft) = h.leave()
-        && recalled.as_deref() == Some(s.drafts.get(left))
+        && recalled == Some(super::paste::expand(s.drafts.get(left)))
     {
         s.drafts.set(left, &draft);
+    }
+}
+
+pub fn leave_all_history(s: &mut App) {
+    for (id, origin) in browse_origins(s) {
+        if s.composer_for.as_deref() == Some(id.as_str()) {
+            super::paste::set_composer(s, &origin);
+        } else {
+            s.drafts.set(&id, &origin);
+        }
+    }
+    for h in s.complete.history.values_mut() {
+        h.leave();
     }
 }
 
@@ -522,10 +543,10 @@ pub fn done(s: &mut App, done: Done) {
             }
             if result.as_ref().is_ok_and(|d| *d != feed::composer::Delivered::Unconfirmed) && !super::attach::has(s, &id) {
                 if s.composer_for.as_deref() == Some(id.as_str()) {
-                    if s.composer.text.trim() == typed {
+                    if super::paste::expand(&super::paste::draft(s)).trim() == super::paste::expand(&typed).trim() {
                         replace_composer(s, "");
                     }
-                } else if s.drafts.get(&id).trim() == typed {
+                } else if super::paste::expand(s.drafts.get(&id)).trim() == super::paste::expand(&typed).trim() {
                     s.drafts.set(&id, "");
                 }
             }
@@ -546,12 +567,19 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         return false;
     }
     let Some(x) = session(s, id).cloned() else { return false };
-    let input = Input::parse(&s.composer.text, &Slash::available(&x.capabilities, can(s, &x)));
+    super::paste::finish(s);
+    let draft = super::paste::draft(s);
+    let available = Slash::available(&x.capabilities, can(s, &x));
+    let input = Input::parse(&super::paste::expand(&draft), &available);
     if let Some(problem) = input.problem() {
         crate::note(s, id, problem);
         return true;
     }
     let Input::Command(command, argument) = input else { return false };
+    let typed_argument = match Input::parse(&draft, &available) {
+        Input::Command(typed, kept) if typed == command => kept,
+        _ => super::paste::tokenized(&argument),
+    };
     if command == Slash::Name
         && let Some(problem) = feed::menu::rename_problem(&argument, super::session_menu::current_alias(s, id).as_deref())
     {
@@ -571,7 +599,7 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
             crate::note(s, id, "The goal is still being set.".into());
             return true;
         }
-        let typed = s.composer.text.trim().to_string();
+        let typed = draft.trim().to_string();
         let (key, asked) = s.complete.goal_keys.entry((id.to_string(), argument.clone())).or_insert_with(|| (feed::catalog::request_key(), id.to_string())).clone();
         crate::note(s, id, "Setting the goal…".into());
         spawn(s, move |c| {
@@ -602,7 +630,7 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         Slash::Name => super::session_menu::rename_to(s, id, &argument),
         Slash::Compact => super::session_menu::compact(s, id),
         Slash::Stop => crate::stop(s, id),
-        Slash::Steer => crate::steer_text(s, id, argument, tx),
+        Slash::Steer => crate::steer_text(s, id, typed_argument, tx),
         Slash::Model => pick_model(s, id, &argument),
         Slash::Goal => {}
     }

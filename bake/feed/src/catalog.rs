@@ -201,6 +201,8 @@ pub struct Session {
     #[serde(default)]
     pub unavailable_reason: Option<String>,
     #[serde(default)]
+    pub holders: Option<Vec<crate::holders::Holder>>,
+    #[serde(default)]
     pub snooze: Option<crate::snooze::Snooze>,
     #[serde(default)]
     pub activity: Option<crate::snooze::Activity>,
@@ -229,6 +231,10 @@ pub struct Capabilities {
     pub steer_images: Option<bool>,
     #[serde(default)]
     pub lifecycle: Lifecycle,
+    #[serde(default, rename = "personMessage", deserialize_with = "is_note")]
+    pub reaches_as_note: bool,
+    #[serde(default)]
+    pub remote_control: bool,
 }
 
 #[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq)]
@@ -239,13 +245,22 @@ pub struct Lifecycle {
     pub adopt: bool,
 }
 
+
+fn is_note<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<bool, D::Error> {
+    Ok(Option::<String>::deserialize(d)?.as_deref() == Some("note"))
+}
+
+fn null_list<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> std::result::Result<Vec<T>, D::Error> {
+    Ok(Option::<Vec<T>>::deserialize(d)?.unwrap_or_default())
+}
+
 fn capabilities_or_default<'de, D: serde::Deserializer<'de>>(d: D) -> std::result::Result<Capabilities, D::Error> {
     Ok(Option::<Capabilities>::deserialize(d)?.unwrap_or_default())
 }
 
 impl Default for Capabilities {
     fn default() -> Self {
-        Capabilities { interrupt: true, steer: true, model: false, compact: false, commands: false, attach: false, goal_set: false, steer_images: None, lifecycle: Lifecycle::default() }
+        Capabilities { interrupt: true, steer: true, model: false, compact: false, commands: false, attach: false, goal_set: false, steer_images: None, lifecycle: Lifecycle::default(), reaches_as_note: false, remote_control: false }
     }
 }
 
@@ -382,6 +397,28 @@ pub struct Snapshot {
     pub queue: Vec<QueueRow>,
     #[serde(default)]
     pub decisions_rev: String,
+    #[serde(default, deserialize_with = "null_list")]
+    pub lead_replacements: Vec<LeadReplacement>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LeadReplacement {
+    pub id: i64,
+    #[serde(default)]
+    pub project_id: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub session_id: String,
+    #[serde(default)]
+    pub previous_session_id: String,
+    #[serde(default)]
+    pub changed_by: String,
+    #[serde(default)]
+    pub reason: String,
+    #[serde(default)]
+    pub at: String,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -598,11 +635,19 @@ pub fn numbered_options(body: &str) -> Vec<String> {
     if found.len() >= 2 && found.len() <= 6 { found } else { Vec::new() }
 }
 
-#[derive(Clone)]
 pub struct Client {
     pub(crate) base: String,
     pub(crate) token: String,
     pub(crate) agent: ureq::Agent,
+    picks: Option<std::collections::HashMap<String, crate::holders::Pin>>,
+}
+
+// A copy keeps the terminal picks of its moment, so work handed to a thread goes where the person pointed.
+impl Clone for Client {
+    fn clone(&self) -> Self {
+        let picks = self.picks.clone().unwrap_or_else(|| crate::holders::pins().all());
+        Client { base: self.base.clone(), token: self.token.clone(), agent: self.agent.clone(), picks: Some(picks) }
+    }
 }
 
 pub(crate) fn enc(value: &str) -> String {
@@ -625,7 +670,7 @@ impl Client {
 
     pub fn new(base: &str, token: &str) -> Self {
         let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(5)).timeout(Duration::from_secs(30)).build();
-        Self { base: base.trim_end_matches('/').into(), token: token.into(), agent }
+        Self { base: base.trim_end_matches('/').into(), token: token.into(), agent, picks: None }
     }
 
     pub(crate) fn base(&self) -> &str {
@@ -638,7 +683,7 @@ impl Client {
 
     pub(crate) fn timed(&self, timeout: Duration) -> Client {
         let agent = ureq::AgentBuilder::new().timeout_connect(timeout.min(Duration::from_secs(5))).timeout(timeout).build();
-        Client { base: self.base.clone(), token: self.token.clone(), agent }
+        Client { base: self.base.clone(), token: self.token.clone(), agent, picks: self.picks.clone() }
     }
 
     fn get(&self, path: &str) -> Result<Value> {
@@ -813,7 +858,30 @@ impl Client {
     }
 
     pub fn action_keyed(&self, name: &str, payload: Value, key: &str) -> std::result::Result<Value, RespondError> {
-        let body = action_body(name, payload)?;
+        let mut body = action_body(name, payload)?;
+        let key = match body.as_object_mut() {
+            Some(fields) => match &self.picks {
+                Some(picks) => crate::holders::pin_action(name, fields, key, |id| picks.get(id).copied()),
+                None => crate::holders::pins().pinned(name, fields, key),
+            },
+            None => key.to_string(),
+        };
+        self.post_action(name, body, &key)
+    }
+
+    pub fn action_pinned(&self, name: &str, payload: Value, key: &str, pin: Option<crate::holders::Pin>) -> std::result::Result<Value, RespondError> {
+        let mut body = action_body(name, payload)?;
+        let key = match (pin, body.as_object_mut()) {
+            (Some(pin), Some(fields)) => {
+                pin.apply(fields);
+                pin.key(key)
+            }
+            _ => key.to_string(),
+        };
+        self.post_action(name, body, &key)
+    }
+
+    fn post_action(&self, name: &str, body: Value, key: &str) -> std::result::Result<Value, RespondError> {
         match self
             .agent
             .post(&format!("{}/api/v1/actions", self.base))

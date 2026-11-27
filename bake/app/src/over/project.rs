@@ -324,25 +324,30 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
     let lead = feed::composer::current(&s.rekeyed, lead);
     let k = kit();
     let (to, to2) = (lead.to_string(), lead.to_string());
-    let input = text_input(&s.composer, BODY.lh(21.0))
+    let input = crate::ui::paste::field(text_input(&s.composer, BODY.lh(21.0))
         .key("composer")
         .label("Message")
         .w_full()
         .min_h(44.0)
         .color(strong())
         .placeholder(placeholder.to_string(), weak())
-        .on_edit(|s: &mut App| &mut s.composer)
-        .on_input_paste(|s: &mut App, content, _: &mut Tx| crate::ui::attach::paste(s, content))
+        .on_edit(|s: &mut App| &mut s.composer))
         .on_input_key(crate::ui::complete::key)
         .on_submit(move |s: &mut App, tx: &mut Tx| crate::send_to(s, &to, tx));
-    let status = crate::composer_note(s, lead).or_else(|| crate::send_busy(s, lead).map(|b| b.hint().to_string())).unwrap_or_else(|| "Sends as you".into());
+    let as_note = crate::session(s, lead).is_some_and(|x| x.capabilities.reaches_as_note).then(|| feed::notice::SENDS_AS_NOTE.to_string());
+    let moving = crate::session(s, lead).is_some_and(|x| x.moving.is_some());
+    let status = moving.then(|| feed::moves::COMPOSER_NOTE.to_string()).or_else(|| crate::composer_note(s, lead)).or(as_note).or_else(|| crate::send_busy(s, lead).map(|b| b.hint().to_string())).unwrap_or_else(|| "Sends as you".into());
     let controls = row()
         .w_full()
         .items_center()
         .gap(6.0)
         .children(crate::ui::attach::button(s, lead))
+        .children(crate::session(s, lead).and_then(|x| crate::ui::holders::picker(s, x)))
         .child(ui::spacer())
-        .child(text(status).font(META).color(weak()));
+        .child(match crate::composer_note(s, lead).filter(|_| moving) {
+            Some(note) => text(status).font(META).color(weak()).help(note),
+            None => text(status).font(META).color(weak()),
+        });
     let controls = match crate::busy_delivery(s, lead) {
         Some(choice) => {
             let to = lead.to_string();
@@ -382,7 +387,11 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
         .max_w(780.0)
         .px(28.0)
         .pb(16.0)
-        .on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_composer(r))
+        .on_layout(|s: &mut App, r: [f32; 4]| {
+            s.cover.set_composer(r);
+            crate::trace::composer(r);
+        })
+        .children(lead_session.and_then(|x| crate::ui::notice::above(s, x)))
         .child(
             col()
                 .w_full()
@@ -394,6 +403,7 @@ fn composer(s: &App, placeholder: &str, lead: &str) -> El {
                 .children(lead_session.and_then(|x| crate::ui::complete::search(s, x)))
                 .children(lead_session.and_then(|x| crate::ui::complete::menu(s, x)))
                 .children(crate::ui::attach::chips(s, lead))
+                .children(crate::ui::paste::editor(s))
                 .child(input)
                 .child(controls),
         )

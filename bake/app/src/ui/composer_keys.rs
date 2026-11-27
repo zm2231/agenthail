@@ -52,6 +52,10 @@ impl State {
         json!(self.stash)
     }
 
+    pub fn texts(&self) -> impl Iterator<Item = &str> {
+        self.stash.values().map(String::as_str)
+    }
+
     pub fn from_json(value: &Value) -> State {
         let stash = value.as_object().into_iter().flatten().filter_map(|(id, text)| Some((id.clone(), text.as_str()?.to_string()))).collect();
         State { escaped: None, stash }
@@ -107,7 +111,7 @@ fn send_now(s: &mut App, x: &Session, tx: &mut Tx) {
         return;
     }
     if crate::busy_now(s, &x.id) && x.capabilities.steer {
-        let text = s.composer.text.clone();
+        let text = super::paste::draft(s);
         crate::steer_text(s, &x.id, text, tx);
     } else {
         super::complete::submit(s, &x.id, tx);
@@ -142,13 +146,14 @@ fn held(s: &App, id: &str) -> bool {
 }
 
 fn stash(s: &mut App, id: &str) -> bool {
+    super::paste::finish(s);
     let empty = s.composer.text.is_empty() && !super::attach::has(s, id);
     if empty && !held(s, id) {
         return false;
     }
     let back = s.complete.keys.stash.remove(id).unwrap_or_default();
     if !s.composer.text.is_empty() {
-        s.complete.keys.stash.insert(id.to_string(), s.composer.text.clone());
+        s.complete.keys.stash.insert(id.to_string(), super::paste::draft(s));
     }
     super::attach::swap_stash(s, id);
     super::complete::replace_composer(s, &back);
