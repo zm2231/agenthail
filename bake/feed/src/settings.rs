@@ -240,7 +240,6 @@ fn claude_modes() -> Vec<Choice> {
     CLAUDE_MODES.iter().map(|(id, label, confirm)| Choice { id: (*id).into(), label: (*label).into(), confirm: *confirm }).collect()
 }
 
-/// The choices match what the daemon's turn-setting accepts for each surface.
 pub fn chips(settings: &SessionSettings, models: &[ModelOption], session: &Session) -> Vec<Chip> {
     let mut out = offered(settings, models, &session.capabilities);
     if session.read_only {

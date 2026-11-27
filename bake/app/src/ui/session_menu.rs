@@ -466,9 +466,13 @@ fn settled(s: &mut App, done: Done) {
             match result {
                 Ok(set) => {
                     s.menus.note.remove(&id);
+                    if set.agent_mode_unread {
+                        s.menus.refreshed = Some((id.clone(), Instant::now()));
+                    }
                     s.menus.settings.insert(id, set);
                 }
                 Err(error) => {
+                    s.menus.refreshed = Some((id.clone(), Instant::now()));
                     s.menus.note.insert(id, format!("Couldn't read the settings: {error}"));
                 }
             }
