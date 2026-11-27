@@ -262,9 +262,9 @@ fn route_field(w: &Win) -> El {
         .min_w(0.0)
         .color(theme::text())
         .placeholder("Find a session or project lead, or type an ID or alias", faint())
-        .on_edit(|w: &mut Win| {
+        .on_edit(|w: &mut Win| &mut w.route_edit)
+        .on_input_change(|w: &mut Win, _: &mut Tx| {
             w.picking.get_or_insert(0);
-            &mut w.route_edit
         })
         .on_input_key(|w: &mut Win, ev: &KeyEvent, _: &mut Tx| pick_key(w, ev));
     let hint = if w.route_edit.text.trim().is_empty() {
