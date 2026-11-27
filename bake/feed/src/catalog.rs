@@ -632,6 +632,22 @@ pub struct OpenRequest {
     pub questions: Option<Vec<RequestQuestion>>,
     #[serde(default)]
     pub actions: Vec<RequestAction>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub elicitation: Option<crate::request::Elicitation>,
+    #[serde(default)]
+    pub deadline: Option<String>,
+    #[serde(default)]
+    pub replaced_by: String,
+    #[serde(default)]
+    pub options_only: bool,
+    #[serde(default)]
+    pub detail: String,
+    #[serde(default)]
+    pub blocked_path: String,
+    #[serde(default)]
+    pub input: Option<serde_json::Value>,
 }
 
 impl OpenRequest {

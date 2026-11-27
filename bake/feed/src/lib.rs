@@ -4,6 +4,7 @@ pub mod background;
 pub mod blocks;
 pub mod brief;
 pub mod question;
+pub mod request;
 pub mod review;
 pub mod search;
 pub mod adopt;

@@ -279,6 +279,11 @@ mod tests {
                 Box::new(|c| c.respond("s1", "ask-2", vec!["Yes".into()], Default::default())),
                 json!({"action": "respond", "sessionId": "s1", "requestId": "ask-2", "decision": {"choices": ["Yes"], "answers": {}}}),
             ),
+            (
+                Box::new(|c| c.answer("s1", "e-1", &crate::request::Response::form(json!({"repo": "a"})))),
+                json!({"action": "respond", "sessionId": "s1", "requestId": "e-1", "decision": {"choices": ["allow"], "answers": {}, "content": {"repo": "a"}}}),
+            ),
+            (Box::new(|c| c.withdraw_request("s1", "p-1")), json!({"action": "request-withdraw", "sessionId": "s1", "requestId": "p-1"})),
         ];
         let (client, seen) = daemon(calls.iter().map(|_| (200, r#"{"ok":true,"prs":[]}"#)).collect());
         let mut keys = std::collections::HashSet::new();

@@ -4,7 +4,9 @@ use std::time::{Duration, Instant};
 
 use feed::brief::Brief;
 use feed::catalog::{Client, RespondError, request_key};
-use feed::decisions::{Decision, Handled, Inbox, gone, remember, rev_moved};
+use feed::composer::Delivered;
+use feed::decisions::{Decision, Handled, Inbox, gone, remember, request_hold, rev_moved};
+use feed::request::Response;
 use feed::review::{self, Verdict};
 use feed::version::{Build, notice};
 use rune::TextEdit;
@@ -15,6 +17,7 @@ enum Done {
     Inbox(Instant, Inbox),
     Acted(String, Handled, bool, String, Result<(), (RespondError, String)>),
     Brief(String, Result<Brief, RespondError>),
+    Replied(String, String, String, Result<String, RespondError>),
     Version(Option<String>, Option<String>),
 }
 
@@ -51,12 +54,18 @@ pub struct State {
     newest: Option<Instant>,
     rev: Option<String>,
     ask: Option<Sender<bool>>,
+    pub open: Option<String>,
+    pub replies: HashMap<String, TextEdit>,
+    pub replying: HashSet<String>,
+    pub replied: HashMap<String, String>,
+    reply_keys: HashMap<String, (String, String)>,
+    answered: HashMap<String, String>,
 }
 
 impl Default for State {
     fn default() -> Self {
         let (tx, rx) = channel();
-        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, reads: 0, review_old: HashMap::new(), note: None, daemon: None, newest: None, rev: None, ask: None }
+        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, reads: 0, review_old: HashMap::new(), note: None, daemon: None, newest: None, rev: None, ask: None, open: None, replies: HashMap::new(), replying: HashSet::new(), replied: HashMap::new(), reply_keys: HashMap::new(), answered: HashMap::new() }
     }
 }
 
@@ -174,6 +183,7 @@ pub fn drain(s: &mut crate::App) -> bool {
             }
             Done::Acted(id, entry, reviewed, host, result) => {
                 st.acting.remove(&id);
+                let answered = st.answered.remove(&id);
                 st.newest = Some(Instant::now());
                 match result {
                     Err((e, _)) if reviewed && review::needs_newer(&e) => {
@@ -183,7 +193,10 @@ pub fn drain(s: &mut crate::App) -> bool {
                     Ok(()) => {
                         st.notes.remove(&id);
                         if let Some(inbox) = &mut st.inbox {
-                            inbox.decisions.retain(|d| d.id() != id);
+                            if let Some(request) = &answered {
+                                inbox.decisions.iter_mut().filter(|d| d.id() == id).for_each(|d| d.requests.retain(|r| &r.id != request));
+                            }
+                            inbox.decisions.retain(|d| d.id() != id || answered.is_some() && !d.requests.is_empty());
                         }
                         remember(&mut st.history, entry);
                     }
@@ -215,6 +228,24 @@ pub fn drain(s: &mut crate::App) -> bool {
                         }
                         b.notice = Some(if e.maybe_delivered { format!("Asked, not confirmed: {}", e.message) } else { format!("Couldn't ask: {}", e.message) });
                         b.failed = true;
+                    }
+                }
+            }
+            Done::Replied(id, who, words, result) => {
+                st.replying.remove(&id);
+                match result {
+                    Ok(outcome) => {
+                        st.notes.remove(&id);
+                        if st.replies.get(&id).is_some_and(|t| t.text.trim() == words) {
+                            st.replies.remove(&id);
+                        }
+                        st.reply_keys.remove(&id);
+                        st.replied.insert(id, outcome);
+                    }
+                    Err(e) => {
+                        let hold = st.inbox.as_ref().and_then(|i| i.decisions.iter().find(|d| d.id() == id)).map(Decision::hold_key).unwrap_or_default();
+                        let why = if e.maybe_delivered { format!("Sent to {who}, not confirmed: {}", e.message) } else { format!("Couldn't send to {who}: {}. Open the session to retry.", e.message) };
+                        st.notes.insert(id, (hold, why));
                     }
                 }
             }
@@ -262,9 +293,72 @@ pub fn accept(s: &mut crate::App, d: &Decision) {
     if d.recommended().is_none() || s.ov.inbox.unconfirmed.contains(&d.hold_key()) {
         return;
     }
+    if let Some((request, _)) = d.recommended().filter(|_| !s.ov.inbox.acting.contains(&d.id()) && s.client.is_some()) {
+        s.ov.inbox.answered.insert(d.id(), request);
+    }
     act(s, d, "Accepted the recommended answer", |client, d| {
         let (request, choices) = d.recommended().expect("checked above");
         client.respond(&d.session_id, &request, choices, Default::default()).map_err(|e| (e, d.hold_key()))
+    });
+}
+
+pub fn held(s: &crate::App, d: &Decision, request: &str) -> bool {
+    let st = &s.ov.inbox;
+    st.acting.contains(&d.id()) || st.unconfirmed.contains(&request_hold(&d.session_id, request))
+}
+
+pub fn answer(s: &mut crate::App, d: &Decision, request: &str, response: Response) {
+    if held(s, d, request) {
+        return;
+    }
+    let request = request.to_string();
+    if !s.ov.inbox.acting.contains(&d.id()) && s.client.is_some() {
+        s.ov.inbox.answered.insert(d.id(), request.clone());
+    }
+    let outcome = if response.choices.is_empty() { "Answered in your own words" } else { "Answered" };
+    act(s, d, outcome, move |client, d| client.answer(&d.session_id, &request, &response).map_err(|e| (e, request_hold(&d.session_id, &request))));
+}
+
+pub fn toggle_open(s: &mut crate::App, d: &Decision, tx: &mut rune::Tx) {
+    let id = d.id();
+    crate::ui::waiting::put_down_composer(s, tx);
+    if s.ov.inbox.open.as_ref() == Some(&id) {
+        s.ov.inbox.open = None;
+        return;
+    }
+    tx.focus_when_shown(format!("decision-answer-{id}"), false);
+    s.ov.inbox.open = Some(id);
+}
+
+pub fn reply(s: &mut crate::App, d: &Decision) {
+    let id = d.id();
+    let words = s.ov.inbox.replies.get(&id).map(|t| t.text.trim().to_string()).unwrap_or_default();
+    if words.is_empty() || d.session_id.is_empty() || s.ov.inbox.replying.contains(&id) {
+        return;
+    }
+    let who = title_of(s, d);
+    let Some(client) = s.client.clone() else {
+        s.ov.inbox.notes.insert(id, (d.hold_key(), "Fixture mode: not sent".into()));
+        return;
+    };
+    s.ov.inbox.replying.insert(id.clone());
+    s.ov.inbox.notes.remove(&id);
+    s.ov.inbox.replied.remove(&id);
+    let message = d.parked_reply(&words);
+    let key = match s.ov.inbox.reply_keys.get(&id) {
+        Some((sent, key)) if *sent == message => key.clone(),
+        _ => request_key(),
+    };
+    s.ov.inbox.reply_keys.insert(id.clone(), (message.clone(), key.clone()));
+    let (tx, session) = (s.ov.inbox.tx.clone(), d.session_id.clone());
+    std::thread::spawn(move || {
+        let result = client.send_as(&session, &message, &[], None, None, &key).and_then(|delivered| match delivered {
+            Delivered::Unconfirmed => Err(RespondError { message: "the daemon took it but hasn't confirmed it ran".into(), code: "submitted".into(), maybe_delivered: true, answered: false, reply: serde_json::Value::Null, status: 0 }),
+            Delivered::Queued(_) => Ok(format!("Queued for {who}")),
+            Delivered::QueuedUntilAnswer(_) => Ok(format!("Queued for {who} until it answers")),
+            Delivered::Sent | Delivered::Steered | Delivered::NotSteered => Ok(format!("Sent to {who}")),
+        });
+        let _ = tx.send(Done::Replied(id, who, words, result));
     });
 }
 

@@ -19,6 +19,7 @@ lucide!(SERVER, "ah-server", r#"<rect x="3" y="4" width="18" height="7" rx="2"/>
 lucide!(FOLDER, "ah-folder", r#"<path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h3.8l2 2.2h7.2A2.5 2.5 0 0 1 21 9.7v7.8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/>"#);
 lucide!(TERMINAL, "ah-terminal", r#"<path d="m5 8 4 4-4 4"/><path d="M12 17h7"/>"#);
 lucide!(CHEVRON_RIGHT, "ah-chevron-right", r#"<path d="m9 6 6 6-6 6"/>"#);
+lucide!(CHEVRON_LEFT, "ah-chevron-left", r#"<path d="m15 6-6 6 6 6"/>"#);
 lucide!(CHEVRON_DOWN, "ah-chevron-down", r#"<path d="m6 9 6 6 6-6"/>"#);
 lucide!(ARROW_UP, "ah-arrow-up", r#"<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>"#);
 lucide!(SPARKLES, "ah-sparkles", r#"<path d="M12 3.5 13.8 9l5.7 1.8-5.7 1.8L12 18.4l-1.8-5.8-5.7-1.8L10.2 9z"/><path d="M19 3v3M17.5 4.5h3"/>"#);
