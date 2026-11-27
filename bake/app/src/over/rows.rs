@@ -9,6 +9,8 @@ pub fn memo(id: impl Into<String>, shows: impl Hash, k: &Kit, build: impl FnOnce
     let id = id.into();
     #[cfg(test)]
     let named = id.clone();
+    #[cfg(test)]
+    built::called(&id);
     let look = fx(&(crate::theme::paint_key(), k.dark, k.c, k.ty, k.radius, k.roles, k.text_scale.to_bits()));
     let v = fx(&(shows, look));
     rune::memo::memo_with_hash(id, v, move || {
@@ -32,6 +34,15 @@ pub mod built {
 
     thread_local! {
         static BUILT: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+        static CALLED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub fn called(id: &str) {
+        CALLED.with_borrow_mut(|c| c.push(id.to_string()));
+    }
+
+    pub fn take_called() -> Vec<String> {
+        CALLED.with_borrow_mut(std::mem::take)
     }
 
     pub fn note(id: String) {

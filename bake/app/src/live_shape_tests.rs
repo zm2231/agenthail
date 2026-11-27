@@ -123,6 +123,20 @@ fn probe() {
         feed::shared::copies() - copies,
         median(built_rows)
     ));
+    send(&rt, poll(&path, 200, None, &mut sent));
+    rt.frame(DT);
+    built::take();
+    built::take_called();
+    send(&rt, poll(&path, 205, None, &mut sent));
+    rt.frame(DT);
+    let rebuilt_rows = built::take();
+    let memos: std::collections::HashSet<String> = built::take_called().into_iter().collect();
+    let all: Vec<String> = rt.elements().into_iter().filter(|e| !e.exiting).map(|e| e.path).collect();
+    let outside: Vec<&String> = all.iter().filter(|p| !p.split('/').any(|seg| memos.contains(seg))).collect();
+    lines.push(format!("steady poll: {} nodes, {} memos, {} nodes outside memos, rows built {:?}", all.len(), memos.len(), outside.len(), rebuilt_rows));
+    if let Ok(dump) = std::env::var("AGENTHAIL_LIVE_OUTSIDE") {
+        std::fs::write(dump, outside.iter().map(|p| p.as_str()).collect::<Vec<_>>().join("\n")).unwrap();
+    }
     if let Ok(dump) = std::env::var("AGENTHAIL_LIVE_PATHS") {
         let paths: Vec<String> = rt.elements().into_iter().filter(|e| !e.exiting).map(|e| e.path).collect();
         std::fs::write(dump, paths.join("\n")).unwrap();
