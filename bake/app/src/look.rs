@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
@@ -85,6 +85,7 @@ fn scheme_of(look: &Look) -> rune::ColorScheme {
 }
 
 static TICKET: AtomicU64 = AtomicU64::new(0);
+static SCREEN: AtomicU32 = AtomicU32::new(2880);
 
 pub fn ticket() -> u64 {
     TICKET.fetch_add(1, Ordering::Relaxed) + 1
@@ -102,16 +103,35 @@ fn start(s: &mut State) {
     let (tx, rx) = channel();
     s.rx = Some(rx);
     s.tx = Some(tx.clone());
+    s.screen = screen_side();
+    SCREEN.store(s.screen, Ordering::Relaxed);
+    std::thread::spawn(move || follow(tx));
+}
+
+fn redecode(s: &mut State) {
     let side = screen_side();
+    if side == s.screen {
+        return;
+    }
     s.screen = side;
-    std::thread::spawn(move || follow(tx, side));
+    SCREEN.store(side, Ordering::Relaxed);
+    let (Some(tx), paths) = (s.tx.clone(), s.look.images()) else { return };
+    std::thread::spawn(move || {
+        let Ok(client) = Client::from_env() else { return };
+        for path in paths {
+            let got = client.ui_background(&path).and_then(|data| fl::decode(&data, side, SAMPLE_SIDE));
+            if tx.send(Got::Image(path, got)).is_err() {
+                return;
+            }
+        }
+    });
 }
 
 fn screen_side() -> u32 {
     rune::displays().iter().map(|d| d.size.0.max(d.size.1)).max().unwrap_or(2880)
 }
 
-fn follow(tx: Sender<Got>, side: u32) {
+fn follow(tx: Sender<Got>) {
     let client = loop {
         match Client::from_env() {
             Ok(client) => break client,
@@ -129,9 +149,10 @@ fn follow(tx: Sender<Got>, side: u32) {
     }
     let class = fl::device_class();
     let mut fetched: Vec<String> = Vec::new();
+    let mut decoded_at = 0u32;
     loop {
         let cursor = client.base_settings().map(|b| b.event_cursor).unwrap_or(0);
-        match read(&client, class, &device, side, &tx, &mut fetched) {
+        match read(&client, class, &device, &mut decoded_at, &tx, &mut fetched) {
             Read::Closed => return,
             Read::Retry => {
                 std::thread::sleep(RETRY);
@@ -144,7 +165,7 @@ fn follow(tx: Sender<Got>, side: u32) {
             if kind != "ui.changed" && kind != "stream.reset" {
                 return true;
             }
-            after = read(&client, class, &device, side, &tx, &mut fetched);
+            after = read(&client, class, &device, &mut decoded_at, &tx, &mut fetched);
             after == Read::Done
         });
         match after {
@@ -169,7 +190,7 @@ enum Read {
     Closed,
 }
 
-fn read(client: &Client, class: &str, device: &str, side: u32, tx: &Sender<Got>, fetched: &mut Vec<String>) -> Read {
+fn read(client: &Client, class: &str, device: &str, decoded_at: &mut u32, tx: &Sender<Got>, fetched: &mut Vec<String>) -> Read {
     let ticket = ticket();
     let view = match client.ui_view(class, device) {
         Ok(view) => view,
@@ -179,6 +200,11 @@ fn read(client: &Client, class: &str, device: &str, side: u32, tx: &Sender<Got>,
         }
     };
     let paths = Look::from_view(&view).images();
+    let side = SCREEN.load(Ordering::Relaxed);
+    if side != *decoded_at {
+        *decoded_at = side;
+        fetched.clear();
+    }
     fetched.retain(|p| paths.contains(p));
     if tx.send(Got::View(ticket, Box::new(view))).is_err() {
         return Read::Closed;
@@ -242,6 +268,7 @@ fn pump(s: &mut State) {
                 s.applied = ticket;
                 s.view = Some(*v);
                 s.screen = screen_side();
+                SCREEN.store(s.screen, Ordering::Relaxed);
                 relook(s);
                 let keep = s.look.images();
                 s.pictures.retain(|p, _| keep.contains(p));
@@ -416,6 +443,9 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool, zoom: bool) {
                 k.c.bg_base = Color::WHITE.alpha(0.025);
                 k.c.border_muted = paint.border;
             }
+            k.c.text_base = paint.text;
+            k.c.text_muted = paint.muted;
+            k.c.text_faint = paint.faint;
             accented(&mut k, paint.accent);
             k
         });
@@ -456,7 +486,10 @@ pub fn backdrop(session: bool) -> El {
             let scale = tx.scale();
             STATE.with_borrow_mut(|s| {
                 s.area = (r[2], r[3]);
-                s.scale = scale;
+                if s.scale != scale {
+                    s.scale = scale;
+                    redecode(s);
+                }
             });
         });
         if !s.look.drawn(dark) {
