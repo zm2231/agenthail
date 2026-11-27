@@ -100,6 +100,12 @@ fn read(s: &mut Prefs) {
 fn session_choices(sessions: &[feed::catalog::Session]) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = sessions.iter().filter(|x| !x.archived).map(|x| (x.id.clone(), x.alias.as_ref().filter(|a| !a.is_empty()).map_or_else(|| x.name.clone(), |a| format!("@{a}")))).collect();
     out.sort_by_key(|(_, label)| label.to_lowercase());
+    let labels: Vec<String> = out.iter().map(|(_, l)| l.clone()).collect();
+    for (id, label) in &mut out {
+        if labels.iter().filter(|l| *l == label).count() > 1 {
+            *label = format!("{label} · {}", id.chars().take(8).collect::<String>());
+        }
+    }
     out
 }
 
@@ -512,7 +518,11 @@ fn orphans(s: &Prefs, k: &Kit) -> Option<El> {
             row().w_full().gap(8.0).items_center().px(14.0).py(10.0).child(col().grow(1.0).min_w(0.0).child(words)).child(discard).child(recreate)
         })
         .collect();
-    Some(section("Unsaved changes", rows, None))
+    let mut out = col().w_full().gap(8.0).child(section("Unsaved changes", rows, None));
+    if let Some(f) = s.agents.save_error.as_ref().filter(|_| s.agents.draft.is_none()) {
+        out = out.child(parts::failure(s, f));
+    }
+    Some(out)
 }
 
 fn roles_page(s: &Prefs, r: &Roles, layer: &mut Vec<El>, k: &Kit) -> El {
@@ -644,4 +654,21 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
         };
     };
     if s.agents.page == 2 { out.child(assignments_page(s, r, layer, k)) } else { out.child(roles_page(s, r, layer, k)) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session(id: &str, name: &str, alias: Option<&str>) -> feed::catalog::Session {
+        serde_json::from_value(serde_json::json!({"id": id, "name": name, "alias": alias})).unwrap()
+    }
+
+    #[test]
+    fn sessions_with_the_same_label_stay_apart() {
+        let list = session_choices(&[session("aaaaaaaa-1", "Fix tests", None), session("bbbbbbbb-2", "Fix tests", None), session("c", "Other", Some("rev"))]);
+        let labels: Vec<&str> = list.iter().map(|(_, l)| l.as_str()).collect();
+        assert_eq!(labels, ["@rev", "Fix tests · aaaaaaaa", "Fix tests · bbbbbbbb"]);
+        assert_eq!(list[2].0, "bbbbbbbb-2");
+    }
 }
