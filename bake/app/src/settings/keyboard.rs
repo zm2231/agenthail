@@ -23,6 +23,10 @@ pub fn opened(s: &mut Prefs) {
     }
     bindings::refresh();
     s.keyboard.kept.clear();
+    sync_rows(s);
+}
+
+fn sync_rows(s: &mut Prefs) {
     for c in COMMANDS {
         let state = s.keyboard.rows.entry(c.id).or_default();
         if !state.is_recording() {
@@ -73,7 +77,7 @@ fn restore(s: &mut Prefs) {
     s.keyboard.kept = bindings::change(Shortcuts::reset_all);
     s.keyboard.kept_at = bindings::generation();
     s.keyboard.rows.clear();
-    opened(s);
+    sync_rows(s);
 }
 
 fn command_row(s: &Prefs, id: &'static str, title: &str, k: &Kit) -> El {
