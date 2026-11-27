@@ -7,6 +7,14 @@ use crate::catalog::Session;
 
 pub const REMEMBERED: usize = 500;
 pub const SENDS_AS_NOTE: &str = "Sends as a note";
+pub const READ_ONLY: &str = "This session is closed. You can read it, but not message it.";
+
+pub fn read_only(x: &Session) -> Option<String> {
+    if !x.read_only && x.capabilities.send {
+        return None;
+    }
+    Some(x.read_only_reason.clone().filter(|r| !r.trim().is_empty()).unwrap_or_else(|| READ_ONLY.to_string()))
+}
 
 pub fn turn_notice(x: &Session) -> String {
     if !x.capabilities.reaches_as_note {
@@ -79,6 +87,19 @@ mod tests {
 
     fn session(capabilities: Value, read_only: bool) -> Session {
         serde_json::from_value(json!({"id": "s1", "capabilities": capabilities, "readOnly": read_only})).unwrap()
+    }
+
+    #[test]
+    fn a_read_only_session_or_one_that_takes_no_messages_gets_the_closed_notice() {
+        assert_eq!(read_only(&session(json!({"send": true}), false)), None);
+        assert_eq!(read_only(&serde_json::from_value(json!({"id": "s1"})).unwrap()), None);
+        assert_eq!(read_only(&session(json!({"send": true}), true)).as_deref(), Some(READ_ONLY));
+        assert_eq!(read_only(&session(json!({"send": false}), false)).as_deref(), Some(READ_ONLY));
+        assert_eq!(read_only(&session(json!({}), false)).as_deref(), Some(READ_ONLY));
+        let why: Session = serde_json::from_value(json!({"id": "s1", "capabilities": {"send": true}, "readOnly": true, "readOnlyReason": "This Claude session is being written to from another computer."})).unwrap();
+        assert_eq!(read_only(&why).as_deref(), Some("This Claude session is being written to from another computer."));
+        let blank: Session = serde_json::from_value(json!({"id": "s1", "readOnly": true, "readOnlyReason": " "})).unwrap();
+        assert_eq!(read_only(&blank).as_deref(), Some(READ_ONLY));
     }
 
     #[test]

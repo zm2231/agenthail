@@ -199,6 +199,8 @@ pub struct Session {
     #[serde(default)]
     pub read_only: bool,
     #[serde(default)]
+    pub read_only_reason: Option<String>,
+    #[serde(default)]
     pub unavailable_reason: Option<String>,
     #[serde(default)]
     pub holders: Option<Vec<crate::holders::Holder>>,
@@ -215,6 +217,8 @@ pub struct Session {
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
+    #[serde(default)]
+    pub send: bool,
     #[serde(default)]
     pub interrupt: bool,
     #[serde(default)]
@@ -262,7 +266,7 @@ fn capabilities_or_default<'de, D: serde::Deserializer<'de>>(d: D) -> std::resul
 
 impl Default for Capabilities {
     fn default() -> Self {
-        Capabilities { interrupt: true, steer: true, model: false, compact: false, commands: false, attach: false, goal_set: false, steer_images: None, lifecycle: Lifecycle::default(), reaches_as_note: false, remote_control: false }
+        Capabilities { send: true, interrupt: true, steer: true, model: false, compact: false, commands: false, attach: false, goal_set: false, steer_images: None, lifecycle: Lifecycle::default(), reaches_as_note: false, remote_control: false }
     }
 }
 
@@ -987,7 +991,7 @@ mod capabilities_tests {
     #[test]
     fn a_session_without_capabilities_can_be_stopped_and_steered() {
         for c in [caps(""), caps(r#","capabilities":null"#)] {
-            assert!(c.interrupt && c.steer);
+            assert!(c.send && c.interrupt && c.steer);
             assert!(!c.model && !c.compact && !c.commands);
         }
     }
@@ -995,7 +999,7 @@ mod capabilities_tests {
     #[test]
     fn a_capability_the_daemon_leaves_out_is_not_offered() {
         let c = caps(r#","capabilities":{}"#);
-        assert!(!c.interrupt && !c.steer && !c.model && !c.compact && !c.commands);
+        assert!(!c.send && !c.interrupt && !c.steer && !c.model && !c.compact && !c.commands);
         let c = caps(r#","capabilities":{"model":true}"#);
         assert!(c.model && !c.interrupt && !c.steer);
         assert!(!c.attach && caps(r#","capabilities":{"attach":true}"#).attach);

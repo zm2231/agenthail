@@ -545,12 +545,22 @@ pub fn send(s: &mut App, tx: &mut Tx) {
 }
 
 pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
+    if closed(s, id) {
+        return;
+    }
     if !ui::complete::run(s, id, tx) {
         send_with(s, id, None, tx);
     }
 }
 
+fn closed(s: &App, id: &str) -> bool {
+    session(s, id).is_some_and(|x| feed::notice::read_only(x).is_some())
+}
+
 pub fn steer_text(s: &mut App, id: &str, text: String, tx: &mut Tx) {
+    if closed(s, id) {
+        return;
+    }
     ui::paste::set_composer(s, &text);
     send_with(s, id, Some(Busy::Steer), tx);
 }
@@ -614,7 +624,7 @@ fn clear_sent(s: &mut App, id: &str, unsent: &Unsent) {
 }
 
 pub fn can_retry(s: &App, id: &str) -> bool {
-    s.unsent.latest(id).is_some_and(|u| feed::attach::missing_upload(&u.error).is_none())
+    !closed(s, id) && s.unsent.latest(id).is_some_and(|u| feed::attach::missing_upload(&u.error).is_none())
 }
 
 pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {

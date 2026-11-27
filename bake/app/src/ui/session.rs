@@ -260,12 +260,12 @@ pub(crate) fn session_screen(s: &App) -> El {
     let Some(id) = s.selected.clone() else { return transcript::loading("Pick a session".into()) };
     let Some(x) = session(s, &id).filter(|x| !x.archived) else { return super::gone::screen(s, &id) };
     let mut center = col().grow(1.0).h_full().min_w(0.0).child(header(s, x));
-    let open = open_request(s, x).is_some();
-    let sent = has_settled(s, x);
+    let open = open_request(s, x).is_some() && !x.read_only;
+    let sent = has_settled(s, x) && !x.read_only;
     let stop = x.limit(s.now);
     if let Some(stop) = stop.as_ref().filter(|_| !open) {
         center = center.child(super::limit::card(s, x, stop));
-    } else if open || (x.state(s.now) == State::NeedsYou && !sent) {
+    } else if open || (x.state(s.now) == State::NeedsYou && !sent && !x.read_only) {
         center = center.child(waiting_card(s, x));
     } else if sent {
         let request = settled_request(s, x).map(|r| r.id.clone()).unwrap_or_default();
@@ -277,7 +277,27 @@ pub(crate) fn session_screen(s: &App) -> El {
         };
         center = center.child(col().w_full().items_center().px(32.0).pb(12.0).child(pill(glyph, label, color)));
     }
-    super::attach::drop_target(conversation(s, &id, center).child(composer(s, x)).on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_bottom(r[1] + r[3])))
+    let bottom = match feed::notice::read_only(x) {
+        Some(why) => read_only(s, x, why),
+        None => composer(s, x),
+    };
+    let screen = conversation(s, &id, center).child(bottom).on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_bottom(r[1] + r[3]));
+    if x.read_only || !x.capabilities.send { screen } else { super::attach::drop_target(screen) }
+}
+
+pub(crate) fn read_only(s: &App, x: &Session, why: String) -> El {
+    let notice = col()
+        .key("read-only")
+        .w_full()
+        .max_w(780.0)
+        .radius(18.0)
+        .backdrop_blur(theme::paint().blur)
+        .fill(theme::glass_tint())
+        .border(1.0, theme::line())
+        .children(crate::ui::background::dock(s, x))
+        .child(col().w_full().px(15.0).py(13.0).child(text(why).font(BODY).color(muted()).wrap()))
+        .on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_composer(r));
+    col().w_full().items_center().px(28.0).pb(COMPOSER_BELOW).mt(-120.0).child(notice)
 }
 
 pub(crate) fn conversation(s: &App, id: &str, center: El) -> El {
