@@ -11,7 +11,6 @@ use rune_kit::Kit;
 
 use crate::theme::{self, Paint};
 
-const IMAGE_SIDE: u32 = 2560;
 const SAMPLE_SIDE: u32 = 512;
 const MIN_LAYOUT: (f32, f32) = (1440.0, 900.0);
 const RETRY: Duration = Duration::from_secs(5);
@@ -103,10 +102,16 @@ fn start(s: &mut State) {
     let (tx, rx) = channel();
     s.rx = Some(rx);
     s.tx = Some(tx.clone());
-    std::thread::spawn(move || follow(tx));
+    let side = screen_side();
+    s.screen = side;
+    std::thread::spawn(move || follow(tx, side));
 }
 
-fn follow(tx: Sender<Got>) {
+fn screen_side() -> u32 {
+    rune::displays().iter().map(|d| d.size.0.max(d.size.1)).max().unwrap_or(2880)
+}
+
+fn follow(tx: Sender<Got>, side: u32) {
     let client = loop {
         match Client::from_env() {
             Ok(client) => break client,
@@ -126,7 +131,7 @@ fn follow(tx: Sender<Got>) {
     let mut fetched: Vec<String> = Vec::new();
     loop {
         let cursor = client.base_settings().map(|b| b.event_cursor).unwrap_or(0);
-        match read(&client, class, &device, &tx, &mut fetched) {
+        match read(&client, class, &device, side, &tx, &mut fetched) {
             Read::Closed => return,
             Read::Retry => {
                 std::thread::sleep(RETRY);
@@ -139,7 +144,7 @@ fn follow(tx: Sender<Got>) {
             if kind != "ui.changed" && kind != "stream.reset" {
                 return true;
             }
-            after = read(&client, class, &device, &tx, &mut fetched);
+            after = read(&client, class, &device, side, &tx, &mut fetched);
             after == Read::Done
         });
         match after {
@@ -164,7 +169,7 @@ enum Read {
     Closed,
 }
 
-fn read(client: &Client, class: &str, device: &str, tx: &Sender<Got>, fetched: &mut Vec<String>) -> Read {
+fn read(client: &Client, class: &str, device: &str, side: u32, tx: &Sender<Got>, fetched: &mut Vec<String>) -> Read {
     let ticket = ticket();
     let view = match client.ui_view(class, device) {
         Ok(view) => view,
@@ -183,7 +188,7 @@ fn read(client: &Client, class: &str, device: &str, tx: &Sender<Got>, fetched: &
         if fetched.contains(&path) {
             continue;
         }
-        let got = client.ui_background(&path).and_then(|data| fl::decode(&data, IMAGE_SIDE, SAMPLE_SIDE));
+        let got = client.ui_background(&path).and_then(|data| fl::decode(&data, side, SAMPLE_SIDE));
         if got.is_ok() {
             fetched.push(path.clone());
         } else {
@@ -236,7 +241,7 @@ fn pump(s: &mut State) {
             Got::View(ticket, v) if ticket > s.applied => {
                 s.applied = ticket;
                 s.view = Some(*v);
-                s.screen = rune::displays().iter().map(|d| d.size.0.max(d.size.1)).max().unwrap_or(2880);
+                s.screen = screen_side();
                 relook(s);
                 let keep = s.look.images();
                 s.pictures.retain(|p, _| keep.contains(p));
