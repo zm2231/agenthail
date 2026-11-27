@@ -90,6 +90,8 @@ pub fn refusal(e: &RespondError) -> String {
     }
 }
 
+pub const CHANGED_WORDS: &str = "The last send isn't confirmed yet. Changed words go as a new one, so check the timeline first.";
+
 pub fn unconfirmed(e: &RespondError, again: bool) -> String {
     if again {
         format!("Still not confirmed: {}. If the timeline doesn't show it, pressing again sends it as new.", e.message)

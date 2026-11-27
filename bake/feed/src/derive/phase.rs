@@ -53,6 +53,7 @@ impl World {
                 Some(p) => p.lead_name.clone(),
                 None => "The lead".into(),
             },
+            _ if w.assignee.as_deref() == Some(crate::ledger::PERSON) => "You".into(),
             _ => self.worker(w),
         }
     }

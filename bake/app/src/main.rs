@@ -1370,7 +1370,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
 }
 
 fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
-    if ev.is_command(',') {
+    if ev.is_command(',') && !over::note_open(s) {
         settings::open();
         return true;
     }

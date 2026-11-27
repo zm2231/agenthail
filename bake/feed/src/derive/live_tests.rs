@@ -601,3 +601,14 @@ fn the_persons_move_reads_as_yours() {
     assert_eq!(super::phase::move_of("You"), "Your move");
     assert_eq!(super::phase::move_of("@lead"), "@lead's move");
 }
+
+#[test]
+fn work_the_person_holds_is_their_move_whoever_logged_before() {
+    let mut held = work("w1", "in_progress");
+    held.assignee = Some(crate::ledger::PERSON.into());
+    held.timeline.push(serde_json::from_value(json!({"at": "2026-11-24T11:30:00Z", "actor": "a", "kind": "log", "text": "started"})).unwrap());
+    let mut ov = Overview::default();
+    ov.refresh(fetched("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")], vec![("p", Ok(vec![held]))]));
+    let w = ov.world(&[]);
+    assert_eq!(w.whose_move(&w.work["w1"]), "You");
+}

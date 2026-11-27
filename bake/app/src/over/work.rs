@@ -322,10 +322,14 @@ fn start(s: &mut App, id: &str, m: Move) {
         send(s, id, m, "");
         return;
     }
-    let mut text = TextEdit::new("");
+    let mut text = TextEdit::new(pending_words(s, id, m).unwrap_or_default());
     text.focused = true;
     s.composer.focused = false;
     s.ov.work.words = Some(Words { item: id.into(), title: plain(&w.text), m, text });
+}
+
+fn pending_words<'a>(s: &'a App, id: &str, m: Move) -> Option<&'a str> {
+    s.ov.work.keys.get(&(id.to_string(), m)).filter(|p| p.unconfirmed).map(|p| p.words.as_str())
 }
 
 fn send_words(s: &mut App) {
@@ -443,12 +447,17 @@ pub fn words_dialog(s: &App, layer: &mut Vec<El>) {
         .child(el().grow(1.0))
         .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(|s: &mut App| s.ov.work.words = None).build(k).key("work-words-cancel"))
         .child(Button::new(yes).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(problem.is_some()).on_press(send_words).build(k).key("work-words-send"));
+    let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0).child(field);
+    if pending_words(s, &n.item, n.m).is_some_and(|said| said != n.text.text.trim()) {
+        body = body.child(text(ledger::CHANGED_WORDS.to_string()).font(META).color(ui::needs_color()).wrap().w_full());
+    }
+    let body = body.child(buttons);
     Dialog::new("work-words", format!("{title} {}", ui::short_title(&n.title, 48)))
         .description(about)
         .open(true)
         .fit()
         .width(460.0)
         .on_close(|s: &mut App| s.ov.work.words = None)
-        .child(col().w_full().gap(10.0).px(16.0).pb(16.0).child(field).child(buttons))
+        .child(body)
         .build(k, layer);
 }
