@@ -134,7 +134,7 @@ impl Outcome {
             "session_operation_unknown" | "host_outcome_unknown" => Outcome::Unknown(unknown(&error.message)),
             "submitted" => Outcome::Pending(unknown(STILL_FINISHING)),
             _ if error.status == 0 && error.maybe_delivered => Outcome::Pending(unknown(&error.message)),
-            _ if error.status == 504 && error.maybe_delivered => Outcome::Unknown(unknown(&error.message)),
+            _ if error.status == 504 && error.maybe_delivered => Outcome::Pending(unknown(&error.message)),
             _ => Outcome::Failed(error.message),
         }
     }
@@ -155,6 +155,8 @@ struct Pending {
     unresolved: bool,
     recorded: Option<u64>,
 }
+
+const KEPT_KEYS: usize = 64;
 
 #[derive(Default)]
 pub struct Keys {
@@ -195,11 +197,20 @@ impl Keys {
             }
         }
         self.pending.retain(|p| p.sent > 0 || p.unresolved);
+        while self.pending.len() > KEPT_KEYS {
+            let Some(oldest) = self.pending.iter().position(|p| p.sent == 0) else { break };
+            self.pending.remove(oldest);
+        }
     }
 
     pub fn read_started(&mut self) -> u64 {
         self.seq += 1;
         self.seq
+    }
+
+    #[cfg(test)]
+    pub fn len(&self) -> usize {
+        self.pending.len()
     }
 
     pub fn observed(&mut self, session: &str, read: u64) {

@@ -192,11 +192,28 @@ fn another_change_succeeding_keeps_an_unanswered_add_on_its_key() {
 fn a_gateway_timeout_keeps_the_key_for_a_retry() {
     let error = crate::catalog::RespondError::from_status("native-queue", 504, "");
     let outcome = Outcome::of(Err(error));
-    assert!(matches!(outcome, Outcome::Unknown(_)), "{outcome:?}");
+    assert!(matches!(outcome, Outcome::Pending(_)), "{outcome:?}");
     let mut keys = Keys::default();
     let add = Act::Add("Ship it".into());
     let first = send(&mut keys, "s", &add, outcome);
-    assert_eq!(send(&mut keys, "s", &add, Outcome::Done), first);
+    let read = keys.read_started();
+    keys.observed("s", read);
+    assert_eq!(send(&mut keys, "s", &add, Outcome::Done), first, "a list read doesn't retire a timed-out add");
+}
+
+#[test]
+fn unanswered_keys_stay_bounded() {
+    let mut keys = Keys::default();
+    for i in 0..200 {
+        send(&mut keys, "s", &Act::Add(format!("item {i}")), Outcome::Pending("still finishing".into()));
+    }
+    let newest = Act::Add("item 199".into());
+    let kept = keys.key("s", &newest);
+    keys.settled(&kept, &Outcome::Done);
+    let oldest = Act::Add("item 0".into());
+    let fresh = keys.key("s", &oldest);
+    keys.settled(&fresh, &Outcome::Done);
+    assert!(keys.len() <= 64);
 }
 
 #[test]
