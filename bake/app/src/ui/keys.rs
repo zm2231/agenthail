@@ -14,6 +14,7 @@ pub enum Act {
     NextSession,
     JumpToLatest,
     Find,
+    Talk,
 }
 
 pub struct Binding {
@@ -22,7 +23,7 @@ pub struct Binding {
     pub menu: Option<(&'static str, &'static str)>,
 }
 
-pub const APP: [Binding; 8] = [
+pub const APP: [Binding; 9] = [
     Binding { act: Act::NewSession, chord: "mod+n", menu: Some(("File", "New Session")) },
     Binding { act: Act::GoToSession, chord: "mod+k", menu: Some(("Session", "Go to Session…")) },
     Binding { act: Act::Stop, chord: "mod+period", menu: Some(("Session", "Stop")) },
@@ -31,6 +32,7 @@ pub const APP: [Binding; 8] = [
     Binding { act: Act::NextSession, chord: "mod+down", menu: None },
     Binding { act: Act::JumpToLatest, chord: "mod+l", menu: None },
     Binding { act: Act::Find, chord: "mod+f", menu: None },
+    Binding { act: Act::Talk, chord: "mod+alt+t", menu: Some(("Session", "Talk to Orchestrator…")) },
 ];
 
 fn chord(spec: &str) -> Chord {
@@ -90,6 +92,7 @@ pub fn run(s: &mut App, act: Act, tx: &mut Tx) {
             s.ov.sessions_query.focused = true;
             tx.focus("sessions-search", false);
         }
+        Act::Talk => crate::voice::open("", ""),
     }
 }
 
@@ -158,6 +161,7 @@ mod tests {
         assert_eq!(press(Key::Down, CMD), Some(Act::NextSession));
         assert_eq!(press(Key::Command('l'), CMD), Some(Act::JumpToLatest));
         assert_eq!(press(Key::Command('f'), CMD), Some(Act::Find));
+        assert_eq!(press(Key::Command('t'), Mods { alt: true, ..CMD }), Some(Act::Talk));
     }
 
     #[test]
@@ -169,6 +173,8 @@ mod tests {
         assert_eq!(press(Key::Command('s'), Mods { shift: true, ..CMD }), None, "⇧⌘S stays the Sessions screen's");
         assert_eq!(press(Key::Command('0'), CMD), None, "⌘0 stays Now");
         assert_eq!(press(Key::Command('j'), CMD), None, "⌘J stays next need");
+        assert_eq!(press(Key::Command('t'), CMD), None, "⌘T alone is left free");
+        assert_eq!(press(Key::Command('b'), Mods { alt: true, ..CMD }), None, "⌥⌘B stays the brief toggle");
     }
 
     #[test]
@@ -180,7 +186,7 @@ mod tests {
             }
         }
         let menus: Vec<_> = APP.iter().filter_map(|b| b.menu).collect();
-        assert_eq!(menus, vec![("File", "New Session"), ("Session", "Go to Session…"), ("Session", "Stop"), ("View", "Refresh")]);
+        assert_eq!(menus, vec![("File", "New Session"), ("Session", "Go to Session…"), ("Session", "Stop"), ("View", "Refresh"), ("Session", "Talk to Orchestrator…")]);
     }
 
     #[test]
