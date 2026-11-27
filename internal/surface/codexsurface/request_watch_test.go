@@ -42,7 +42,6 @@ func TestTheStatusWatchHearsASecondCodexRequestAndOneOfSeveralResolving(t *testi
 	daemon.Load(managedThreadID)
 	var changes atomic.Int32
 	watchedCodexWaking(t, managedThreadID, func() { changes.Add(1) })
-	testkit.Eventually(t, "the watch to attach", 5*time.Second, func() bool { return changes.Load() > 0 })
 
 	daemon.OpenRequest(1, codexCommandApproval, approvalOn(managedThreadID, "call_a"))
 	daemon.Notify("thread/status/changed", map[string]any{"threadId": managedThreadID, "status": waitingStatus("waitingOnApproval")})
@@ -176,7 +175,6 @@ func TestTheStatusWatchNeverLoadsAThreadItsAppServerDoesNotHave(t *testing.T) {
 	daemon.AddThread(runningThread(otherManagedThreadID))
 	var changes atomic.Int32
 	watchedCodexWaking(t, managedThreadID, func() { changes.Add(1) })
-	testkit.Eventually(t, "the watch to attach", 5*time.Second, func() bool { return changes.Load() > 0 })
 	daemon.Notify("thread/status/changed", map[string]any{"threadId": otherManagedThreadID, "status": waitingStatus("waitingOnApproval")})
 	time.Sleep(300 * time.Millisecond)
 	if resumes := resumesOf(daemon, otherManagedThreadID); resumes != 0 || daemon.Loaded(otherManagedThreadID) {

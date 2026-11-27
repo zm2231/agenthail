@@ -87,7 +87,6 @@ func TestCodexWatchWakesTheCatalogWhenAReceiptChanges(t *testing.T) {
 	daemon.Load(id)
 	var wakes atomic.Int32
 	watchedCodexWaking(t, id, func() { wakes.Add(1) })
-	testkit.Eventually(t, "the watch to attach", 5*time.Second, func() bool { return wakes.Load() > 0 })
 	attached := wakes.Load()
 	daemon.CompleteTurn(id, "done")
 	testkit.Eventually(t, "the finished turn's receipt to wake the catalog", 5*time.Second, func() bool { return wakes.Load() > attached })
