@@ -294,6 +294,7 @@ pub struct Words {
     title: String,
     m: Move,
     text: TextEdit,
+    held: Option<String>,
 }
 
 pub struct State {
@@ -318,19 +319,25 @@ fn start(s: &mut App, id: &str, m: Move) {
         send(s, id, m, "");
         return;
     }
-    let mut text = TextEdit::new(s.ov.work.sends.held_words(id, m).unwrap_or_default().to_string());
+    let sends = &s.ov.work.sends;
+    let held = sends.held_key(id, m).map(str::to_string);
+    let mut text = TextEdit::new(sends.held_words(id, m).unwrap_or_default().to_string());
     text.focused = true;
     s.composer.focused = false;
-    s.ov.work.words = Some(Words { item: id.into(), title: plain(&w.text), m, text });
+    s.ov.work.words = Some(Words { item: id.into(), title: plain(&w.text), m, text, held });
 }
 
 fn changed_while_held(s: &App, n: &Words) -> bool {
     s.ov.work.sends.held_words(&n.item, n.m).is_some_and(|said| said != n.text.text.trim())
 }
 
+fn settled_while_open(s: &App, n: &Words) -> bool {
+    n.held.as_deref().is_some_and(|key| s.ov.work.sends.held_key(&n.item, n.m) != Some(key))
+}
+
 fn send_words(s: &mut App) {
     let Some(n) = &s.ov.work.words else { return };
-    if ledger::words_problem(n.m, &n.text.text).is_some() || changed_while_held(s, n) {
+    if ledger::words_problem(n.m, &n.text.text).is_some() || changed_while_held(s, n) || settled_while_open(s, n) || s.ov.work.acting.contains(&n.item) {
         return;
     }
     let (id, m, words) = (n.item.clone(), n.m, n.text.text.trim().to_string());
@@ -353,12 +360,12 @@ fn post(s: &mut App, id: &str, m: Move, words: &str) {
         s.ov.work.notes.insert(id.into(), (true, "Fixture mode: not sent".into()));
         return;
     };
-    let key = s.ov.work.sends.key(id, m, words);
+    let (key, body) = s.ov.work.sends.sending(&w, m, words);
     s.ov.work.acting.insert(id.into());
     s.ov.work.notes.remove(id);
-    let (tx, id, words) = (s.ov.work.tx.clone(), id.to_string(), words.to_string());
+    let (tx, id) = (s.ov.work.tx.clone(), id.to_string());
     std::thread::spawn(move || {
-        let result = client.work_move(&w, m, &words, &key);
+        let result = client.work_post(m, body, &key);
         let _ = tx.send((id, m, result));
     });
 }
@@ -432,7 +439,9 @@ pub fn words_dialog(s: &App, layer: &mut Vec<El>) {
     let Some(n) = &s.ov.work.words else { return };
     let k = kit();
     let held = changed_while_held(s, n);
-    let problem = ledger::words_problem(n.m, &n.text.text).or(held.then_some(ledger::CHANGED_WORDS));
+    let settled = settled_while_open(s, n);
+    let busy = s.ov.work.acting.contains(&n.item);
+    let problem = ledger::words_problem(n.m, &n.text.text).or(held.then_some(ledger::CHANGED_WORDS)).or(settled.then_some(ledger::SETTLED_WHILE_OPEN)).or(busy.then_some("Sending…"));
     let (title, label, placeholder, yes, about) = match n.m {
         Move::Park => ("Park", "Why it waits", "What should happen before anyone picks this up?", "Park", "It leaves the board until someone unparks it."),
         _ => ("Comment on", "Comment", "Your note for whoever works on this", "Add comment", "It goes on the item's timeline, where its workers read it."),
@@ -456,6 +465,8 @@ pub fn words_dialog(s: &App, layer: &mut Vec<El>) {
     let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0).child(field);
     if held {
         body = body.child(text(ledger::CHANGED_WORDS.to_string()).font(META).color(ui::needs_color()).wrap().w_full());
+    } else if settled {
+        body = body.child(text(ledger::SETTLED_WHILE_OPEN.to_string()).font(META).color(ui::needs_color()).wrap().w_full());
     }
     let body = body.child(buttons);
     Dialog::new("work-words", format!("{title} {}", ui::short_title(&n.title, 48)))

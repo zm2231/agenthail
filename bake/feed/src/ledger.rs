@@ -92,6 +92,8 @@ pub fn refusal(e: &RespondError) -> String {
     }
 }
 
+pub const SETTLED_WHILE_OPEN: &str = "The earlier send settled while this was open. Close it and start again to send another.";
+
 pub const CHANGED_WORDS: &str = "The last send isn't settled yet, so only the same words can go now. Change them once it settles.";
 
 pub fn settles(e: &RespondError) -> bool {
@@ -119,12 +121,14 @@ struct Resend {
     due: f64,
     wait: f64,
     since: f64,
+    woke: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Pending {
     pub words: String,
     pub key: String,
+    body: Value,
     resend: Option<Resend>,
 }
 
@@ -138,16 +142,16 @@ impl Pending {
 pub struct Sends(HashMap<(String, Move), Pending>);
 
 impl Sends {
-    pub fn key(&mut self, id: &str, m: Move, words: &str) -> String {
-        let slot = (id.to_string(), m);
-        match self.0.get(&slot) {
-            Some(p) if p.words == words => p.key.clone(),
-            _ => {
-                let key = crate::catalog::request_key();
-                self.0.insert(slot, Pending { words: words.to_string(), key: key.clone(), resend: None });
-                key
-            }
+    pub fn sending(&mut self, w: &Work, m: Move, words: &str) -> (String, Value) {
+        let fresh = || Pending { words: words.to_string(), key: crate::catalog::request_key(), body: body(w, m, words), resend: None };
+        let p = self.0.entry((w.id.clone(), m)).or_insert_with(fresh);
+        if p.words != words {
+            *p = fresh();
         }
+        if let Some(r) = p.resend.as_mut() {
+            r.woke = false;
+        }
+        (p.key.clone(), p.body.clone())
     }
 
     pub fn get(&self, id: &str, m: Move) -> Option<&Pending> {
@@ -156,6 +160,10 @@ impl Sends {
 
     pub fn held(&self, id: &str) -> Option<Move> {
         self.0.iter().find(|((item, _), p)| item == id && p.unconfirmed()).map(|((_, m), _)| *m)
+    }
+
+    pub fn held_key(&self, id: &str, m: Move) -> Option<&str> {
+        self.get(id, m).filter(|p| p.unconfirmed()).map(|p| p.key.as_str())
     }
 
     pub fn held_words(&self, id: &str, m: Move) -> Option<&str> {
@@ -178,9 +186,9 @@ impl Sends {
                 let next = match held {
                     Some(r) => {
                         let wait = (r.wait * 2.0).min(RESEND_MAX);
-                        Resend { due: now + wait, wait, since: r.since }
+                        Resend { due: if r.woke { now } else { now + wait }, wait, since: r.since, woke: false }
                     }
-                    None => Resend { due: now + RESEND_FIRST, wait: RESEND_FIRST, since: now },
+                    None => Resend { due: now + RESEND_FIRST, wait: RESEND_FIRST, since: now, woke: false },
                 };
                 if let Some(p) = self.0.get_mut(&slot) {
                     p.resend = Some(next);
@@ -201,13 +209,18 @@ impl Sends {
     pub fn wake(&mut self, now: f64) {
         for r in self.0.values_mut().filter_map(|p| p.resend.as_mut()) {
             r.due = r.due.min(now);
+            r.woke = true;
         }
     }
 }
 
 impl Client {
     pub fn work_move(&self, w: &Work, m: Move, words: &str, key: &str) -> Result<Value, RespondError> {
-        self.post_json_keyed("/api/v1/ledger/work", m.action(), body(w, m, words), key).and_then(crate::catalog::confirmed)
+        self.work_post(m, body(w, m, words), key)
+    }
+
+    pub fn work_post(&self, m: Move, body: Value, key: &str) -> Result<Value, RespondError> {
+        self.post_json_keyed("/api/v1/ledger/work", m.action(), body, key).and_then(crate::catalog::confirmed)
     }
 }
 
@@ -300,8 +313,8 @@ mod tests {
     const SUBMITTED: &str = r#"{"ok":true,"status":"submitted"}"#;
 
     fn sent(sends: &mut Sends, client: &Client, w: &Work, m: Move, words: &str, now: f64) -> (bool, String) {
-        let key = sends.key(&w.id, m, words);
-        let result = client.work_move(w, m, words, &key);
+        let (key, body) = sends.sending(w, m, words);
+        let result = client.work_post(m, body, &key);
         sends.answered(&w.id, m, &result, now)
     }
 
@@ -318,7 +331,7 @@ mod tests {
         assert!(!offered(&theirs).contains(&Move::Claim));
         assert!(sends.due(9.9).is_empty(), "nothing goes again before ten seconds");
         assert_eq!(sends.due(10.0), vec![("p-W6".to_string(), Move::Claim, String::new())]);
-        assert_eq!(sends.key("p-W6", Move::Claim, ""), key, "the resend asks about the same send");
+        assert_eq!(sends.sending(&theirs, Move::Claim, "").0, key, "the resend asks about the same send");
         assert_eq!(sent(&mut sends, &client, &theirs, Move::Claim, "", 10.0), (false, "You hold it now.".into()));
         assert!(sends.get("p-W6", Move::Claim).is_none());
     }
@@ -342,7 +355,7 @@ mod tests {
     fn resends_wait_at_least_ten_seconds_up_to_a_minute_for_an_hour() {
         let lost = Err(RespondError::from_status("claim", 504, ""));
         let mut sends = Sends::default();
-        sends.key("p-W6", Move::Park, "later");
+        sends.sending(&work("open", None), Move::Park, "later");
         let mut now = 0.0;
         let mut waits = Vec::new();
         sends.answered("p-W6", Move::Park, &lost, now);
@@ -360,7 +373,7 @@ mod tests {
     #[test]
     fn a_reconnect_asks_again_now() {
         let mut sends = Sends::default();
-        sends.key("p-W6", Move::Claim, "");
+        sends.sending(&work("open", None), Move::Claim, "");
         sends.answered("p-W6", Move::Claim, &Err(RespondError::from_status("claim", 504, "")), 0.0);
         assert!(sends.due(3.0).is_empty());
         sends.wake(3.0);
@@ -371,15 +384,56 @@ mod tests {
     fn an_unreachable_daemon_keeps_an_unconfirmed_send_and_drops_a_fresh_one() {
         let unreached = Err(RespondError { message: "down".into(), code: String::new(), maybe_delivered: false, reply: Value::Null, answered: false, status: 0 });
         let mut sends = Sends::default();
-        sends.key("p-W6", Move::Claim, "");
+        sends.sending(&work("open", None), Move::Claim, "");
         assert_eq!(sends.answered("p-W6", Move::Claim, &unreached, 0.0), (true, "Not done: down".into()));
         assert!(sends.get("p-W6", Move::Claim).is_none());
-        sends.key("p-W6", Move::Claim, "");
+        sends.sending(&work("open", None), Move::Claim, "");
         sends.answered("p-W6", Move::Claim, &Err(RespondError::from_status("claim", 504, "")), 0.0);
         let (failed, note) = sends.answered("p-W6", Move::Claim, &unreached, 10.0);
         assert!(failed && note.starts_with("Agenthail didn't settle it: down."));
         assert_eq!(sends.held("p-W6"), Some(Move::Claim));
         assert!(sends.due(29.9).is_empty() && !sends.due(30.0).is_empty());
+    }
+
+    #[test]
+    fn a_resend_sends_the_first_body_even_if_the_ledger_moved() {
+        let (client, seen) = daemon(replies(&[(504, ""), (200, r#"{"ok":true}"#)]));
+        let mut sends = Sends::default();
+        sent(&mut sends, &client, &work("open", None), Move::Claim, "", 0.0);
+        let first = seen.recv().unwrap().1;
+        let moved = Work { ledger_key: "project:p-2".into(), ..work("open", None) };
+        sent(&mut sends, &client, &moved, Move::Claim, "", 10.0);
+        assert_eq!(seen.recv().unwrap().1, first);
+        assert_eq!(first["projectKey"], "project:p-1");
+    }
+
+    #[test]
+    fn a_reconnect_during_a_resend_asks_again_once_it_returns() {
+        let lost = Err(RespondError::from_status("claim", 504, ""));
+        let w = work("open", None);
+        let mut sends = Sends::default();
+        sends.sending(&w, Move::Claim, "");
+        sends.answered("p-W6", Move::Claim, &lost, 0.0);
+        sends.sending(&w, Move::Claim, "");
+        sends.wake(12.0);
+        sends.answered("p-W6", Move::Claim, &lost, 13.0);
+        assert_eq!(sends.due(13.0).len(), 1, "the reconnect isn't lost to the backoff");
+        sends.sending(&w, Move::Claim, "");
+        sends.answered("p-W6", Move::Claim, &lost, 14.0);
+        assert!(sends.due(14.0 + 39.9).is_empty(), "a reconnect asks once, then the backoff resumes");
+    }
+
+    #[test]
+    fn a_held_send_is_known_by_its_key_until_it_settles() {
+        let w = work("open", None);
+        let mut sends = Sends::default();
+        let (key, _) = sends.sending(&w, Move::Comment, "hi");
+        assert_eq!(sends.held_key("p-W6", Move::Comment), None, "a send in flight isn't held yet");
+        sends.answered("p-W6", Move::Comment, &Err(RespondError::from_status("comment", 504, "")), 0.0);
+        assert_eq!(sends.held_key("p-W6", Move::Comment), Some(key.as_str()));
+        sends.answered("p-W6", Move::Comment, &Ok(json!({"ok": true})), 10.0);
+        assert_eq!(sends.held_key("p-W6", Move::Comment), None, "a dialog opened on it can tell it settled");
+        assert_ne!(sends.sending(&w, Move::Comment, "hi").0, key, "a later send is a new one");
     }
 }
 
