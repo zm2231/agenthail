@@ -43,6 +43,12 @@ pub fn moved() {
     WAITING.with_borrow_mut(Waiting::moved);
 }
 
+pub fn keeping(s: &mut App, step: impl FnOnce(&mut App)) {
+    let waiting = WAITING.take();
+    step(s);
+    WAITING.set(waiting);
+}
+
 pub fn listed(s: &mut App) {
     if let Some(reference) = WAITING.with_borrow_mut(Waiting::listed) {
         open(s, &reference);
@@ -72,11 +78,16 @@ pub fn found(s: &mut App, found: Found) {
     if !WAITING.with_borrow_mut(|w| w.answered(found.ask)) {
         return;
     }
-    match found.result {
-        Ok(row) => match link::resolve(&s.sessions, &row.id).map(str::to_string) {
-            Some(id) => crate::over::open_session(s, &id),
-            None => crate::over::search::open_read(s, row),
-        },
-        Err(message) => s.ov.notice = Some(message),
+    let mut row = match found.result {
+        Ok(row) => row,
+        Err(message) => {
+            s.ov.notice = Some(message);
+            return;
+        }
+    };
+    row.id = feed::composer::current(&s.rekeyed, &row.id).to_string();
+    match link::resolve(&s.sessions, &row.id).map(str::to_string) {
+        Some(id) => crate::over::open_session(s, &id),
+        None => crate::over::search::open_read(s, row),
     }
 }

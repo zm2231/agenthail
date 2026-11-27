@@ -417,7 +417,7 @@ pub fn drain(s: &mut App) -> bool {
     if let crate::Screen::Project(key) = &s.screen
         && s.ov.d.project(key).is_none()
     {
-        crate::over::go(s, crate::Screen::Now);
+        crate::link::keeping(s, |s| crate::over::go(s, crate::Screen::Now));
         changed = true;
     }
     let gone = match &s.ov.projects.sheet {
