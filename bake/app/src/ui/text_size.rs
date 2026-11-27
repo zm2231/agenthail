@@ -2,14 +2,14 @@ use std::cell::RefCell;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
 
-use feed::look::{self as fl, Change, View};
+use feed::look::{self as fl, Change};
 use feed::prefs::Failure;
 
 use crate::App;
 
 const WRITE_AFTER: Duration = Duration::from_secs(1);
 
-type Wrote = Result<View, Failure>;
+type Wrote = Result<(), Failure>;
 
 #[derive(Default)]
 struct State {
@@ -38,7 +38,7 @@ pub fn step(s: &mut App, steps: Option<i32>) {
 }
 
 pub fn pump(s: &mut App) -> bool {
-    let (due, wrote, latest, newer) = STATE.with_borrow_mut(|st| {
+    let (due, wrote, latest) = STATE.with_borrow_mut(|st| {
         if st.tx.is_none() {
             let (tx, rx) = channel();
             st.tx = Some(tx);
@@ -56,16 +56,16 @@ pub fn pump(s: &mut App) -> bool {
         if st.due.is_none() && !st.writing && due.is_none() {
             st.latest = None;
         }
-        (due.zip(st.tx.clone()), wrote, st.latest, st.due.is_some())
+        (due.zip(st.tx.clone()), wrote, st.latest)
     });
-    crate::look::hold_text_scale(latest);
-    let changed = !wrote.is_empty();
-    for result in wrote {
-        match result {
-            Ok(view) if !newer && due.is_none() => crate::look::take_view(crate::look::ticket(), view),
-            Ok(_) => {}
-            Err(failure) => s.ov.notice = Some(format!("Couldn't save the text size: {}", failure.message)),
-        }
+    let failure = wrote.into_iter().find_map(Result::err);
+    let changed = failure.is_some();
+    match (&failure, latest) {
+        (Some(_), None) => crate::look::release_text_scale(),
+        _ => crate::look::hold_text_scale(latest),
+    }
+    if let Some(failure) = failure {
+        s.ov.notice = Some(format!("Couldn't save the text size: {}", failure.message));
     }
     let Some((scale, tx)) = due else { return changed };
     let Some(client) = s.client.clone() else {
@@ -74,8 +74,7 @@ pub fn pump(s: &mut App) -> bool {
     };
     let device = crate::look::device();
     std::thread::spawn(move || {
-        let result = client.ui_change(fl::device_class(), &device, &Change::text_scale(scale, &device));
-        let _ = tx.send(result);
+        let _ = tx.send(client.ui_change(fl::device_class(), &device, &Change::text_scale(scale, &device)).map(drop));
     });
     changed
 }

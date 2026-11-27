@@ -283,6 +283,14 @@ impl Picture {
     }
 }
 
+pub fn release_text_scale() {
+    STATE.with_borrow_mut(|s| {
+        s.held_scale = None;
+        relook(s);
+        s.generation += 1;
+    });
+}
+
 fn relook(s: &mut State) {
     if let Some(v) = &s.view {
         s.look = if s.increased { Look::with_increased_contrast(v) } else { Look::from_view(v) };
