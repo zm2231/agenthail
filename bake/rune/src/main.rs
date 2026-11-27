@@ -1,6 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
-use std::time::Duration;
 
 use feed::blocks::{AgentEntry, Block, Kind, Work};
 use feed::source::{Live, Message};
@@ -36,6 +35,7 @@ struct App {
     live: Option<Receiver<Message>>,
     status: String,
     applied: usize,
+    wake: Option<f64>,
 }
 
 fn load_replay(path: &str, speed: f64) -> Replay {
@@ -65,6 +65,7 @@ fn init() -> App {
         live: None,
         status: "connecting".into(),
         applied: 0,
+        wake: None,
     };
     if let Some(path) = value("--replay").or_else(|| std::env::var("BAKE_REPLAY").ok()) {
         let speed = value("--speed").and_then(|s| s.parse().ok()).unwrap_or(1.0);
@@ -106,6 +107,14 @@ fn rebuild(s: &mut App) {
     s.revs.extend(revs);
 }
 
+fn soon(wake: &mut Option<f64>, tx: &mut Tx) {
+    let due = tx.clock() + 0.016;
+    if wake.is_none_or(|armed| tx.clock() >= armed || armed > due + 0.001) {
+        *wake = Some(due);
+        tx.wake_at(due);
+    }
+}
+
 fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     let mut changed = false;
     if let Some(replay) = &mut s.replay {
@@ -124,7 +133,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         if replay.next >= replay.lines.len() {
             s.status = "replay finished".into();
         } else {
-            tx.wake_after(Duration::from_millis(16));
+            soon(&mut s.wake, tx);
         }
     }
     if let Some(rx) = &s.live {
@@ -138,7 +147,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 Message::CaughtUp => {}
             }
         }
-        tx.wake_after(Duration::from_millis(16));
+        soon(&mut s.wake, tx);
     }
     if changed {
         rebuild(s);
