@@ -228,6 +228,14 @@ struct SessionOperationsTest {
         let start = StubProtocol.bodies.first?["nativeQueue"] as? [String: Any]
         check(started && start?["queueAction"] as? String == "start" && start?["queuedSubmissionId"] == nil, "start next lets Codex choose")
 
+        reset([(200, empty), (200, two)])
+        let loading = Task { await controller.reload(api) }
+        for _ in 0..<100 where !controller.busy { await Task.yield() }
+        check(controller.busy, "the first load is still running when the change is heard")
+        await controller.refresh(api)
+        await loading.value
+        check(StubProtocol.bodies.count == 2 && controller.items.map(\.id) == ["q1", "q2"], "a queue change heard during a load lists the queue again after it")
+
         controller.reset(sessionID: "T")
         check(controller.items.isEmpty && !controller.loaded && controller.sessionID == "T", "switching sessions clears the queue")
     }

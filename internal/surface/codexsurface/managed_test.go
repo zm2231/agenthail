@@ -533,6 +533,22 @@ func TestCodexManagedStreamForwardsGoalAndContextNotificationsForItsThread(t *te
 	}
 }
 
+func TestCodexManagedStreamForwardsQueueChangesForItsThread(t *testing.T) {
+	fake := startManagedCodex(t, nil)
+	fake.AddThread(codextest.Thread{ID: "thread"})
+	fake.Load("thread")
+	session := managedRolloutSession(t, `{"type":"session_meta","payload":{"id":"thread"}}`)
+	session.TranscriptOffsetSet = true
+	events := streamManagedState(t, isolatedManagedRuntime(t), fake, session, func() {
+		fake.Notify("thread/queue/changed", map[string]any{"threadId": "other"})
+		fake.Notify("thread/queue/changed", map[string]any{"threadId": "thread"})
+		fake.Notify("thread/goal/cleared", map[string]any{"threadId": "thread"})
+	}, func(events []surface.StreamEvent) bool { return len(events) >= 2 })
+	if len(events) != 2 || events[0].Kind != surface.StreamKindNativeQueue || events[1].Kind != "goal" {
+		t.Fatalf("events=%+v, want one queue change for the thread, then its goal", events)
+	}
+}
+
 func TestCodexManagedInterruptTargetsOnlyTheConfirmedTurn(t *testing.T) {
 	running := map[string]any{"id": "turn-a", "status": map[string]any{"type": "inProgress"}}
 	for _, test := range []struct {

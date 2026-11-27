@@ -188,6 +188,10 @@ enum SessionLifecycleCopy {
     }
 }
 
+enum NativeQueueEvent {
+    static let changed = "native.queue.changed"
+}
+
 enum SessionOperationAvailability {
     static func fork(_ session: SessionState) -> Bool { session.surface == "codex" && !session.isReadOnly }
     static func nativeQueue(_ session: SessionState) -> Bool { session.surface == "codex" }

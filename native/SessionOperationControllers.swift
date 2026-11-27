@@ -12,6 +12,7 @@ final class NativeQueueController: ObservableObject {
     @Published var error: String?
     private(set) var sessionID: String?
     private var generation: UInt64 = 0
+    private var stale = false
     private let keys: ActionRetryKeys
 
     init(keys: ActionRetryKeys) {
@@ -28,22 +29,42 @@ final class NativeQueueController: ObservableObject {
         nextCursor = nil
         loaded = false
         busy = false
+        stale = false
         error = nil
     }
 
     func reload(_ api: AgenthailAPI?) async {
-        await fetch(api, cursor: nil)
+        await load(api, cursor: nil)
     }
 
     func loadMore(_ api: AgenthailAPI?) async {
         guard let cursor = nextCursor else { return }
+        await load(api, cursor: cursor)
+    }
+
+    /// Lists the queue again after it changed; asked while a load or an edit
+    /// runs, it lists it once that finishes.
+    func refresh(_ api: AgenthailAPI?) async {
+        if busy {
+            stale = true
+        } else {
+            await reload(api)
+        }
+    }
+
+    private func load(_ api: AgenthailAPI?, cursor: String?) async {
+        let started = generation
         await fetch(api, cursor: cursor)
+        if stale, !busy, generation == started {
+            await reload(api)
+        }
     }
 
     private func fetch(_ api: AgenthailAPI?, cursor: String?) async {
         guard let api, let sessionID, !busy else { return }
         let started = generation
         busy = true
+        if cursor == nil { stale = false }
         defer { if generation == started { busy = false } }
         do {
             let page: NativeQueuePage = try await api.nativeQueue(sessionID: sessionID, NativeQueueCommand(queueAction: .list, cursor: cursor), keys: keys)

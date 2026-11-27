@@ -167,6 +167,7 @@ final class AgenthailModel {
     private(set) var busyDelivery = FollowUpAction.queue
     private(set) var decisionsRev: String?
     private(set) var tileOrder: TileOrderState?
+    private(set) var nativeQueueChanges: [String: Int] = [:]
 
     private func adoptParts() {
         hasSnapshot = snapshot != nil
@@ -1516,6 +1517,9 @@ final class AgenthailModel {
             lastEventID = 0
         } else {
             lastEventID = max(lastEventID, event.id)
+        }
+        if event.type == NativeQueueEvent.changed, let entityID = event.entityId {
+            nativeQueueChanges[entityID, default: 0] &+= 1
         }
         if let entityID = event.entityId {
             panes.forEach { $0.sessionChanged(entityID) }

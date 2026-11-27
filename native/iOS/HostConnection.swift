@@ -9,6 +9,7 @@ protocol HostConnectionDelegate: AnyObject {
     func host(_ host: HostConnection, rekeyed retired: [String: String])
     func host(_ host: HostConnection, removedSession id: String, unlisted: Bool)
     func host(_ host: HostConnection, receivedEventFor entity: String)
+    func host(_ host: HostConnection, nativeQueueChangedFor session: String)
     func hostRefreshed(_ host: HostConnection) async
     func hostConnected(_ host: HostConnection)
     func hostAppearanceChanged(_ host: HostConnection)
@@ -373,6 +374,7 @@ final class HostConnection {
         guard !stopped else { return }
         lastEventID = event.type == "stream.reset" ? 0 : max(lastEventID, event.id)
         if let entity = event.entityId { delegate?.host(self, receivedEventFor: entity) }
+        if event.type == NativeQueueEvent.changed, let session = event.entityId { delegate?.host(self, nativeQueueChangedFor: session) }
         if event.type == "ui.changed" { delegate?.hostAppearanceChanged(self) }
         if ExtensionCatalog.refreshes(for: event.type) { delegate?.hostExtensionsChanged(self) }
         if AgentRolesRefresh.refetches(type: event.type, source: event.source) { delegate?.hostAgentRolesChanged(self) }
