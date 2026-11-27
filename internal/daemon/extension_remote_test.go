@@ -3,6 +3,7 @@ package daemon
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -71,6 +72,8 @@ func startRemoteApp(t *testing.T, remote *federationNode, name string) *remoteAp
 		case "/echo":
 			body, _ := io.ReadAll(r.Body)
 			_, _ = w.Write(body)
+		case "/reset":
+			resetAfterReading(w, r)
 		case "/ws":
 			conn, err := upgrader.Upgrade(w, r, nil)
 			if err != nil {
@@ -92,6 +95,20 @@ func startRemoteApp(t *testing.T, remote *federationNode, name string) *remoteAp
 	t.Cleanup(app.server.Close)
 	app.port = app.server.Listener.Addr().(*net.TCPAddr).Port
 	return app
+}
+
+func resetAfterReading(w http.ResponseWriter, r *http.Request) {
+	_, _ = io.Copy(io.Discard, r.Body)
+	conn, _, err := http.NewResponseController(w).Hijack()
+	if err != nil {
+		return
+	}
+	if tlsConn, ok := conn.(*tls.Conn); ok {
+		if tcp, ok := tlsConn.NetConn().(*net.TCPConn); ok {
+			_ = tcp.SetLinger(0)
+		}
+	}
+	_ = conn.Close()
 }
 
 func cookieValue(cookie *http.Cookie, err error) string {
@@ -139,6 +156,10 @@ func newRemoteExtensionFixture(t *testing.T) *remoteExtensionFixture {
 			var body map[string]string
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			f.built.Store(&remoteBuild{body: body, key: r.Header.Get(actionIdempotencyHeader)})
+			if body["message"] == "reset" {
+				resetAfterReading(w, r)
+				return
+			}
 			w.Header().Set(hosts.ResponseHeader, "1")
 			if body["message"] == "refuse" {
 				writeAPIError(w, http.StatusConflict, "extensions_off", "Extensions are off on this host.")
@@ -436,6 +457,62 @@ func TestHistoryUndoAndBuildingReachAPairedHost(t *testing.T) {
 	}
 	if unknown := f.local.request(t, http.MethodPost, "/api/v1/extensions/build?host=nowhere", map[string]string{"message": "x"}); unknown.Code != http.StatusNotFound || !strings.Contains(unknown.Body.String(), "host_not_found") {
 		t.Fatalf("an unknown host answered %d %s", unknown.Code, unknown.Body)
+	}
+}
+
+func TestAWriteThatMayHaveReachedAPairedHostIsNotReportedAsNotSent(t *testing.T) {
+	f := newRemoteExtensionFixture(t)
+	pagePort, mountPort := f.ports(t)
+	errorCode := func(t *testing.T, status int, body string) string {
+		t.Helper()
+		var answer struct {
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(body), &answer); err != nil {
+			t.Fatalf("answer %d is not an API error: %s", status, body)
+		}
+		return answer.Error.Code
+	}
+	page := func(t *testing.T, port int, method, path string) (int, string) {
+		t.Helper()
+		request, _ := http.NewRequest(method, fmt.Sprintf("http://127.0.0.1:%d%s", port, path), strings.NewReader("x"))
+		request.AddCookie(&http.Cookie{Name: webSessionCookieName, Value: f.session.Value})
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, _ := io.ReadAll(response.Body)
+		return response.StatusCode, string(body)
+	}
+
+	before := len(f.board.seen())
+	if status, body := page(t, pagePort, http.MethodPost, "/reset"); status != http.StatusGatewayTimeout || errorCode(t, status, body) != "host_outcome_unknown" || len(f.board.seen()) == before {
+		t.Fatalf("a page post the host read before resetting answered %d %s", status, body)
+	}
+	if status, body := page(t, pagePort, http.MethodGet, "/reset"); status != http.StatusServiceUnavailable || errorCode(t, status, body) != "host_unreachable" {
+		t.Fatalf("a page read the host reset answered %d %s", status, body)
+	}
+	f.notes.server.Close()
+	if status, body := page(t, mountPort, http.MethodPost, "/echo"); status != http.StatusServiceUnavailable || errorCode(t, status, body) != "host_unreachable" {
+		t.Fatalf("a page post whose connection was refused answered %d %s", status, body)
+	}
+
+	reset := f.local.request(t, http.MethodPost, "/api/v1/extensions/build?host=vps", map[string]string{"message": "reset"})
+	if reset.Code != http.StatusGatewayTimeout || errorCode(t, reset.Code, reset.Body.String()) != "host_outcome_unknown" || f.built.Load() == nil {
+		t.Fatalf("a build the host read before resetting answered %d %s", reset.Code, reset.Body)
+	}
+	_ = f.remote.server.Listener.Close()
+	f.remote.server.CloseClientConnections()
+	if read := f.local.request(t, http.MethodGet, "/api/v1/extensions/history?host=vps", nil); read.Code != http.StatusServiceUnavailable || errorCode(t, read.Code, read.Body.String()) != "host_unreachable" {
+		t.Fatalf("a read from a closed host answered %d %s", read.Code, read.Body)
+	}
+	f.built.Store(nil)
+	refused := f.local.request(t, http.MethodPost, "/api/v1/extensions/build?host=vps", map[string]string{"message": "a board"})
+	if refused.Code != http.StatusServiceUnavailable || errorCode(t, refused.Code, refused.Body.String()) != "host_unreachable" || f.built.Load() != nil {
+		t.Fatalf("a build to a closed host answered %d %s", refused.Code, refused.Body)
 	}
 }
 

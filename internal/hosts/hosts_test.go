@@ -2,9 +2,11 @@ package hosts
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -149,6 +151,43 @@ func TestClientTreatsIntermediaryAnswerAsUnanswered(t *testing.T) {
 	var notSent NotSentError
 	if !errors.As(err, &unanswered) || unanswered.Status != http.StatusBadGateway || errors.As(err, &notSent) {
 		t.Fatalf("err=%v, want UnansweredError and not NotSentError", err)
+	}
+}
+
+func TestClientLeavesAResetAfterTheRequestWasWrittenUnknown(t *testing.T) {
+	allowLoopback(t)
+	var received atomic.Int32
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(ResponseHeader, "h0123456789ab")
+		if r.URL.Path == "/api/v1/version" {
+			_, _ = w.Write([]byte(currentVersion))
+			return
+		}
+		_, _ = io.Copy(io.Discard, r.Body)
+		received.Add(1)
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return
+		}
+		if tcp, ok := conn.(*tls.Conn).NetConn().(*net.TCPConn); ok {
+			_ = tcp.SetLinger(0)
+		}
+		_ = conn.Close()
+	}))
+	defer server.Close()
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	client, err := NewClient("https://example.com:"+strconv.Itoa(server.Listener.Addr().(*net.TCPAddr).Port), "127.0.0.1", "ahd_token", ClientOptions{RootCAs: roots})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Version(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Do(context.Background(), http.MethodPost, "/api/v1/actions", nil, []byte(`{}`), nil)
+	var notSent NotSentError
+	if err == nil || errors.As(err, &notSent) || received.Load() == 0 {
+		t.Fatalf("err=%v after the host read the request %d times, want an error that is not NotSentError", err, received.Load())
 	}
 }
 

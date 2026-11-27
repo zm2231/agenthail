@@ -439,6 +439,7 @@ struct NewExtensionSheet: View {
     @State private var message = ""
     @State private var starting = false
     @State private var failure: String?
+    @State private var buildKey = ExtensionBuildKey()
 
     var body: some View {
         VStack(alignment: .leading, spacing: DesktopSpace.m) {
@@ -463,6 +464,7 @@ struct NewExtensionSheet: View {
         }
         .padding(DesktopSpace.xl)
         .frame(width: 480)
+        .onChange(of: message) { buildKey.reset() }
     }
 
     private func start() async {
@@ -470,10 +472,12 @@ struct NewExtensionSheet: View {
         starting = true
         defer { starting = false }
         do {
-            let created = try await api.buildExtension(message.trimmingCharacters(in: .whitespacesAndNewlines), host: target.host)
+            let created = try await api.buildExtension(message.trimmingCharacters(in: .whitespacesAndNewlines), host: target.host, idempotencyKey: buildKey.current())
+            buildKey.reset()
             dismiss()
             if let id = created.session?.id { started(id) }
         } catch {
+            buildKey.failed(error)
             failure = error.localizedDescription
         }
     }
