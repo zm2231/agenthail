@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::catalog::{Client, RespondError, confirmed};
+use crate::composer::Delivered;
 use crate::derive::world::{Coordinator, ProjectRecord};
 
 type Outcome<T> = std::result::Result<T, RespondError>;
@@ -190,6 +191,15 @@ pub fn host_labels<'a>(hosts: impl Iterator<Item = (&'a str, &'a str)>) -> std::
             (id.to_string(), label)
         })
         .collect()
+}
+
+pub fn lead_sent(lead: &str, delivered: &Delivered) -> String {
+    match delivered {
+        Delivered::Queued(_) => format!("Queued for {lead}; it goes when {lead} is free."),
+        Delivered::QueuedUntilAnswer(_) => format!("Queued for {lead}; it goes once {lead}'s waiting question is answered."),
+        Delivered::Unconfirmed => format!("Sent to {lead}, but Agenthail hasn't confirmed it arrived. Check before sending again."),
+        _ => format!("Sent to {lead}."),
+    }
 }
 
 pub fn lead_session_id(c: &Coordinator) -> Option<String> {
@@ -633,8 +643,8 @@ impl Client {
         lead(self.action("coordinator-set", payload).and_then(confirmed)?)
     }
 
-    pub fn lead_send(&self, project: &str, message: &str) -> Outcome<()> {
-        self.action("coordinator-send", json!({"project": project, "message": message, "author": "person"})).and_then(confirmed).map(drop)
+    pub fn lead_send(&self, project: &str, message: &str) -> Outcome<Delivered> {
+        Ok(Delivered::read(&self.action("coordinator-send", json!({"project": project, "message": message, "author": "person"}))?))
     }
 
     pub fn lead_clear(&self, project: &str) -> Outcome<()> {

@@ -33,6 +33,9 @@ impl Job {
         if let Job::Clean { session, ignored } = self {
             return c.work_clean(session, ignored).map(|w| (w.outcome(), w.cleanup != "removed"));
         }
+        if let Job::Message { project, lead, text } = self {
+            return c.lead_send(project, text).map(|d| (projects::lead_sent(lead, &d), d == feed::composer::Delivered::Unconfirmed));
+        }
         let message = match self {
             Job::Add { path, title, host } => c.project_add(path, title, host).map(|a| a.notice()),
             Job::Rename { project, title } => c.project_rename(project, title).map(|_| format!("Renamed to {title}.")),
@@ -42,7 +45,7 @@ impl Job {
             Job::ClearLead { project, name } => c.lead_clear(project).map(|_| format!("{name} has no lead now.")),
             Job::StartLead { surface, folder, host, name, project, replace } => c.lead_start(surface, folder, host, name, *replace).map(|l| format!("@{} leads {project}; its first message starts it.", l.name)),
             Job::SetLead { session, replace } => c.lead_set(session, *replace).map(|l| format!("@{} leads {}.", l.name, l.project_root)),
-            Job::Message { project, lead, text } => c.lead_send(project, text).map(|_| format!("Sent to {lead}.")),
+            Job::Message { .. } => Ok(String::new()),
             Job::Clean { .. } => Ok(String::new()),
         }?;
         Ok((message, false))
@@ -312,6 +315,10 @@ fn load_folders(s: &mut App, host: &str) {
 }
 
 fn close_sheet(s: &mut App) {
+    let id = s.ov.projects.sheet_id;
+    if s.ov.projects.confirm.as_ref().is_some_and(|(_, _, from)| *from == Some(id)) {
+        s.ov.projects.confirm = None;
+    }
     s.ov.projects.sheet = None;
     s.ov.projects.picking = None;
     s.ov.projects.error = None;
@@ -356,7 +363,7 @@ fn settled(s: &mut App, job: Job, from_sheet: Option<u64>, result: Result<(Strin
     }
     if let Job::Message { project, text, .. } = &job {
         s.ov.projects.sending_to.remove(project);
-        if result.is_ok() && s.ov.projects.lead_drafts.get(project).is_some_and(|d| d.text.trim() == text) {
+        if matches!(result, Ok((_, false))) && s.ov.projects.lead_drafts.get(project).is_some_and(|d| d.text.trim() == text) {
             s.ov.projects.lead_drafts.remove(project);
         }
     }

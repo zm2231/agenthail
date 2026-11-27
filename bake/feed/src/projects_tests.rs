@@ -389,7 +389,8 @@ fn a_newer_order_seen_while_a_write_is_out_is_taken_once_the_write_lands() {
 fn an_action_the_daemon_only_took_is_not_reported_as_done() {
     let submitted = r#"{"ok":true,"status":"submitted"}"#;
     let (client, _seen) = daemon(replies(&[(202, submitted); 4]));
-    for e in [client.project_remove("p1").unwrap_err(), client.lead_send("p1", "hi").unwrap_err(), client.lead_set("s1", false).unwrap_err(), client.work_clean("s1", &[]).unwrap_err()] {
+    assert_eq!(client.lead_send("p1", "hi").unwrap(), Delivered::Unconfirmed);
+    for e in [client.project_remove("p1").unwrap_err(), client.lead_set("s1", false).unwrap_err(), client.work_clean("s1", &[]).unwrap_err()] {
         assert!(e.maybe_delivered && e.code == "submitted", "{e:?}");
     }
 }
@@ -467,4 +468,15 @@ fn a_lead_starts_where_chosen_or_on_the_one_computer_left() {
     assert_eq!(both.lead_place("gone"), None, "with a choice left, nothing is picked for you");
     let one = two("unreachable");
     assert_eq!(one.lead_place("h2::p1").map(|c| c.host.id.as_str()), Some("h1"), "the one computer left is used and shown");
+}
+
+#[test]
+fn a_message_to_a_lead_says_whether_it_arrived_or_waits() {
+    let (client, _seen) = daemon(replies(&[
+        (200, r#"{"ok":true,"result":{"evidence":"delivered","status":"sent","sessionId":"s1"},"started":true}"#),
+        (200, r#"{"ok":true,"result":{"evidence":"queued","queueId":4}}"#),
+        (200, r#"{"ok":true,"result":{"evidence":"queued","queueId":5,"waitingOn":{"kind":"ask"}}}"#),
+    ]));
+    let notes: Vec<String> = (0..3).map(|_| lead_sent("@lead", &client.lead_send("p1", "hi").unwrap())).collect();
+    assert_eq!(notes, vec!["Sent to @lead.", "Queued for @lead; it goes when @lead is free.", "Queued for @lead; it goes once @lead's waiting question is answered."]);
 }
