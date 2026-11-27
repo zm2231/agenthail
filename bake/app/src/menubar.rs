@@ -14,7 +14,7 @@ const WARNING: &[u8] = include_bytes!("../assets/menubar-warning.png");
 pub struct Bar {
     tray: Option<Tray>,
     app: Option<AppHandle<App>>,
-    shown: Option<(MenuBar, Link)>,
+    shown: Option<(MenuBar, Link, Option<&'static str>)>,
     keys: Option<MenuState>,
     warning: bool,
 }
@@ -37,7 +37,7 @@ pub fn install(app: rune::App<App>) -> rune::App<App> {
     let handle = app.handle();
     let picks = handle.clone();
     let spec = match icon(ICON) {
-        Ok(icon) => TraySpec::new("com.agenthail.app", "Agenthail", icon).tooltip("Agenthail").menu(tray_items(&MenuBar::default(), Link::Connecting)),
+        Ok(icon) => TraySpec::new("com.agenthail.app", "Agenthail", icon).tooltip("Agenthail").menu(tray_items(&MenuBar::default(), Link::Connecting, None)).menu_on_primary_click(true),
         Err(error) => {
             eprintln!("agenthail: no menu bar icon: {error}");
             return app;
@@ -83,13 +83,14 @@ pub fn warn(s: &mut App) {
 pub fn refresh(s: &mut App) {
     let bar = MenuBar::build(&s.ov.d, &s.ov.needs);
     let link = Link::of(&s.status);
-    if s.bar.shown.as_ref().is_some_and(|(b, l)| *b == bar && *l == link) {
+    let note = crate::notify::menu_note(s);
+    if s.bar.shown.as_ref().is_some_and(|(b, l, n)| *b == bar && *l == link && *n == note) {
         return;
     }
     if let Some(tray) = &s.bar.tray {
-        tray.set_menu(tray_items(&bar, link));
+        tray.set_menu(tray_items(&bar, link, note));
     }
-    s.bar.shown = Some((bar, link));
+    s.bar.shown = Some((bar, link, note));
     s.bar.keys = None;
     sync_keys(s);
 }
@@ -99,17 +100,18 @@ pub fn sync_keys(s: &mut App) {
     if s.bar.keys == Some(state) {
         return;
     }
-    if let (Some(app), Some((bar, _))) = (&s.bar.app, &s.bar.shown) {
+    if let (Some(app), Some((bar, ..))) = (&s.bar.app, &s.bar.shown) {
         let _ = app.set_menu(dock_items(bar).into_iter().chain(keys::menu_items(state)));
     }
     s.bar.keys = Some(state);
 }
 
 fn show_link(tray: &Tray, link: Link) -> bool {
-    let (art, tip) = if link.warns() { (WARNING, link.label()) } else { (ICON, "Agenthail") };
+    let (art, tip, said) = if link.warns() { (WARNING, link.label(), "Agenthail unavailable") } else { (ICON, "Agenthail", "Agenthail") };
     match icon(art).and_then(|i| tray.set_icon(i).map_err(|e| e.to_string())) {
         Ok(()) => {
             tray.set_tooltip(tip);
+            tray.set_accessibility_label(said);
             true
         }
         Err(error) => {
@@ -119,8 +121,12 @@ fn show_link(tray: &Tray, link: Link) -> bool {
     }
 }
 
-fn tray_items(bar: &MenuBar, link: Link) -> Vec<TrayItem> {
-    let mut items = vec![TrayItem::action("status", link.label()).enabled(false), TrayItem::Separator];
+fn tray_items(bar: &MenuBar, link: Link, note: Option<&str>) -> Vec<TrayItem> {
+    let mut items = vec![TrayItem::action("status", link.label()).enabled(false)];
+    if let Some(note) = note {
+        items.extend([TrayItem::action("notifications-off", note).enabled(false), TrayItem::action("notification-settings", "Turn On Notifications…")]);
+    }
+    items.push(TrayItem::Separator);
     for (i, (title, rows)) in bar.sections().into_iter().enumerate() {
         items.push(TrayItem::action(format!("section-{i}"), title).enabled(false));
         items.extend(rows.iter().map(|r| TrayItem::action(menubar::item_id(&r.target), r.label.clone())));
@@ -181,6 +187,7 @@ fn on_event(app: &AppHandle<App>, event: TrayEvent) {
             "open" => app.open(),
             "quit" => app.quit(),
             "settings" => crate::settings::open(),
+            "notification-settings" => crate::open_settings(feed::notify::NOTIFICATION_SETTINGS),
             "new-session" => {
                 app.open();
                 app.update(|s, tx| {

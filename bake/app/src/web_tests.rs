@@ -14,7 +14,7 @@ fn now() -> OffsetDateTime {
 fn signed_in() -> Web {
     let mut web = Web::new();
     assert!(web.sign_in_due(now()));
-    web.signed(Ok(session("2026-11-26T22:00:00Z")));
+    web.signed(Ok(session("2026-11-26T22:00:00Z")), now());
     web
 }
 
@@ -44,7 +44,7 @@ fn a_failed_sign_in_waits_for_reload_and_then_tries_again() {
     let mut web = Web::new();
     assert!(web.sign_in_due(now()));
     assert!(!web.sign_in_due(now()), "one request at a time");
-    web.signed(Err("refused".into()));
+    web.signed(Err("refused".into()), now());
     assert!(web.failed());
     assert!(!web.sign_in_due(now()), "no retry loop after a failure");
     web.reload();
@@ -66,16 +66,16 @@ fn reload_signs_in_afresh_and_opens_the_page_again() {
 fn a_failed_renewal_keeps_a_page_whose_cookie_still_works() {
     let mut web = Web::new();
     open(&mut web, A, true);
-    let soon = (OffsetDateTime::now_utc() + time::Duration::minutes(30)).format(&Rfc3339).unwrap();
+    let soon = (now() + time::Duration::minutes(30)).format(&Rfc3339).unwrap();
     web.cookie = Some(session(&soon));
-    assert!(web.sign_in_due(OffsetDateTime::now_utc()));
-    web.signed(Err("daemon restarting".into()));
+    assert!(web.sign_in_due(now()));
+    web.signed(Err("daemon restarting".into()), now());
     assert_eq!(web.phase(), Phase::Shown);
-    assert!(!web.sign_in_due(OffsetDateTime::now_utc()), "waits a minute before trying again");
+    assert!(!web.sign_in_due(now()), "waits a minute before trying again");
     web.renew_at = Some(Instant::now());
-    assert!(web.sign_in_due(OffsetDateTime::now_utc()));
+    assert!(web.sign_in_due(now()));
     web.cookie = Some(session("2026-11-26T09:00:00Z"));
-    web.signed(Err("daemon down".into()));
+    web.signed(Err("daemon down".into()), now());
     assert!(web.failed(), "an expired cookie can't keep the page");
 }
 
@@ -84,7 +84,7 @@ fn renewing_the_cookie_keeps_the_open_page() {
     let mut web = signed_in();
     open(&mut web, A, true);
     web.pages.get_mut(A).unwrap().cookie_set = Some("v".into());
-    web.signed(Ok(WebSession { value: "v2".into(), ..session("2026-11-27T22:00:00Z") }));
+    web.signed(Ok(WebSession { value: "v2".into(), ..session("2026-11-27T22:00:00Z") }), now());
     assert!(web.pages[A].opened && web.pages[A].ready);
     assert_ne!(web.pages[A].cookie_set.as_deref(), Some("v2"), "the new cookie is handed over on the next pump, without loading again");
 }
@@ -172,7 +172,7 @@ fn an_unclear_check_signs_in_afresh_only_for_a_page_waiting_to_open() {
     web.checked(B, &cookie.value, Err("the page's port answered 503".into()));
     assert!(web.cookie.is_some(), "the open page keeps its cookie meanwhile");
     assert!(web.sign_in_due(now()), "a fresh sign-in stands in for the unclear check");
-    web.signed(Err("daemon down".into()));
+    web.signed(Err("daemon down".into()), now());
     assert_eq!(web.pages[A].phase, Phase::Shown, "a failed sign-in with a working cookie keeps the page");
     web.renew_at = None;
     web.remint = false;
@@ -199,7 +199,7 @@ fn a_forgotten_cookie_signs_in_again_and_reopens_every_page() {
     assert_eq!(web.phase(), Phase::SigningIn);
     assert!(web.check_due(Some(A)).is_none(), "no check while there is no cookie");
     assert!(web.sign_in_due(now()));
-    web.signed(Ok(session("2026-11-26T23:00:00Z")));
+    web.signed(Ok(session("2026-11-26T23:00:00Z")), now());
     assert!(web.verified_for("v", A), "the fresh cookie opens the page");
 }
 

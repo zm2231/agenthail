@@ -238,3 +238,13 @@ fn the_daemon_posts_only_while_its_desktop_notifications_are_on() {
     assert!(!daemon_posts(&home));
     std::fs::remove_dir_all(&home).unwrap();
 }
+
+#[test]
+fn permission_reads_like_the_mac_app() {
+    assert_eq!(Permission::Allowed.note(), None);
+    assert_eq!(Permission::Off.note().map(|n| n.0), Some("Notifications are off for Agenthail"));
+    assert!(Permission::Off.note().unwrap().1.contains("System Settings"));
+    assert!(Permission::NotAsked.note().is_some() && Permission::Unavailable.note().is_some());
+    assert!(Permission::Off.warns());
+    assert!(![Permission::Allowed, Permission::NotAsked, Permission::Unavailable].iter().any(|p| p.warns()));
+}

@@ -9,6 +9,7 @@ pub mod search;
 pub mod settings;
 pub mod catalog;
 pub mod complete;
+pub mod connect;
 pub mod create;
 pub mod decisions;
 pub mod composer;

@@ -239,7 +239,7 @@ impl Web {
         due
     }
 
-    pub fn signed(&mut self, result: Result<WebSession, String>) {
+    pub fn signed(&mut self, result: Result<WebSession, String>, now: OffsetDateTime) {
         self.signing = false;
         match result {
             Ok(cookie) => {
@@ -249,7 +249,7 @@ impl Web {
                 self.cookie = Some(cookie);
                 self.renew_at = None;
             }
-            Err(_) if self.cookie.as_ref().is_some_and(|c| !expired(c, OffsetDateTime::now_utc())) => self.renew_at = Some(Instant::now() + RENEW_RETRY),
+            Err(_) if self.cookie.as_ref().is_some_and(|c| !expired(c, now)) => self.renew_at = Some(Instant::now() + RENEW_RETRY),
             Err(error) => self.failure = Some(format!("Couldn't sign in to the page: {error}")),
         }
     }

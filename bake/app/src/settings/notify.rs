@@ -1,3 +1,4 @@
+use feed::notify::{NOTIFICATION_SETTINGS, Permission, daemon_posts};
 use feed::prefs::{Notify, NotifyStatus, Preference};
 use rune::{El, row};
 use rune_kit::{Button, ButtonVariant, ControlSize};
@@ -31,6 +32,16 @@ fn desktop(s: &Prefs, status: &NotifyStatus) -> El {
     section("", rows, Some("Agenthail notifies when an agent finishes or fails, and when a message can't be delivered.".into()))
 }
 
+fn own(permission: Permission) -> Option<El> {
+    let (head, how) = permission.note()?;
+    let control = if permission.warns() {
+        Button::new("Open System Settings…").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(|_: &mut Prefs| crate::open_settings(NOTIFICATION_SETTINGS)).build(theme::kit()).key("settings-notify-permission")
+    } else {
+        row()
+    };
+    Some(line(head, Some(how.to_string()), control))
+}
+
 fn preferences(s: &Prefs, list: &[Preference]) -> El {
     let rows = list
         .iter()
@@ -56,6 +67,11 @@ pub fn page(s: &Prefs) -> El {
         None => out = out.child(parts::reading("notification access")),
         Some(Err(f)) => out = out.child(parts::failure(s, f)),
         Some(Ok(st)) => out = out.child(desktop(s, &st.notifications)),
+    }
+    if !std::env::var_os("HOME").is_some_and(|home| daemon_posts(std::path::Path::new(&home)))
+        && let Some(note) = s.permission.and_then(own)
+    {
+        out = out.child(section("", vec![note], None));
     }
     match &s.preferences {
         None => out.child(parts::reading("notification preferences")),

@@ -223,6 +223,31 @@ impl Notified {
     }
 }
 
+pub const NOTIFICATION_SETTINGS: &str = "x-apple.systempreferences:com.apple.Notifications-Settings.extension";
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Permission {
+    Allowed,
+    NotAsked,
+    Off,
+    Unavailable,
+}
+
+impl Permission {
+    pub fn note(self) -> Option<(&'static str, &'static str)> {
+        match self {
+            Permission::Allowed => None,
+            Permission::Off => Some(("Notifications are off for Agenthail", "Turn them on in System Settings › Notifications › Agenthail.")),
+            Permission::NotAsked => Some(("Agenthail hasn't asked to notify you yet", "macOS asks the first time Agenthail has something to tell you.")),
+            Permission::Unavailable => Some(("This copy of Agenthail can't post notifications", "Notifications come from the Agenthail app. Open it from Applications.")),
+        }
+    }
+
+    pub fn warns(self) -> bool {
+        self == Permission::Off
+    }
+}
+
 pub fn daemon_posts(home: &Path) -> bool {
     #[derive(Deserialize)]
     struct Config {

@@ -50,7 +50,8 @@ pub enum Bg {
     Attach(ui::attach::Done),
     Crew(ui::subagents::Done),
     Complete(ui::complete::Done),
-    Error(String),
+    Down(feed::connect::Problem),
+    Started(Result<(), feed::connect::Problem>),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -100,6 +101,7 @@ pub struct App {
     confirming: HashMap<String, Confirm>,
     pub queued: HashMap<String, Vec<(u64, Delivered)>>,
     snapshots: u64,
+    link: ui::connect::Link,
     queue_rows: Vec<feed::catalog::QueueRow>,
     pub stopping: HashSet<String>,
     pub queue: HashMap<String, Vec<feed::queue::Queued>>,
@@ -209,6 +211,7 @@ fn init() -> App {
         confirming: HashMap::new(),
         queued: HashMap::new(),
         snapshots: 0,
+        link: Default::default(),
         queue_rows: Vec::new(),
         stopping: HashSet::new(),
         queue: HashMap::new(),
@@ -274,36 +277,7 @@ fn init() -> App {
         app.fixtures = Some(Fixtures { dir, streams: HashMap::new(), speed: 1.0 });
         app.status = "fixture".into();
     } else {
-        match Client::from_env() {
-            Ok(client) => {
-                let tx = app.outbox.clone();
-                let c = client.clone();
-                std::thread::spawn(move || {
-                    loop {
-                        let message = match c.snapshot() {
-                            Ok(snap) => {
-                                if tx.send(Bg::SendSettings(snap.busy_delivery, snap.rekeyed, snap.queue)).is_err() || tx.send(Bg::DecisionsRev(snap.decisions_rev)).is_err() {
-                                    return;
-                                }
-                                Bg::Snapshot(snap.updated_at, snap.sessions)
-                            }
-                            Err(error) => Bg::Error(error.to_string()),
-                        };
-                        if tx.send(message).is_err() {
-                            return;
-                        }
-                        std::thread::sleep(Duration::from_secs(2));
-                    }
-                });
-                let (poke, poked) = channel();
-                watch_overview(client.clone(), app.outbox.clone(), poked);
-                app.overview_poke = Some(poke);
-                over::inbox::start(&mut app.ov.inbox, &client);
-                notify::start(&mut app);
-                app.client = Some(client);
-            }
-            Err(error) => app.status = error.to_string(),
-        }
+        ui::connect::start(&mut app);
     }
     if app.ov.persist {
         over::layout::load(&mut app);
@@ -989,6 +963,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 }
                 s.now = OffsetDateTime::now_utc();
                 s.status = "live".into();
+                ui::connect::up(s);
                 if let Some(id) = s.selected.clone() {
                     fetch_requests(s, &id);
                     if ui::queue::wants(s, &id) {
@@ -1083,7 +1058,8 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Body(id, generation, item, version, result) => history::take_body(s, id, generation, item, version, result),
             Bg::Attach(done) => ui::attach::done(s, done, tx),
             Bg::Complete(done) => ui::complete::done(s, done),
-            Bg::Error(error) => s.status = format!("daemon: {error}"),
+            Bg::Down(problem) => ui::connect::down(s, problem),
+            Bg::Started(result) => ui::connect::started(s, result),
             Bg::Looked(id, seq, result) => ui::gone::looked(s, &id, seq, result),
             Bg::Fixed(id, seq, fix, result) => ui::gone::fixed(s, &id, seq, fix, result),
         }
