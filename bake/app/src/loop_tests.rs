@@ -469,6 +469,30 @@ fn an_unconfirmed_change_that_expires_shows_the_daemon_value_in_the_same_poll() 
 }
 
 #[test]
+fn a_second_unconfirmed_change_keeps_its_own_expiry_after_the_first_lapses() {
+    if !isolated("a_second_unconfirmed_change_keeps_its_own_expiry_after_the_first_lapses") {
+        return;
+    }
+    let dir = Dir::new("expire-two");
+    let mut rt = unframed(app(sessions(&["a", "b"]), &dir));
+    rt.frame(DT);
+    let hold = feed::derive::live::EXPECT_HOLD;
+    let now = std::time::Instant::now();
+    rt.update(|s, _| {
+        assert!(s.ov.live.patch("a", feed::menu::Patch::Alias(Some("one".into())), now - hold + std::time::Duration::from_millis(40)));
+        assert!(s.ov.live.patch("b", feed::menu::Patch::Alias(Some("two".into())), now - hold + std::time::Duration::from_millis(400)));
+    });
+    rt.frame(DT);
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    let clock = rt.state.clock + 0.08;
+    rt.update_if(|s, tx| crate::poll(s, clock, tx));
+    assert_eq!(rt.state.ov.d.session("a").and_then(|x| x.alias.clone()), None);
+    let next = crate::wake::next(crate::wake::Window::Main).expect("a deadline is armed");
+    let left = next.saturating_duration_since(std::time::Instant::now()).as_secs_f64();
+    assert!(left > 0.2 && left < 0.4, "the second change's expiry is armed, in {left}");
+}
+
+#[test]
 fn a_stream_that_goes_quiet_catches_up_at_its_deadline_and_redraws() {
     if !isolated("a_stream_that_goes_quiet_catches_up_at_its_deadline_and_redraws") {
         return;
@@ -512,17 +536,33 @@ fn a_layout_that_cannot_be_written_retries_on_a_wait_not_in_a_loop() {
     first.ov.persist = true;
     let mut rt = unframed(first);
     rt.frame(DT);
-    let started = std::time::Instant::now();
-    let mut polls = 0;
-    while started.elapsed() < std::time::Duration::from_millis(800) {
-        if crate::wake::MAIN.rung() {
-            rt.frame(DT);
-            polls += 1;
+    let mut last = std::time::Instant::now();
+    let mut run = |rt: &mut Runtime<App>, for_ms: u64| {
+        let mut polls = 0;
+        let started = std::time::Instant::now();
+        while started.elapsed() < std::time::Duration::from_millis(for_ms) {
+            let since = last.elapsed().as_secs_f64();
+            let due = rt.wake_deadline().is_some_and(|at| at <= rt.state.clock + since);
+            if crate::wake::MAIN.rung() || due {
+                let reach = rt.wake_deadline().filter(|_| due).map_or(0.0, |at| at - rt.state.clock + 0.001);
+                rt.frame(since.max(reach).max(DT));
+                last = std::time::Instant::now();
+                polls += 1;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
         }
-        std::thread::sleep(std::time::Duration::from_millis(2));
-    }
+        polls
+    };
+    let mut polls = run(&mut rt, 800);
     assert!(crate::over::layout::failure().is_some(), "the failure shows");
-    assert!(polls <= 3 && rung(&rings) <= 3, "a failing write waits before trying again: {polls} polls, {} rings", rung(&rings));
+    assert!(polls <= 3, "a failing write waits before trying again: {polls} polls, {} rings", rung(&rings));
+    polls += run(&mut rt, 1900);
+    assert!(crate::over::layout::failure().is_some(), "the first retry fails the same way");
+    std::fs::remove_file(home.join("Agenthail")).unwrap();
+    polls += run(&mut rt, 2600);
+    assert!(crate::over::layout::failure().is_none(), "the retry after the wait saves and clears the warning");
+    assert!(home.join("Agenthail/layout.json").exists());
+    assert!(polls <= 12, "retries stay paced: {polls} polls");
 }
 
 #[test]

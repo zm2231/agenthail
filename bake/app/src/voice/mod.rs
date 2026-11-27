@@ -8,7 +8,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
-use std::time::Duration;
 
 use feed::catalog::Client;
 #[cfg(target_os = "macos")]
@@ -102,6 +101,7 @@ pub struct Win {
     gone: Arc<AtomicBool>,
     clock: f64,
     save_after: f64,
+    minute: time::OffsetDateTime,
     wake: crate::wake::Wake,
     #[cfg(target_os = "macos")]
     page_spent: bool,
@@ -146,6 +146,7 @@ impl Win {
             gone: Arc::new(AtomicBool::new(false)),
             clock: 0.0,
             save_after: 0.0,
+            minute: time::OffsetDateTime::now_utc(),
             wake: crate::wake::Wake::default(),
             #[cfg(target_os = "macos")]
             page_spent: false,
@@ -498,7 +499,17 @@ fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
             w.save_after = t + SAVE_RETRY_SECS;
         }
     }
-    w.wake.after(tx, Duration::from_millis(100));
+    let now = time::OffsetDateTime::now_utc();
+    if now >= feed::wake::next_minute(w.minute) {
+        w.minute = now;
+        changed = true;
+    }
+    let minute = t + (feed::wake::next_minute(now) - now).as_seconds_f64();
+    let save = w.call.trail.changed.then_some(w.save_after);
+    let due = [w.call.next_due(), save, Some(minute)].into_iter().flatten().min_by(f64::total_cmp);
+    if let Some(at) = due {
+        w.wake.at(tx, at.max(t));
+    }
     trace("poll", w);
     changed
 }

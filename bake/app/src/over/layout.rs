@@ -222,7 +222,8 @@ fn writer() -> &'static Sender<Write> {
                     }
                 }
                 let failed = written.clone().err();
-                if std::mem::replace(&mut *FAILED.lock().expect("layout lock"), failed.clone()) != failed {
+                let moved = std::mem::replace(&mut *FAILED.lock().expect("layout lock"), failed.clone()) != failed;
+                if moved || failed.is_some() {
                     crate::wake::poke();
                 }
                 if let Some(done) = done {

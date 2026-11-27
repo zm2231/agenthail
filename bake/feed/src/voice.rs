@@ -640,6 +640,18 @@ impl Call {
         self.drain()
     }
 
+    pub fn next_due(&self) -> Option<f64> {
+        if self.closed {
+            return None;
+        }
+        let setup = self.setup.filter(|_| !self.ready && !self.setup_stuck).map(|(stage, since)| since + stage.limit());
+        let refresh = (!self.refreshing && (self.visible || self.active())).then_some(self.next_refresh);
+        let beat = self.beat_due.filter(|_| self.attempt.is_some() && self.beating.is_none());
+        let grace = (self.host_has_call && self.attempt.is_some()).then_some(self.last_beat + HEARTBEAT_GRACE_SECS);
+        let lost = self.lost_at.filter(|_| !self.audio_connected).map(|at| at + RECOVERY_SECS);
+        [setup, refresh, beat, grace, lost].into_iter().flatten().min_by(f64::total_cmp)
+    }
+
     pub fn call(&mut self) -> Vec<Effect> {
         if !self.can_call() {
             return Vec::new();

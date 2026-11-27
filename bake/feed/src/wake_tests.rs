@@ -142,8 +142,8 @@ fn std_channels(lines: &[(usize, &str)]) -> Vec<usize> {
 
 #[test]
 fn the_check_finds_every_way_to_make_a_plain_channel() {
-    let text = "use std::sync::mpsc::{Receiver, Sender, channel};\nlet (a, b) = std::sync::mpsc::channel();\nuse std::sync::mpsc::{\n    Receiver,\n    sync_channel,\n};\nuse std::sync::mpsc::Receiver;\nlet (c, d) = crate::wake::channel();\n#[cfg(test)]\nmod tests {\n    let x = mpsc::channel();\n}\nuse std::sync::mpsc::channel;\nuse std::sync::mpsc::channel as plain;\nuse std::sync::{mpsc, Arc};\nlet (e, f) = mpsc::channel::<u8>();\nuse std::sync::mpsc::*;\nuse std::sync::mpsc as queue;\n";
-    assert_eq!(std_channels(&outside_tests(text)), vec![1, 2, 3, 13, 14, 16, 17, 18]);
+    let text = "use std::sync::mpsc::{Receiver, Sender, channel};\nlet (a, b) = std::sync::mpsc::channel();\nuse std::sync::mpsc::{\n    Receiver,\n    sync_channel,\n};\nuse std::sync::mpsc::Receiver;\nlet (c, d) = crate::wake::channel();\n#[cfg(test)]\nmod tests {\n    let x = mpsc::channel();\n}\nuse std::sync::mpsc::channel;\nuse std::sync::mpsc::channel as plain;\nuse std::sync::{mpsc, Arc};\nlet (e, f) = mpsc::channel::<u8>();\nuse std::sync::mpsc::*;\nuse std::sync::mpsc as queue;\nuse std::sync::{mpsc as q, Arc};\n";
+    assert_eq!(std_channels(&outside_tests(text)), vec![1, 2, 3, 13, 14, 16, 17, 18, 19]);
 }
 
 #[test]

@@ -610,12 +610,12 @@ pub fn drain(s: &mut App) -> bool {
         changed = true;
         settled(s, done);
     }
-    if let Some(at) = s.ov.live.next_expiry() {
-        crate::wake::due(at);
-    }
     if s.ov.live.expire() {
         s.sessions = s.ov.live.sessions().to_vec();
         changed = true;
+    }
+    if let Some(at) = s.ov.live.next_expiry() {
+        crate::wake::by(at);
     }
     if let Some((id, key)) = s.menus.chip.clone()
         && !chips_for(s, &id).iter().any(|c| c.key == key && c.changeable)
