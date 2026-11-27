@@ -29,17 +29,21 @@ func watchedCodex(t *testing.T, threadID string) *Codex {
 	return watchedCodexWaking(t, threadID, func() {})
 }
 
+// watchedCodexWaking returns once the watch has attached: the app-server sends
+// a status change only to connections open when it happens.
 func watchedCodexWaking(t *testing.T, threadID string, changed func()) *Codex {
 	t.Helper()
 	codex := surfacetest.InDaemon(NewCodex("1"))
 	codex.noteLoaded(&codexRuntimes{managed: &managedCodexClient{}, managedLoaded: map[string]bool{threadID: true}})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+	var attached atomic.Bool
 	go func() {
 		defer close(done)
-		codex.NotifyCatalog(ctx, changed)
+		codex.NotifyCatalog(ctx, func() { attached.Store(true); changed() })
 	}()
 	t.Cleanup(func() { cancel(); <-done })
+	testkit.Eventually(t, "the watch to attach", 5*time.Second, attached.Load)
 	return codex
 }
 
