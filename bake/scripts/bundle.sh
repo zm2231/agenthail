@@ -4,10 +4,9 @@ name=$1
 bin=$2
 out=$3
 app="$out/$name.app"
-scheme=agenthail-bake
-if [ "${AGENTHAIL_RELEASE:-}" = true ]; then scheme=agenthail; fi
 links=
 if [ "$(basename "$bin")" = agenthail-rune ]; then
+	scheme=$("$bin" --link-scheme)
 	links="<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLName</key><string>com.agenthail.bake.$name.link</string><key>CFBundleURLSchemes</key><array><string>$scheme</string></array></dict></array>"
 fi
 mkdir -p "$app/Contents/MacOS"

@@ -1,4 +1,6 @@
-use crate::catalog::Session;
+use serde_json::Value;
+
+use crate::catalog::{Client, Session, enc};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Link {
@@ -40,6 +42,23 @@ pub fn matches(session: &Session, reference: &str) -> bool {
 
 pub fn resolve<'a>(sessions: &'a [Session], reference: &str) -> Option<&'a str> {
     sessions.iter().find(|x| matches(x, reference)).map(|x| x.id.as_str())
+}
+
+pub const NOT_FOUND: &str = "No session matches that link.";
+
+impl Client {
+    pub fn session_for_link(&self, reference: &str) -> Result<String, String> {
+        match self.get_coded(&format!("/api/v1/session?id={}&limit=1", enc(reference))) {
+            Ok(v) => canonical(&v).ok_or_else(|| NOT_FOUND.to_string()),
+            Err((404, _)) => Err(NOT_FOUND.to_string()),
+            Err((_, message)) if !message.is_empty() => Err(format!("Couldn't open the session in that link: {message}")),
+            Err((code, _)) => Err(format!("Couldn't open the session in that link: status code {code}")),
+        }
+    }
+}
+
+pub fn canonical(detail: &Value) -> Option<String> {
+    detail["session"]["id"].as_str().map(str::trim).filter(|id| !id.is_empty()).map(String::from)
 }
 
 fn decode(part: &str) -> Option<String> {
@@ -112,6 +131,25 @@ mod tests {
     fn test_builds_answer_only_their_own_scheme() {
         assert_eq!(Link::parse("agenthail-bake://new", "agenthail-bake"), Some(Link::NewSession));
         assert_eq!(Link::parse("agenthail://new", "agenthail-bake"), None);
+    }
+
+    #[test]
+    fn an_unlisted_reference_takes_the_id_the_daemon_returns() {
+        assert_eq!(canonical(&serde_json::json!({"session": {"id": "019a-thread", "name": "Fix"}})), Some("019a-thread".into()));
+        assert_eq!(canonical(&serde_json::json!({"session": {"id": "  "}})), None);
+        assert_eq!(canonical(&serde_json::json!({"session": {}})), None);
+        assert_eq!(canonical(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn the_daemon_resolves_an_unlisted_alias_to_its_id() {
+        let (client, paths) = crate::mock::daemon(vec![
+            (200, r#"{"session": {"id": "019a-thread"}}"#.into()),
+            (404, r#"{"error": {"code": "not_found"}}"#.into()),
+        ]);
+        assert_eq!(client.session_for_link("@optimizer"), Ok("019a-thread".into()));
+        assert_eq!(paths.recv().unwrap().0, "/api/v1/session?id=%40optimizer&limit=1");
+        assert_eq!(client.session_for_link("@nobody"), Err(NOT_FOUND.into()));
     }
 
     #[test]

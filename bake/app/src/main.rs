@@ -1,5 +1,6 @@
 mod history;
 mod icons;
+mod instance;
 mod link;
 mod look;
 mod menubar;
@@ -57,6 +58,7 @@ pub enum Bg {
     Started(Result<(), feed::connect::Problem>),
     LeadReplacements(Vec<feed::catalog::LeadReplacement>),
     Notice(ui::notice::Done),
+    Link(link::Found),
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -1038,6 +1040,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::DecisionsRev(rev) => over::inbox::rev_seen(s, &rev),
             Bg::LeadReplacements(list) => ui::notice::take_replacements(s, list),
             Bg::Notice(done) => ui::notice::take(s, done),
+            Bg::Link(found) => link::found(s, found),
             Bg::Sent(id, pending, retry, result) => take_sent(s, id, pending, retry, result),
             Bg::Stopped(id, result) => {
                 let id = feed::composer::current(&s.rekeyed, &id).to_string();
@@ -1215,8 +1218,12 @@ fn main() {
         voice::run_alone();
         return;
     }
+    if args().iter().any(|a| a == "--link-scheme") {
+        println!("{}", link::SCHEME);
+        return;
+    }
     rune::url_schemes([link::SCHEME]);
-    if !rune::single_instance(link::INSTANCE) {
+    if !rune::single_instance(link::INSTANCE) || !instance::only_copy(link::LOCK) {
         return;
     }
     let mut app = rune::App::new(AppSpec::<App> {
