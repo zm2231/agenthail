@@ -320,3 +320,17 @@ fn a_page_that_is_loading_wakes_for_its_slow_note_and_its_unreached_failure() {
     assert!(armed.contains(&(since + SLOW)), "{armed:?}");
     assert!(armed.contains(&(since + UNREACHED)), "{armed:?}");
 }
+
+#[test]
+fn a_load_that_starts_during_the_pump_is_woken_for_in_the_same_poll() {
+    let mut web = Web::new();
+    open(&mut web, A, true);
+    web.pages.get_mut(A).unwrap().loading_since = None;
+    send(&web, A, Load::Started(format!("{A}report")));
+    crate::wake::begin(crate::wake::Window::Main);
+    let before = Instant::now();
+    web.pump(None);
+    let after = Instant::now();
+    let armed = crate::wake::pending(crate::wake::Window::Main);
+    assert!(armed.iter().any(|at| *at >= before + SLOW && *at <= after + SLOW), "the slow note's wake comes from this poll's load: {armed:?}");
+}
