@@ -1583,6 +1583,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= ui::notice::poll(s);
     changed |= ui::tabs::expire(s);
     ui::window::open_shown(s);
+    ui::window::note_frames(s);
     switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &ui::paste::draft(s));

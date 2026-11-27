@@ -306,6 +306,12 @@ fn spec() -> AppSpec<App> {
     }
 }
 
+pub fn note_frames(s: &mut App) {
+    for o in &mut s.windows.open {
+        o.note_normal();
+    }
+}
+
 pub fn open_shown(s: &mut App) {
     let Some(shared) = SHARED.with_borrow(Clone::clone) else { return };
     for (id, restored) in take_to_show(s) {
