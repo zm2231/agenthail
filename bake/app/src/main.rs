@@ -12,8 +12,6 @@ mod voice;
 mod web;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
@@ -34,7 +32,8 @@ pub enum Bg {
     DecisionsRev(String),
     Changed(feed::watch::Wants),
     Reopened,
-    LedgerChanged(String),
+    LedgerChanged(String, std::time::Instant),
+    LedgersReopened,
     SessionNews,
     Item(String, WorkItem),
     Overview(Box<Fetched>),
@@ -183,10 +182,10 @@ pub enum Ask {
     Read(String),
 }
 
-fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, streamed: Arc<AtomicBool>) {
+fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: feed::watch::Stream) {
     std::thread::spawn(move || {
         let first = std::time::Instant::now();
-        while !streamed.load(Ordering::Acquire) && first.elapsed() < feed::watch::LEDGERS_FIRST {
+        while !stream.settled() && first.elapsed() < feed::watch::LEDGERS_FIRST {
             std::thread::sleep(Duration::from_millis(50));
         }
         let mut known = feed::derive::live::Known::default();
@@ -199,12 +198,14 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, streamed:
                 if std::mem::take(&mut reset) {
                     known = Default::default();
                 }
+                if let Some(at) = stream.settles_at() {
+                    std::thread::sleep(at.saturating_duration_since(std::time::Instant::now()));
+                }
                 due = false;
                 last = Some(std::time::Instant::now());
-                let trusted = streamed.load(Ordering::Acquire);
-                let message = match feed::derive::live::fetch(&client, &known, trusted) {
+                let message = match feed::derive::live::fetch(&client, &known, stream.settles_at()) {
                     Ok(fetched) => {
-                        due = known.learn(&fetched, trusted);
+                        due = known.learn(&fetched);
                         Bg::Overview(Box::new(fetched))
                     }
                     Err(error) => Bg::OverviewError(error.to_string()),
@@ -236,9 +237,9 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, streamed:
             reads.sort();
             reads.dedup();
             for id in reads {
-                let (started, trusted) = (std::time::Instant::now(), streamed.load(Ordering::Acquire));
+                let started = std::time::Instant::now();
                 let result = feed::derive::live::ledger(&client, &id, &known);
-                known.read(&id, started, trusted, &result);
+                known.read(&id, started, &result);
                 if tx.send(Bg::Ledger(id, started, result)).is_err() {
                     return;
                 }
@@ -1089,9 +1090,8 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             }
             Bg::Changed(wants) => changed_elsewhere(s, wants),
             Bg::Reopened => reopened(s),
-            Bg::LedgerChanged(key) => {
-                ask_overview(s, Ask::Ledger(key, std::time::Instant::now()));
-            }
+            Bg::LedgerChanged(key, at) => ask_overview(s, Ask::Ledger(key, at)),
+            Bg::LedgersReopened => ask_overview(s, Ask::Refresh),
             Bg::SessionNews => ask_overview(s, Ask::Refresh),
             Bg::Item(id, item) => {
                 s.items.insert(id, item);

@@ -336,19 +336,18 @@ fn sessions_are_ordered_by_catalog_position_not_by_whose_clock_is_later() {
 }
 
 #[test]
-fn an_overview_skips_ledgers_the_stream_covers_and_retries_failures_later() {
+fn an_overview_skips_ledgers_read_after_their_stream_settled_and_retries_failures_later() {
     let mut known = super::live::Known::default();
+    let settled = Some(Instant::now() - std::time::Duration::from_secs(1));
     let mut f = Fetched { asked: vec!["found".into(), "gone".into()], ..fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(Vec::new())), ("h2::p", Err("status code 404".into()))]) };
     f.recorded.actors.insert("found".into(), Actor::default());
-    assert!(!known.learn(&f, true));
-    assert!(known.skips_ledger("p", true), "a read ledger waits for the stream to say it changed");
-    assert!(!known.skips_ledger("p", false), "without the stream every overview reads it");
-    assert!(known.skips_ledger("h2::p", true) && known.skips_ledger("h2::p", false), "a failed read waits a minute");
-    assert!(!known.skips_ledger("q", true));
+    assert!(!known.learn(&f));
+    assert!(known.skips_ledger("p", settled), "a read ledger waits for the stream to say it changed");
+    assert!(!known.skips_ledger("p", None), "without the stream every overview reads it");
+    assert!(!known.skips_ledger("p", Some(Instant::now())), "a stream that settled after the read, after a reconnect say, can't vouch for it");
+    assert!(known.skips_ledger("h2::p", settled) && known.skips_ledger("h2::p", None), "a failed read waits a minute");
+    assert!(!known.skips_ledger("q", settled));
     assert!(known.skips_actor("found") && known.skips_actor("gone") && !known.skips_actor("new"));
-    let mut late = super::live::Known::default();
-    late.learn(&f, false);
-    assert!(!late.skips_ledger("p", true), "a ledger read before its stream opened is read again");
 }
 
 fn keyed(started: Instant) -> Fetched {
@@ -360,10 +359,10 @@ fn keyed(started: Instant) -> Fetched {
 #[test]
 fn a_ledger_that_changes_during_an_overview_read_is_read_again() {
     let mut known = super::live::Known::default();
-    let f = keyed(Instant::now());
+    let f = keyed(Instant::now() - std::time::Duration::from_millis(10));
     assert_eq!(known.changed("shared:x", Instant::now()), Change::Nothing, "nothing is known yet; the read in flight checks for itself");
-    assert!(known.learn(&f, true), "the read began before the change, so it goes again");
-    assert!(!known.skips_ledger("p", true));
+    assert!(known.learn(&f), "the read began before the change, so it goes again");
+    assert!(!known.skips_ledger("p", Some(f.started)));
     assert_eq!(known.changed("shared:x", Instant::now()), Change::Overview, "a wanted ledger that isn't held needs the overview");
 }
 
@@ -372,11 +371,12 @@ fn a_change_heard_after_the_read_landed_reads_that_ledger_alone() {
     let mut known = super::live::Known::default();
     let heard_at = Instant::now();
     let started = heard_at - std::time::Duration::from_millis(10);
-    assert!(!known.learn(&keyed(started), true));
+    assert!(!known.learn(&keyed(started)));
     assert_eq!(known.changed("shared:x", heard_at), Change::Read("p".into()), "a change that happened during the read, processed after it");
     assert_eq!(known.changed("shared:x", started - std::time::Duration::from_millis(1)), Change::Nothing, "a change older than the read is already in it");
     assert_eq!(known.changed("project:elsewhere", Instant::now()), Change::Nothing);
     let read = Ok(Ledger { rows: vec![work("p-W1", "open")], actors: HashMap::new(), asked: vec!["missing".into()] });
-    known.read("p", Instant::now(), true, &read);
-    assert!(known.skips_ledger("p", true) && known.skips_actor("missing"), "a single read also records its failed lookups");
+    let at = Instant::now();
+    known.read("p", at, &read);
+    assert!(known.skips_ledger("p", Some(at)) && known.skips_actor("missing"), "a single read also records its failed lookups");
 }

@@ -98,6 +98,7 @@ pub struct Inbox {
     pub lead_handling: Vec<LeadHandled>,
     pub notes: Vec<String>,
     pub read: Vec<String>,
+    pub failed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -224,8 +225,12 @@ impl Decision {
     }
 }
 
+fn older(error: &anyhow::Error) -> bool {
+    error.to_string().contains("404")
+}
+
 fn unread(name: &str, error: &anyhow::Error) -> String {
-    if error.to_string().contains("404") {
+    if older(error) {
         format!("{name} runs an older Agenthail without the Inbox.")
     } else {
         format!("{name}'s decisions couldn't be read, so they aren't shown.")
@@ -338,8 +343,12 @@ impl Client {
         let own = hosts["host"]["id"].as_str().unwrap_or_default().to_string();
         match local {
             Ok(page) => inbox.add(page, "", "", &own),
-            Err(e) => inbox.notes.push(unread("This computer", &e)),
+            Err(e) => {
+                inbox.failed |= !older(&e);
+                inbox.notes.push(unread("This computer", &e));
+            }
         }
+        inbox.failed |= !listed;
         if !listed {
             inbox.notes.push("Couldn't list the paired computers, so their decisions aren't shown.".into());
         }
@@ -359,7 +368,10 @@ impl Client {
         for (id, name, page) in pages {
             match page {
                 Ok(page) => inbox.add(page, &id, &name, &own),
-                Err(e) => inbox.notes.push(unread(&name, &e)),
+                Err(e) => {
+                    inbox.failed |= !older(&e);
+                    inbox.notes.push(unread(&name, &e));
+                }
             }
         }
         inbox.settle();
@@ -557,6 +569,7 @@ mod tests {
         inbox.settle();
         let hosts: Vec<&str> = inbox.decisions.iter().map(|d| d.host.as_str()).collect();
         assert_eq!(hosts, ["", "h2"]);
+        assert!(!inbox.failed, "an older or offline computer is not a failed read");
     }
 
     #[test]
@@ -573,6 +586,7 @@ mod tests {
         let ids: Vec<&str> = inbox.decisions.iter().map(|d| d.session_id.as_str()).collect();
         assert_eq!(ids, ["h2::remote"]);
         assert_eq!(inbox.notes, ["This computer's decisions couldn't be read, so they aren't shown.", "stuck's decisions couldn't be read, so they aren't shown."]);
+        assert!(inbox.failed, "a failed read is tried again");
     }
 
     #[test]

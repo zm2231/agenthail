@@ -2,7 +2,7 @@ fn main() -> anyhow::Result<()> {
     let client = feed::catalog::Client::from_env()?;
     let t = std::time::Instant::now();
     let mut overview = feed::derive::live::Overview::default();
-    overview.refresh(feed::derive::live::fetch(&client, &Default::default(), false)?);
+    overview.refresh(feed::derive::live::fetch(&client, &Default::default(), None)?);
     let fetched = t.elapsed();
     let due = overview.due_tails(&Default::default());
     let results: Vec<_> = std::thread::scope(|scope| {

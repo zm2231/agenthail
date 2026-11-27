@@ -13,6 +13,8 @@ pub const SETTLE: Duration = Duration::from_millis(180);
 pub const OVERVIEW_GAP: Duration = Duration::from_secs(5);
 pub const DECISIONS_GAP: Duration = Duration::from_secs(10);
 pub const LEDGERS_FIRST: Duration = Duration::from_secs(5);
+pub const LEDGERS_SETTLE: Duration = Duration::from_secs(1);
+pub const DECISIONS_RETRY: Duration = Duration::from_secs(30);
 const KEEP: usize = 2000;
 const IDLE: Duration = Duration::from_secs(120);
 
@@ -222,22 +224,38 @@ impl Catalog {
 #[derive(Default)]
 pub struct Ledgers {
     versions: HashMap<String, String>,
-    reopened: bool,
 }
 
 impl Ledgers {
-    pub fn reopened(&mut self) {
-        self.reopened = true;
-    }
-
-    pub fn changed(&mut self, event: &Event) -> Option<String> {
+    pub fn changed(&mut self, event: &Event, settled: bool) -> Option<String> {
         let key = event.data["projectKey"].as_str()?.to_string();
         let version = event.data["version"].as_str().unwrap_or_default().to_string();
         match self.versions.insert(key.clone(), version.clone()) {
             Some(was) if was == version => None,
-            None if !self.reopened => None,
+            None if !settled => None,
             _ => Some(key),
         }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct Stream(std::sync::Arc<std::sync::Mutex<Option<std::time::Instant>>>);
+
+impl Stream {
+    pub fn open(&self) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::time::Instant::now() + LEDGERS_SETTLE);
+    }
+
+    pub fn close(&self) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
+    pub fn settles_at(&self) -> Option<std::time::Instant> {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn settled(&self) -> bool {
+        self.settles_at().is_some_and(|at| std::time::Instant::now() >= at)
     }
 }
 

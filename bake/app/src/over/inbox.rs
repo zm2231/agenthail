@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant};
 
 use feed::brief::Brief;
@@ -69,9 +69,11 @@ pub fn app_build() -> Build {
     }
 }
 
-fn fetch(client: &Client, tx: &Sender<Done>) -> bool {
+fn fetch(client: &Client, tx: &Sender<Done>) -> Option<bool> {
     let started = Instant::now();
-    tx.send(Done::Inbox(started, client.inbox())).is_ok()
+    let inbox = client.inbox();
+    let failed = inbox.failed;
+    tx.send(Done::Inbox(started, inbox)).ok().map(|()| failed)
 }
 
 pub fn start(state: &mut State, client: &Client) {
@@ -84,12 +86,16 @@ pub fn start(state: &mut State, client: &Client) {
     let (client, tx) = (client.clone(), state.tx.clone());
     check_version(&client, &tx);
     std::thread::spawn(move || {
-        while asked.recv().is_ok() {
-            while asked.try_recv().is_ok() {}
-            let started = Instant::now();
-            if !fetch(&client, &tx) {
+        let mut failed = false;
+        loop {
+            let woke = if failed { asked.recv_timeout(feed::watch::DECISIONS_RETRY).map_err(|e| e == RecvTimeoutError::Disconnected) } else { asked.recv().map_err(|_| true) };
+            if woke == Err(true) {
                 return;
             }
+            while asked.try_recv().is_ok() {}
+            let started = Instant::now();
+            let Some(again) = fetch(&client, &tx) else { return };
+            failed = again;
             std::thread::sleep(feed::watch::DECISIONS_GAP.saturating_sub(started.elapsed()));
         }
     });

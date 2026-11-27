@@ -1,10 +1,11 @@
 use std::cell::Cell;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
+use std::time::Instant;
 
 use feed::catalog::Client;
-use feed::watch::{CatalogEvent, Ledgers, Opened, Wants, backoff, wants};
+use feed::watch::{CatalogEvent, Ledgers, Opened, Stream, Wants, backoff, wants};
 
 use crate::Bg;
 
@@ -49,22 +50,32 @@ pub fn events(client: Client, mut after: u64, tx: Sender<Bg>) {
     });
 }
 
-pub fn ledgers(client: Client, tx: Sender<Bg>, streamed: Arc<AtomicBool>) {
+pub fn ledgers(client: Client, tx: Sender<Bg>, stream: Stream) {
     std::thread::spawn(move || {
-        let (mut seen, mut failures) = (Ledgers::default(), 0u32);
+        let (mut seen, mut failures, mut lost) = (Ledgers::default(), 0u32, false);
         loop {
-            let mut gone = false;
-            let result = client.follow_ledgers(|| streamed.store(true, Ordering::Release), |e| {
-                if let Some(key) = seen.changed(&e) {
-                    gone |= tx.send(Bg::LedgerChanged(key)).is_err();
-                }
-                !gone
-            });
-            streamed.store(false, Ordering::Release);
-            seen.reopened();
-            if gone {
+            let gone = Cell::new(false);
+            let result = client.follow_ledgers(
+                || {
+                    stream.open();
+                    if lost && tx.send(Bg::LedgersReopened).is_err() {
+                        gone.set(true);
+                    }
+                },
+                |e| {
+                    if let Some(key) = seen.changed(&e, stream.settled())
+                        && tx.send(Bg::LedgerChanged(key, Instant::now())).is_err()
+                    {
+                        gone.set(true);
+                    }
+                    !gone.get()
+                },
+            );
+            stream.close();
+            if gone.get() {
                 return;
             }
+            lost = true;
             failures = if result.is_ok() { 0 } else { failures + 1 };
             std::thread::sleep(backoff(failures));
         }

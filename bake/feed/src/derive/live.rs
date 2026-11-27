@@ -28,7 +28,6 @@ pub const RETRY: std::time::Duration = std::time::Duration::from_secs(60);
 
 struct Held {
     read_at: Instant,
-    trusted: bool,
     retry: Option<Instant>,
 }
 
@@ -52,7 +51,7 @@ pub struct Known {
 }
 
 impl Known {
-    pub fn learn(&mut self, fetched: &Fetched, trusted: bool) -> bool {
+    pub fn learn(&mut self, fetched: &Fetched) -> bool {
         let key_of = |id: &str| fetched.recorded.projects.iter().find(|p| p.id == id && !p.ledger_key.is_empty()).map_or(id.to_string(), |p| p.ledger_key.clone());
         let mut again = false;
         for (id, result) in &fetched.ledgers {
@@ -63,7 +62,7 @@ impl Known {
                 again = true;
                 continue;
             }
-            self.hold(id, fetched.started, trusted, result.as_ref().ok());
+            self.hold(id, fetched.started, result.as_ref().ok());
         }
         self.wanted = fetched.ledgers.keys().chain(&fetched.held).cloned().collect();
         self.sessions = fetched.recorded.sessions.clone();
@@ -71,16 +70,16 @@ impl Known {
         again
     }
 
-    pub fn read(&mut self, id: &str, started: Instant, trusted: bool, result: &Result<Ledger, String>) {
+    pub fn read(&mut self, id: &str, started: Instant, result: &Result<Ledger, String>) {
         self.opened.insert(id.to_string());
-        self.hold(id, started, trusted, result.as_ref().ok().map(|l| &l.rows));
+        self.hold(id, started, result.as_ref().ok().map(|l| &l.rows));
         if let Ok(l) = result {
             self.asked(&l.asked, &l.actors);
         }
     }
 
-    fn hold(&mut self, id: &str, read_at: Instant, trusted: bool, rows: Option<&Vec<Work>>) {
-        self.ledgers.insert(id.to_string(), Held { read_at, trusted, retry: rows.is_none().then(|| Instant::now() + RETRY) });
+    fn hold(&mut self, id: &str, read_at: Instant, rows: Option<&Vec<Work>>) {
+        self.ledgers.insert(id.to_string(), Held { read_at, retry: rows.is_none().then(|| Instant::now() + RETRY) });
         self.candidates.extend(rows.into_iter().flatten().flat_map(|w| &w.timeline).map(|t| t.actor.clone()));
     }
 
@@ -108,10 +107,10 @@ impl Known {
         &self.sessions
     }
 
-    pub fn skips_ledger(&self, key: &str, streamed: bool) -> bool {
+    pub fn skips_ledger(&self, key: &str, settled: Option<Instant>) -> bool {
         match self.ledgers.get(key) {
             Some(Held { retry: Some(until), .. }) => Instant::now() < *until,
-            Some(Held { trusted, .. }) => streamed && *trusted,
+            Some(Held { read_at, .. }) => settled.is_some_and(|at| *read_at >= at),
             None => false,
         }
     }
@@ -131,13 +130,13 @@ pub struct Ledger {
     pub asked: Vec<String>,
 }
 
-pub fn fetch(client: &Client, known: &Known, streamed: bool) -> Result<Fetched> {
+pub fn fetch(client: &Client, known: &Known, settled: Option<Instant>) -> Result<Fetched> {
     let started = Instant::now();
     let snap = client.get_json("/api/v1/snapshot")?;
     let now = snap["updatedAt"].as_str().and_then(parse_time).unwrap_or_else(OffsetDateTime::now_utc);
     let sessions: Vec<Session> = serde_json::from_value(snap["sessions"].clone()).unwrap_or_default();
     let recent: BTreeSet<String> = sessions.iter().filter(|s| hours(now, &s.last_active) < LEDGER_WINDOW_H).map(|s| s.project_key()).collect();
-    let (held, keys): (Vec<String>, Vec<String>) = snap["projects"].as_array().into_iter().flatten().filter(|p| p["archived"] != json!(true)).filter_map(|p| p["id"].as_str()).filter(|k| recent.contains(*k)).map(String::from).partition(|k| known.skips_ledger(k, streamed));
+    let (held, keys): (Vec<String>, Vec<String>) = snap["projects"].as_array().into_iter().flatten().filter(|p| p["archived"] != json!(true)).filter_map(|p| p["id"].as_str()).filter(|k| recent.contains(*k)).map(String::from).partition(|k| known.skips_ledger(k, settled));
     let ledgers: HashMap<String, Result<Vec<Work>, String>> = std::thread::scope(|scope| {
         let jobs: Vec<_> = keys.iter().map(|k| (k.clone(), scope.spawn(|| rows(client, k, now)))).collect();
         jobs.into_iter().map(|(k, h)| (k, h.join().unwrap_or_else(|_| Err("the fetch stopped".into())))).collect()

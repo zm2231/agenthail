@@ -108,10 +108,10 @@ fn a_snapshot_read_before_events_already_seen_replays_them() {
 fn a_ledger_counts_as_changed_only_when_its_version_moves() {
     let mut l = Ledgers::default();
     let e = |key: &str, v: &str| Event { id: 0, kind: "ledger.changed".into(), data: json!({"projectKey": key, "version": v}) };
-    assert_eq!(l.changed(&e("project:p-1", "v1")), None);
-    assert_eq!(l.changed(&e("project:p-1", "v1")), None);
-    assert_eq!(l.changed(&e("project:p-1", "v2")).as_deref(), Some("project:p-1"));
-    assert_eq!(l.changed(&e("shared:x", "v1")), None);
+    assert_eq!(l.changed(&e("project:p-1", "v1"), false), None);
+    assert_eq!(l.changed(&e("project:p-1", "v1"), true), None);
+    assert_eq!(l.changed(&e("project:p-1", "v2"), true).as_deref(), Some("project:p-1"));
+    assert_eq!(l.changed(&e("shared:x", "v1"), false), None);
 }
 
 #[test]
@@ -153,11 +153,20 @@ fn history_stays_short_once_snapshots_cover_it() {
 }
 
 #[test]
-fn after_a_reconnect_a_ledger_seen_for_the_first_time_counts_as_changed() {
+fn once_the_stream_settles_a_ledger_seen_for_the_first_time_counts_as_changed() {
     let mut l = Ledgers::default();
     let e = |key: &str, v: &str| Event { id: 0, kind: "ledger.changed".into(), data: json!({"projectKey": key, "version": v}) };
-    assert_eq!(l.changed(&e("project:p-1", "v1")), None);
-    l.reopened();
-    assert_eq!(l.changed(&e("project:p-1", "v1")), None);
-    assert_eq!(l.changed(&e("project:p-2", "v1")).as_deref(), Some("project:p-2"));
+    assert_eq!(l.changed(&e("project:p-1", "v1"), false), None, "the opening list only records");
+    assert_eq!(l.changed(&e("project:p-1", "v1"), true), None);
+    assert_eq!(l.changed(&e("project:p-2", "v1"), true).as_deref(), Some("project:p-2"));
+}
+
+#[test]
+fn a_stream_settles_a_moment_after_it_opens_and_not_once_closed() {
+    let s = Stream::default();
+    assert!(!s.settled() && s.settles_at().is_none());
+    s.open();
+    assert!(!s.settled() && s.settles_at().is_some());
+    s.close();
+    assert!(s.settles_at().is_none());
 }

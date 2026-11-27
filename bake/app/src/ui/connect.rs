@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant};
 
@@ -38,10 +38,10 @@ fn attach(s: &mut App, client: Client) {
     let (poke, poked) = channel();
     s.link.poke = Some(poke.clone());
     sessions(client.clone(), s.outbox.clone(), poke, poked);
-    let streamed = Arc::new(AtomicBool::new(false));
-    watch::ledgers(client.clone(), s.outbox.clone(), streamed.clone());
+    let stream = feed::watch::Stream::default();
+    watch::ledgers(client.clone(), s.outbox.clone(), stream.clone());
     let (poke, poked) = channel();
-    crate::watch_overview(client.clone(), s.outbox.clone(), poked, streamed);
+    crate::watch_overview(client.clone(), s.outbox.clone(), poked, stream);
     s.overview_poke = Some(poke);
     crate::over::inbox::start(&mut s.ov.inbox, &client);
     s.client = Some(client);
