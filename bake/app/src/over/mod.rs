@@ -12,6 +12,7 @@ pub mod search;
 mod sessions;
 pub mod ui;
 pub mod work;
+pub mod worksearch;
 
 use rune_kit::Kit;
 use std::collections::{HashMap, HashSet};
@@ -57,6 +58,7 @@ pub struct Over {
     pub search: search::State,
     pub projects: projects::State,
     pub work: work::State,
+    pub worksearch: worksearch::State,
 }
 
 impl Over {
@@ -95,6 +97,7 @@ impl Over {
             search: search::State::default(),
             projects: projects::State::default(),
             work: work::State::default(),
+            worksearch: worksearch::State::default(),
         }
     }
 
@@ -105,6 +108,7 @@ impl Over {
         self.need_ix = self.need_ix.min(needs.len().saturating_sub(1));
         self.needs = needs;
         self.d = d;
+        self.worksearch.keep(&mut self.d);
         self.arrange();
     }
 
@@ -224,6 +228,7 @@ pub fn open_jump(s: &mut App, tx: &mut Tx) {
     s.ov.jump = Some(edit);
     s.ov.jump_ix = (String::new(), 0);
     search::forget_codex(s);
+    worksearch::forget(s);
     tx.focus("jump-input", false);
 }
 

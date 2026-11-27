@@ -453,3 +453,118 @@ fn a_moved_ledger_key_drops_the_ready_count_and_its_old_read_and_follows_the_new
     crate::ui::ready::ledger_changed(&mut rt.state, "new");
     assert_eq!(crate::ui::ready::count(&rt.state, "p1"), 0, "the new key's events refresh it");
 }
+
+fn ledger_api(paths: std::sync::mpsc::Sender<String>) -> String {
+    use std::io::{BufRead, BufReader, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let mut stream = stream.unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let path = line.split_whitespace().nth(1).unwrap_or_default().to_string();
+            loop {
+                let mut header = String::new();
+                if reader.read_line(&mut header).unwrap() == 0 || header.trim_end().is_empty() {
+                    break;
+                }
+            }
+            paths.send(path.clone()).unwrap();
+            let item = |id: &str, title: &str| json!({"projectKey": "shared:z", "projectName": "Zed", "id": id, "title": title, "state": "parked", "updatedAt": "2026-09-01T00:00:00Z", "matched": "title"});
+            let (status, body) = if path.starts_with("/api/v1/ledger/search?q=exp&") {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                (200, json!({"items": [item("z-W1", "Old export")], "truncated": false}))
+            } else if path.starts_with("/api/v1/ledger/search?q=export&") {
+                (200, json!({"items": [item("z-W9", "Parked export")], "truncated": false}))
+            } else if path.starts_with("/api/v1/ledger/search?") {
+                (500, json!({"error": {"code": "internal", "message": "the ledger store is busy"}}))
+            } else if path == "/api/v1/ledger?projectKey=shared%3Az&view=item&id=z-W9" {
+                (200, json!({"item": {"item": {"id": "z-W9", "text": "Parked export", "state": "parked", "type": "task", "priority": "P3"}}}))
+            } else {
+                (404, json!({"error": {"code": "unknown_route", "message": "no"}}))
+            };
+            let body = body.to_string();
+            let _ = write!(stream, "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+        }
+    });
+    base
+}
+
+fn until(rt: &mut Runtime<App>, done: impl Fn(&App) -> bool) {
+    for _ in 0..400 {
+        if done(&rt.state) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        rt.frame(DT);
+    }
+    panic!("timed out");
+}
+
+fn work_found(s: &App) -> Option<Result<Vec<String>, String>> {
+    match crate::over::worksearch::found_for(s)? {
+        Some(Ok(found)) => Some(Ok(found.items.iter().map(|f| f.id.clone()).collect())),
+        Some(Err(e)) => Some(Err(e.clone())),
+        None => None,
+    }
+}
+
+#[test]
+fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() {
+    if !isolated("jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item") {
+        return;
+    }
+    let dir = Dir::new("worksearch");
+    let (tx, paths) = std::sync::mpsc::channel();
+    let mut a = app(sessions(&["a"]), &dir);
+    a.client = Some(feed::catalog::Client::new(&ledger_api(tx), "t"));
+    let mut rt = runtime(a, (1440.0, 900.0));
+    let typed = |rt: &mut Runtime<App>, q: &str| {
+        rt.state.ov.jump = Some(rune::TextEdit::new(q));
+        rt.frame(DT);
+    };
+
+    typed(&mut rt, "e");
+    assert!(work_found(&rt.state).is_none(), "one character doesn't search");
+    typed(&mut rt, "exp");
+    assert!((wake_in(&rt) - 0.2).abs() < 0.02, "the loop wakes when typing settles, in {}", wake_in(&rt));
+    rt.frame(0.1);
+    assert!(paths.try_iter().all(|p| !p.starts_with("/api/v1/ledger")), "no search before typing settles");
+    rt.frame(wake_in(&rt));
+    typed(&mut rt, "export");
+    rt.frame(0.2);
+    until(&mut rt, |s| work_found(s).is_some());
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    rt.frame(DT);
+    assert_eq!(work_found(&rt.state), Some(Ok(vec!["z-W9".to_string()])), "the older, slower search doesn't replace the newer one");
+    let mut asked: Vec<String> = paths.try_iter().filter(|p| p.starts_with("/api/v1/ledger")).collect();
+    asked.sort();
+    assert_eq!(asked, ["/api/v1/ledger/search?q=exp&limit=20", "/api/v1/ledger/search?q=export&limit=20"]);
+    assert!(rt.presented("hit-0").is_some() && rt.presented("hit-1").is_none(), "the one match is listed");
+
+    typed(&mut rt, "broken");
+    rt.frame(0.2);
+    until(&mut rt, |s| work_found(s).is_some());
+    assert_eq!(work_found(&rt.state), Some(Err("the ledger store is busy".to_string())));
+    for _ in 0..20 {
+        rt.frame(0.25);
+    }
+    assert_eq!(paths.try_iter().filter(|p| p.starts_with("/api/v1/ledger")).count(), 1, "a failed search waits for the next keystroke");
+    typed(&mut rt, "broken2");
+    rt.frame(0.2);
+    until(&mut rt, |s| work_found(s).is_some());
+    assert_eq!(paths.try_iter().filter(|p| p.starts_with("/api/v1/ledger")).count(), 1, "the next keystroke retries");
+
+    crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W9");
+    assert!(rt.state.screen == Screen::Work("z-W9".into()));
+    assert!(rt.state.ov.jump.is_none());
+    assert_eq!(crate::over::worksearch::note(&rt.state, "z-W9").as_deref(), Some("Loading this work item…"));
+    until(&mut rt, |s| s.ov.d.work.contains_key("z-W9"));
+    send(&rt, overview(2, sessions(&["a"])));
+    rt.frame(DT);
+    let w = &rt.state.ov.d.work["z-W9"];
+    assert_eq!((w.state.as_str(), w.ledger_key(), w.project.as_str()), ("parked", "shared:z", "shared:z"), "a rebuild keeps the opened item");
+    assert_eq!(crate::over::worksearch::note(&rt.state, "z-W9"), None);
+}

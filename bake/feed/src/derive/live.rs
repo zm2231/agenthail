@@ -248,7 +248,7 @@ pub fn fetch(client: &Client, known: &Known, settled: Option<Instant>) -> Result
     let hosts: Vec<Value> = client
         .get_json("/api/v1/hosts")
         .ok()
-        .map(|hv| std::iter::once(json!({"name": hv["host"]["name"], "state": hv["host"]["state"]})).chain(hv["hosts"].as_array().cloned().unwrap_or_default().into_iter().map(|x| json!({"name": x["name"], "state": x["state"]}))).collect())
+        .map(|hv| std::iter::once(json!({"id": hv["host"]["id"], "name": hv["host"]["name"], "state": hv["host"]["state"]})).chain(hv["hosts"].as_array().cloned().unwrap_or_default().into_iter().map(|x| json!({"id": x["id"], "name": x["name"], "state": x["state"]}))).collect())
         .unwrap_or_default();
     let activity = client.project_activity().ok();
     let activity_missing = activity.is_none();

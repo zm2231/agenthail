@@ -82,6 +82,8 @@ pub struct Meter {
 #[serde(rename_all = "camelCase")]
 pub struct Host {
     #[serde(default)]
+    pub id: String,
+    #[serde(default)]
     pub name: String,
     #[serde(default)]
     pub state: String,

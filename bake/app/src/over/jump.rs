@@ -14,6 +14,7 @@ use crate::App;
 #[derive(Clone)]
 pub enum Pick {
     Target(Target),
+    Found(String, String),
     Codex(Box<Session>),
     Command(Command),
 }
@@ -53,6 +54,7 @@ fn entries(s: &App) -> Vec<Entry> {
     let lead = commands_lead(q, &rows);
     let cmds = rows.into_iter().map(|c| Entry { group: "Commands", title: c.title, status: String::new(), badge: c.shortcut.to_string(), look: Look::Icon(command_icon(c.command)), pick: Some(Pick::Command(c.command)) });
     let mut out: Vec<Entry> = if lead { cmds.chain(hits).collect() } else { hits.chain(cmds).collect() };
+    work_found(s, &mut out, lead);
     if let Some(found) = search::codex_for(s) {
         let group = "Codex history";
         let note = |text: String| Entry { group, title: text, status: String::new(), badge: String::new(), look: Look::Icon(&ah::CLOCK), pick: None };
@@ -81,6 +83,22 @@ fn entries(s: &App) -> Vec<Entry> {
     out
 }
 
+fn work_found(s: &App, out: &mut Vec<Entry>, lead: bool) {
+    let Some(Some(found)) = crate::over::worksearch::found_for(s) else { return };
+    let note = |text: String| Entry { group: "Work", title: text, status: String::new(), badge: String::new(), look: Look::Icon(&icons::TASK), pick: None };
+    let rows: Vec<Entry> = match found {
+        Err(e) => vec![note(e.clone())],
+        Ok(search) => {
+            let listed = |id: &str| out.iter().any(|e| matches!(&e.pick, Some(Pick::Target(Target::Work(x)) | Pick::Found(_, x)) if x == id));
+            let mut rows: Vec<Entry> = s.ov.d.found_rows(search, listed).into_iter().map(|r| Entry { group: "Work", title: r.title, status: r.status, badge: r.badge, look: Look::Avatar(r.avatar), pick: Some(Pick::Found(r.ledger, r.id)) }).collect();
+            rows.extend(search.note().map(note));
+            rows
+        }
+    };
+    let at = feed::worksearch::work_slot(out.iter().map(|e| e.group), lead);
+    out.splice(at..at, rows);
+}
+
 fn query(s: &App) -> &str {
     s.ov.jump.as_ref().map(|e| e.text.as_str()).unwrap_or_default()
 }
@@ -102,6 +120,7 @@ fn picks(s: &App) -> usize {
 fn run(s: &mut App, pick: Pick, tx: &mut Tx) {
     match pick {
         Pick::Target(t) => open_target(s, &t),
+        Pick::Found(ledger, id) => crate::over::worksearch::open(s, &ledger, &id),
         Pick::Codex(x) => search::open_pinned(s, *x),
         Pick::Command(c) => search::run(s, c, tx),
     }

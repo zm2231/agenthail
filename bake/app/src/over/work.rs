@@ -49,7 +49,9 @@ fn tile(i: usize, expected: &str, observed: &str, passed: Option<bool>, k: &Kit)
 
 pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>, main_kit: &Kit) -> El {
     let k = cx.kit();
-    let Some(w) = s.ov.d.work.get(id) else { return col() };
+    let Some(w) = s.ov.d.work.get(id) else {
+        return col().w_full().padding(24.0).children(crate::over::worksearch::note(s, id).map(|n| text(n).font(BODY).color(weak(&k)).wrap()));
+    };
     let project = s.ov.d.project(&w.project).map(|p| p.name.clone()).unwrap_or_default();
     let phase = phase(w);
     let pr = pr(w);
@@ -389,6 +391,7 @@ pub fn drain(s: &mut App) -> bool {
     while let Ok((id, m, result)) = s.ov.work.rx.try_recv() {
         changed = true;
         s.ov.work.acting.remove(&id);
+        crate::over::worksearch::moved(s, &id);
         let note = s.ov.work.sends.answered(&id, m, &result, clock);
         s.ov.work.notes.insert(id, note);
         if result.as_ref().map_or_else(|e| e.maybe_delivered, |_| true) {

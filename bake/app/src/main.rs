@@ -1530,6 +1530,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= over::inbox::drain(s);
     changed |= over::work::drain(s);
     changed |= over::search::drain(s);
+    changed |= over::worksearch::drain(s);
     changed |= notify::tick(s);
     changed |= ui::gone::watch(s);
     changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s) | ui::inspect::drain(s);
@@ -1559,6 +1560,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     menubar::sync_keys(s);
     menubar::warn(s);
     menubar::badge(s);
+    if let Some(due) = over::worksearch::wait(s) {
+        s.wake.after(tx, due);
+    }
     s.wake.after(tx, Duration::from_millis(if busy { 16 } else { 250 }));
     changed
 }
