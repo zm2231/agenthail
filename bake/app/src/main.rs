@@ -221,7 +221,7 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
                 Ask::Refresh => due = true,
                 Ask::Reset => {
                     reads.extend(known.opened());
-                    known = Default::default();
+                    known = known.carry();
                     (due, reset) = (true, true);
                 }
                 Ask::Ledger(key, at) => match known.changed(&key, at) {

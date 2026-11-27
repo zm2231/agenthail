@@ -17,19 +17,24 @@ pub enum Feed {
     Gap(u64),
 }
 
-pub fn events(client: Client, mut after: u64, tx: Sender<Bg>) {
+pub fn events(client: Client, mut after: u64, tx: Sender<Bg>, generation: Arc<AtomicU64>, mine: u64) {
+    let current = move || generation.load(Ordering::Acquire) == mine;
     std::thread::spawn(move || {
         let (mut failures, mut lost) = (0u32, false);
-        loop {
+        while current() {
             let gone = Cell::new(false);
             let result = client.follow(
                 after,
                 || {
-                    if lost {
+                    if lost && current() {
                         gone.set(tx.send(Bg::Reopened).is_err());
                     }
                 },
                 |e| {
+                    if !current() {
+                        gone.set(true);
+                        return false;
+                    }
                     if e.id > 0 {
                         after = after.max(e.id);
                     }

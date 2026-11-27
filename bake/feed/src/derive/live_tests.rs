@@ -442,3 +442,18 @@ fn opening_a_project_the_overview_already_reads_keeps_following_it_after_it_goes
     assert_eq!(opened, ["new", "p"]);
     assert_eq!(known.changed("p", Instant::now()), Change::Read("p".into()), "once out of the overview, its changes still read it");
 }
+
+#[test]
+fn a_reset_keeps_every_opened_project_but_forgets_what_was_read() {
+    let mut known = super::live::Known::default();
+    known.learn(&fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(Vec::new()))]));
+    known.open("p");
+    known.read("old", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: vec!["gone".into()] }));
+    assert_eq!(known.opened(), ["old".to_string()], "only projects outside the overview are read again");
+    let mut fresh = known.carry();
+    let mut opened = fresh.opened();
+    opened.sort();
+    assert_eq!(opened, ["old", "p"], "both stay followed");
+    assert!(!fresh.skips_ledger("p", Some(Instant::now() - std::time::Duration::from_secs(5))) && !fresh.skips_actor("gone"));
+    assert!(fresh.open("p"), "nothing is held any more");
+}

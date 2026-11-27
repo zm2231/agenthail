@@ -78,7 +78,7 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                         if let Some(resumed) = resumed.take() {
                             cursor.store(catalog.seq(), Ordering::Release);
                             watch::catalog(c.clone(), cursor.clone(), resumed, poke.clone(), generation.clone(), 0);
-                            watch::events(c.clone(), snap.event_cursor, tx.clone());
+                            watch::events(c.clone(), snap.event_cursor, tx.clone(), generation.clone(), 0);
                         } else if applied.restart {
                             gap = false;
                             let mine = generation.fetch_add(1, Ordering::AcqRel) + 1;
@@ -86,6 +86,7 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                             let (fresh, resumed) = channel();
                             resume = fresh;
                             watch::catalog(c.clone(), cursor.clone(), resumed, poke.clone(), generation.clone(), mine);
+                            watch::events(c.clone(), snap.event_cursor, tx.clone(), generation.clone(), mine);
                         } else if std::mem::take(&mut gap) {
                             cursor.store(catalog.seq(), Ordering::Release);
                             let _ = resume.send(());

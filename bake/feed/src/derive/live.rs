@@ -114,6 +114,10 @@ impl Known {
         !self.ledgers.contains_key(id)
     }
 
+    pub fn carry(&mut self) -> Known {
+        Known { opened: std::mem::take(&mut self.opened), ..Known::default() }
+    }
+
     pub fn opened(&self) -> Vec<String> {
         self.opened.iter().filter(|id| !self.wanted.contains(*id)).cloned().collect()
     }
