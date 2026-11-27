@@ -894,6 +894,15 @@ struct TranscriptFollowTest {
         guard let anchorIndex = feed.rows.firstIndex(where: { $0.id == anchor }),
               let above = feed.rows[..<anchorIndex].lastIndex(where: { readerTops.top($0.id) != nil })
         else { return expect(false, "a laid-out row sits above the reader's row, \(geometry(scroll))") }
+        // Ordered after Core Animation's commit, so each sample is a frame the reader is shown.
+        var frames = 0
+        let shown = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, 2_000_001) { _, _ in
+            MainActor.assumeIsolated {
+                frames += 1
+                worst = max(worst, abs(place(anchor) - placed))
+            }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), shown, .commonModes)
         for index in 0..<40 {
             feed.rows += rows("Rs\(index)-", 1)
             if index % 8 == 0 { feed.rows[above] = Row(id: feed.rows[above].id, lines: feed.rows[above].lines + 1) }
@@ -901,6 +910,8 @@ struct TranscriptFollowTest {
             worst = max(worst, abs(place(anchor) - placed))
             shifted = max(shifted, abs((readerTops.top(anchor) ?? contentTop) - contentTop))
         }
+        CFRunLoopRemoveObserver(CFRunLoopGetMain(), shown, .commonModes)
+        expect(frames >= 40, "each update reached a frame, \(frames) frames")
         spin(0.4)
         expect(shifted >= 10, "a row above the reader that grows while the stream runs moves the reader's row in the content, so there is something to hold, moved \(shifted)")
         expect(abs(place(anchor) - placed) < 1 && worst < 2, "the reader's row stays put while the stream grows below it and a row above it grows, \(anchor) at \(placed) moved to \(place(anchor)), at most \(worst)")
