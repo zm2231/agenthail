@@ -24,16 +24,36 @@ pub struct Fetched {
     pub started: Instant,
 }
 
+pub const ACTOR_FRESH: std::time::Duration = std::time::Duration::from_secs(600);
+pub const RETRY: std::time::Duration = std::time::Duration::from_secs(60);
+
 #[derive(Default)]
 pub struct Known {
-    pub ledgers: HashSet<String>,
-    pub actors: HashSet<String>,
+    ledgers: HashMap<String, Option<Instant>>,
+    actors: HashMap<String, Instant>,
 }
 
 impl Known {
     pub fn learn(&mut self, fetched: &Fetched) {
-        self.ledgers.extend(fetched.ledgers.keys().cloned());
-        self.actors.extend(fetched.asked.iter().cloned());
+        let now = Instant::now();
+        for (key, result) in &fetched.ledgers {
+            self.ledgers.insert(key.clone(), result.is_err().then(|| now + RETRY));
+        }
+        for id in &fetched.asked {
+            self.actors.insert(id.clone(), now + if fetched.recorded.actors.contains_key(id) { ACTOR_FRESH } else { RETRY });
+        }
+    }
+
+    pub fn skips_ledger(&self, key: &str, streamed: bool) -> bool {
+        match self.ledgers.get(key) {
+            Some(None) => streamed,
+            Some(Some(until)) => Instant::now() < *until,
+            None => false,
+        }
+    }
+
+    pub fn skips_actor(&self, id: &str) -> bool {
+        self.actors.get(id).is_some_and(|until| Instant::now() < *until)
     }
 }
 
@@ -42,13 +62,13 @@ pub struct Ledger {
     pub actors: HashMap<String, Actor>,
 }
 
-pub fn fetch(client: &Client, known: &Known) -> Result<Fetched> {
+pub fn fetch(client: &Client, known: &Known, streamed: bool) -> Result<Fetched> {
     let started = Instant::now();
     let snap = client.get_json("/api/v1/snapshot")?;
     let now = snap["updatedAt"].as_str().and_then(parse_time).unwrap_or_else(OffsetDateTime::now_utc);
     let sessions: Vec<Session> = serde_json::from_value(snap["sessions"].clone()).unwrap_or_default();
     let recent: BTreeSet<String> = sessions.iter().filter(|s| hours(now, &s.last_active) < LEDGER_WINDOW_H).map(|s| s.project_key()).collect();
-    let (held, keys): (Vec<String>, Vec<String>) = snap["projects"].as_array().into_iter().flatten().filter(|p| p["archived"] != json!(true)).filter_map(|p| p["id"].as_str()).filter(|k| recent.contains(*k)).map(String::from).partition(|k| known.ledgers.contains(k));
+    let (held, keys): (Vec<String>, Vec<String>) = snap["projects"].as_array().into_iter().flatten().filter(|p| p["archived"] != json!(true)).filter_map(|p| p["id"].as_str()).filter(|k| recent.contains(*k)).map(String::from).partition(|k| known.skips_ledger(k, streamed));
     let ledgers: HashMap<String, Result<Vec<Work>, String>> = std::thread::scope(|scope| {
         let jobs: Vec<_> = keys.iter().map(|k| (k.clone(), scope.spawn(|| rows(client, k, now)))).collect();
         jobs.into_iter().map(|(k, h)| (k, h.join().unwrap_or_else(|_| Err("the fetch stopped".into())))).collect()
@@ -68,9 +88,9 @@ pub fn fetch(client: &Client, known: &Known) -> Result<Fetched> {
         .ok()
         .map(|hv| std::iter::once(json!({"name": hv["host"]["name"], "state": hv["host"]["state"]})).chain(hv["hosts"].as_array().cloned().unwrap_or_default().into_iter().map(|x| json!({"name": x["name"], "state": x["state"]}))).collect())
         .unwrap_or_default();
-    let raw = json!({"updatedAt": snap["updatedAt"], "projects": snap["projects"], "usage": usage, "hosts": hosts});
+    let raw = json!({"updatedAt": snap["updatedAt"], "hostEpoch": snap["hostEpoch"], "catalogSeq": snap["catalogSeq"], "projects": snap["projects"], "usage": usage, "hosts": hosts});
     let mut recorded: Recorded = serde_json::from_value(raw)?;
-    let (found, asked) = actors(client, &sessions, &known.actors, ledgers.values().filter_map(|r| r.as_ref().ok()).flatten());
+    let (found, asked) = actors(client, &sessions, |a| known.skips_actor(a), ledgers.values().filter_map(|r| r.as_ref().ok()).flatten());
     recorded.actors = found;
     recorded.sessions = sessions;
     Ok(Fetched { recorded, ledgers, held, asked, started })
@@ -78,7 +98,7 @@ pub fn fetch(client: &Client, known: &Known) -> Result<Fetched> {
 
 pub fn ledger(client: &Client, project: &str, sessions: &[Session], known: &HashSet<String>) -> Result<Ledger, String> {
     let rows = rows(client, project, OffsetDateTime::now_utc())?;
-    let (actors, _) = actors(client, sessions, known, rows.iter());
+    let (actors, _) = actors(client, sessions, |a| known.contains(a), rows.iter());
     Ok(Ledger { rows, actors })
 }
 
@@ -100,9 +120,9 @@ fn trim(rows: Vec<Value>, cutoff: OffsetDateTime) -> Vec<Value> {
     rows.into_iter().filter(|r| !matches!(r["state"].as_str(), Some("done" | "deleted")) || r["id"].as_str().is_some_and(|id| kept.contains(id)) || recent(r)).collect()
 }
 
-fn actors<'a>(client: &Client, sessions: &[Session], asked: &HashSet<String>, rows: impl Iterator<Item = &'a Work>) -> (HashMap<String, Actor>, Vec<String>) {
+fn actors<'a>(client: &Client, sessions: &[Session], skip: impl Fn(&str) -> bool, rows: impl Iterator<Item = &'a Work>) -> (HashMap<String, Actor>, Vec<String>) {
     let listed: BTreeSet<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
-    let wanted: BTreeSet<String> = rows.flat_map(|w| &w.timeline).map(|t| t.actor.clone()).filter(|a| !a.is_empty() && !listed.contains(a.as_str()) && !asked.contains(a) && !a.contains(' ') && !a.starts_with("td:")).collect();
+    let wanted: BTreeSet<String> = rows.flat_map(|w| &w.timeline).map(|t| t.actor.clone()).filter(|a| !a.is_empty() && !listed.contains(a.as_str()) && !skip(a) && !a.contains(' ') && !a.starts_with("td:")).collect();
     let found = std::thread::scope(|scope| {
         let jobs: Vec<_> = wanted.iter().map(|a| (a.clone(), scope.spawn(|| client.get_json(&format!("/api/v1/session?id={}", crate::catalog::enc(a)))))).collect();
         jobs.into_iter()
@@ -147,6 +167,13 @@ fn newer(at: &str, than: &str) -> bool {
     }
 }
 
+fn later(at: &str, epoch: &str, seq: u64, base: &Recorded) -> bool {
+    if epoch.is_empty() || epoch != base.host_epoch {
+        return newer(at, &base.updated_at);
+    }
+    seq > base.catalog_seq || seq == base.catalog_seq && newer(at, &base.updated_at)
+}
+
 impl Overview {
     pub fn recorded(mut raw: Recorded) -> Overview {
         let ledgers = std::mem::take(&mut raw.ledgers);
@@ -158,11 +185,13 @@ impl Overview {
         &self.base.sessions
     }
 
-    pub fn take_sessions(&mut self, at: &str, sessions: Vec<Session>) -> bool {
-        if !newer(at, &self.base.updated_at) {
+    pub fn take_sessions(&mut self, at: &str, epoch: &str, seq: u64, sessions: Vec<Session>) -> bool {
+        if !later(at, epoch, seq, &self.base) {
             return false;
         }
         self.base.updated_at = at.to_string();
+        self.base.host_epoch = epoch.to_string();
+        self.base.catalog_seq = seq;
         self.base.sessions = sessions;
         self.reconcile();
         self.stale = true;
@@ -228,9 +257,11 @@ impl Overview {
 
     pub fn refresh(&mut self, fetched: Fetched) {
         let Fetched { mut recorded, ledgers, held, started, .. } = fetched;
-        let fresh = newer(&recorded.updated_at, &self.base.updated_at);
+        let fresh = later(&recorded.updated_at, &recorded.host_epoch, recorded.catalog_seq, &self.base);
         if !fresh {
             recorded.updated_at = std::mem::take(&mut self.base.updated_at);
+            recorded.host_epoch = std::mem::take(&mut self.base.host_epoch);
+            recorded.catalog_seq = self.base.catalog_seq;
             recorded.sessions = std::mem::take(&mut self.base.sessions);
         }
         let actors = std::mem::replace(&mut recorded.actors, std::mem::take(&mut self.base.actors));
@@ -312,6 +343,10 @@ impl Overview {
     pub fn due_tails(&mut self, open: &HashSet<String>) -> Vec<(String, String)> {
         let now = parse_time(&self.base.updated_at).unwrap_or_else(OffsetDateTime::now_utc);
         self.tails.due(&self.base.sessions, now, open)
+    }
+
+    pub fn tail_retry_due(&self) -> bool {
+        self.tails.retry_due()
     }
 
     pub fn take_tail(&mut self, session: &str, last_active: String, result: Result<Tail, String>) {

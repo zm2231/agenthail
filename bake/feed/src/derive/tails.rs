@@ -84,8 +84,9 @@ impl Tails {
         recent.truncate(TAIL_SESSIONS);
         let keep: HashSet<&str> = recent.iter().map(|s| s.id.as_str()).collect();
         self.held.retain(|id, _| keep.contains(id.as_str()));
-        self.failed.retain(|id, _| keep.contains(id.as_str()));
-        let waiting = |s: &Session| self.failed.get(&s.id).is_some_and(|(at, until)| *at == s.last_active && Instant::now() < *until);
+        let now_i = Instant::now();
+        self.failed.retain(|id, (_, until)| keep.contains(id.as_str()) && now_i < *until);
+        let waiting = |s: &Session| self.failed.get(&s.id).is_some_and(|(at, _)| *at == s.last_active);
         let due: Vec<(String, String)> = recent
             .into_iter()
             .filter(|s| !open.contains(&s.id) && !self.fetching.contains(&s.id) && !waiting(s) && self.held.get(&s.id).is_none_or(|(at, _)| *at != s.last_active))
@@ -107,6 +108,11 @@ impl Tails {
                 self.failed.insert(session.to_string(), (last_active, Instant::now() + TAIL_RETRY));
             }
         }
+    }
+
+    pub fn retry_due(&self) -> bool {
+        let now = Instant::now();
+        self.failed.values().any(|(_, until)| now >= *until)
     }
 
     pub fn held(&self) -> impl Iterator<Item = (&String, &Tail)> {

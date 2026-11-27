@@ -12,6 +12,8 @@ mod voice;
 mod web;
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
@@ -28,7 +30,7 @@ use crate::over::Over;
 use crate::transcript::{Pane, Replay};
 
 pub enum Bg {
-    Snapshot(String, Vec<Session>, Option<Vec<String>>),
+    Snapshot(String, String, u64, Vec<Session>, Option<Vec<String>>),
     DecisionsRev(String),
     Changed(feed::watch::Wants),
     Reopened,
@@ -179,12 +181,16 @@ pub enum Ask {
     Reset,
 }
 
-fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>) {
+fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, streamed: Arc<AtomicBool>) {
     std::thread::spawn(move || {
+        let first = std::time::Instant::now();
+        while !streamed.load(Ordering::Acquire) && first.elapsed() < feed::watch::LEDGERS_FIRST {
+            std::thread::sleep(Duration::from_millis(50));
+        }
         let mut known = feed::derive::live::Known::default();
         loop {
             let started = std::time::Instant::now();
-            let message = match feed::derive::live::fetch(&client, &known) {
+            let message = match feed::derive::live::fetch(&client, &known, streamed.load(Ordering::Acquire)) {
                 Ok(fetched) => {
                     known.learn(&fetched);
                     Bg::Overview(Box::new(fetched))
@@ -931,6 +937,7 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
         Ok(receipt @ (Delivered::Queued(_) | Delivered::QueuedUntilAnswer(_))) => {
             s.status_line.remove(&id);
             s.queued.entry(id.clone()).or_default().push((s.snapshots, receipt));
+            ui::connect::poke(s);
             None
         }
         Ok(delivered) => {
@@ -1045,10 +1052,11 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     while let Ok(message) = s.inbox.try_recv() {
         changed = true;
         match message {
-            Bg::Snapshot(at, sessions, touched) => {
-                if s.ov.live.take_sessions(&at, sessions) {
+            Bg::Snapshot(at, epoch, seq, sessions, touched) => {
+                if s.ov.live.take_sessions(&at, &epoch, seq, sessions) {
                     s.sessions = s.ov.live.sessions().to_vec();
                     s.notify.sessions_moved = true;
+                    fetch_tails(s);
                 }
                 s.now = OffsetDateTime::now_utc();
                 s.status = "live".into();
@@ -1239,6 +1247,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s);
     changed |= ui::attach::pump(s);
     changed |= over::extensions::drain(s);
+    if s.ov.live.tail_retry_due() {
+        fetch_tails(s);
+    }
     changed |= ui::complete::pump(s);
     changed |= look::poll(look::Window::Main, tx);
     switch_composer(s);

@@ -12,6 +12,7 @@ pub const OVERVIEW_EVERY: Duration = Duration::from_secs(60);
 pub const SETTLE: Duration = Duration::from_millis(180);
 pub const OVERVIEW_GAP: Duration = Duration::from_secs(5);
 pub const DECISIONS_GAP: Duration = Duration::from_secs(10);
+pub const LEDGERS_FIRST: Duration = Duration::from_secs(5);
 const KEEP: usize = 2000;
 const IDLE: Duration = Duration::from_secs(120);
 
@@ -108,6 +109,7 @@ pub struct Applied {
 #[derive(Default)]
 pub struct Catalog {
     sessions: Vec<Session>,
+    epoch: String,
     seq: u64,
     adopted: bool,
     recent: VecDeque<CatalogEvent>,
@@ -122,11 +124,26 @@ impl Catalog {
         self.seq
     }
 
-    pub fn adopt(&mut self, sessions: Vec<Session>, seq: u64) -> Applied {
+    pub fn epoch(&self) -> &str {
+        &self.epoch
+    }
+
+    pub fn forget(&mut self) {
+        self.recent.clear();
+    }
+
+    pub fn adopt(&mut self, sessions: Vec<Session>, epoch: &str, seq: u64) -> Applied {
+        if epoch != self.epoch {
+            if !self.epoch.is_empty() {
+                self.recent.clear();
+            }
+            self.epoch = epoch.to_string();
+        }
         self.sessions = sessions;
         self.seq = seq;
         self.adopted = true;
-        let later: Vec<CatalogEvent> = self.recent.iter().filter(|e| e.seq > seq).cloned().collect();
+        self.recent.retain(|e| e.seq > seq);
+        let later: Vec<CatalogEvent> = self.recent.iter().cloned().collect();
         let mut out = Applied::default();
         for e in later {
             self.step(e, &mut out);
@@ -257,8 +274,9 @@ impl Client {
         Ok(Opened::Stream)
     }
 
-    pub fn follow_ledgers(&self, on: impl FnMut(Event) -> bool) -> Result<()> {
+    pub fn follow_ledgers(&self, opened: impl FnOnce(), on: impl FnMut(Event) -> bool) -> Result<()> {
         let reader = self.stream("/api/v1/ledger/events", None).map_err(|(_, e)| anyhow!(e))?;
+        opened();
         Ok(read(reader, on)?)
     }
 }

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant};
 
@@ -38,8 +38,10 @@ fn attach(s: &mut App, client: Client) {
     let (poke, poked) = channel();
     s.link.poke = Some(poke.clone());
     sessions(client.clone(), s.outbox.clone(), poke, poked);
+    let streamed = Arc::new(AtomicBool::new(false));
+    watch::ledgers(client.clone(), s.outbox.clone(), streamed.clone());
     let (poke, poked) = channel();
-    crate::watch_overview(client.clone(), s.outbox.clone(), poked);
+    crate::watch_overview(client.clone(), s.outbox.clone(), poked, streamed);
     s.overview_poke = Some(poke);
     crate::over::inbox::start(&mut s.ov.inbox, &client);
     s.client = Some(client);
@@ -66,7 +68,7 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                     Ok(snap) => {
                         down = false;
                         due = false;
-                        let applied = catalog.adopt(snap.sessions, snap.catalog_seq);
+                        let applied = catalog.adopt(snap.sessions, &snap.host_epoch, snap.catalog_seq);
                         let rev = applied.rev.unwrap_or(snap.decisions_rev);
                         if tx.send(Bg::SendSettings(snap.busy_delivery, snap.rekeyed, snap.queue)).is_err() || tx.send(Bg::DecisionsRev(rev)).is_err() {
                             return;
@@ -75,12 +77,11 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                             cursor.store(catalog.seq(), Ordering::Release);
                             watch::catalog(c.clone(), cursor.clone(), resumed, poke.clone());
                             watch::events(c.clone(), snap.event_cursor, tx.clone());
-                            watch::ledgers(c.clone(), tx.clone());
                         } else if std::mem::take(&mut gap) {
                             cursor.store(catalog.seq(), Ordering::Release);
                             let _ = resume.send(());
                         }
-                        Bg::Snapshot(snap.updated_at, catalog.sessions().to_vec(), None)
+                        Bg::Snapshot(snap.updated_at, catalog.epoch().to_string(), catalog.seq(), catalog.sessions().to_vec(), None)
                     }
                 };
                 if tx.send(message).is_err() {
@@ -106,6 +107,7 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                             Feed::Gap => {
                                 due = true;
                                 gap = true;
+                                catalog.forget();
                             }
                             Feed::Catalog(event) => batch.push(event),
                         }
@@ -126,7 +128,7 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
             if applied.news && tx.send(Bg::SessionNews).is_err() {
                 return;
             }
-            if applied.changed && tx.send(Bg::Snapshot(feed::watch::stamp(), catalog.sessions().to_vec(), Some(applied.touched))).is_err() {
+            if applied.changed && tx.send(Bg::Snapshot(feed::watch::stamp(), catalog.epoch().to_string(), catalog.seq(), catalog.sessions().to_vec(), Some(applied.touched))).is_err() {
                 return;
             }
         }
@@ -144,6 +146,12 @@ pub fn up(s: &mut App) {
     s.link.as_of = Some(Instant::now());
     if !matches!(s.link.problem, Some(Problem::StartFailed(_))) {
         s.link.problem = None;
+    }
+}
+
+pub fn poke(s: &App) {
+    if let Some(poke) = &s.link.poke {
+        let _ = poke.send(Feed::Poke);
     }
 }
 

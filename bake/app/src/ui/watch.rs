@@ -1,6 +1,6 @@
 use std::cell::Cell;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 
 use feed::catalog::Client;
@@ -48,17 +48,18 @@ pub fn events(client: Client, mut after: u64, tx: Sender<Bg>) {
     });
 }
 
-pub fn ledgers(client: Client, tx: Sender<Bg>) {
+pub fn ledgers(client: Client, tx: Sender<Bg>, streamed: Arc<AtomicBool>) {
     std::thread::spawn(move || {
         let (mut seen, mut failures) = (Ledgers::default(), 0u32);
         loop {
             let mut gone = false;
-            let result = client.follow_ledgers(|e| {
+            let result = client.follow_ledgers(|| streamed.store(true, Ordering::Release), |e| {
                 if let Some(key) = seen.changed(&e) {
                     gone |= tx.send(Bg::LedgerChanged(key)).is_err();
                 }
                 !gone
             });
+            streamed.store(false, Ordering::Release);
             if gone {
                 return;
             }

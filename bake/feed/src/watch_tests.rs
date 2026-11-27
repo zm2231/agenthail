@@ -57,7 +57,7 @@ fn the_native_rereads_refresh_the_snapshot_and_host_changes_the_decisions() {
 #[test]
 fn session_changes_apply_in_place_without_a_reread() {
     let mut c = Catalog::default();
-    c.adopt(vec![row("a", "idle"), row("b", "idle")], 10);
+    c.adopt(vec![row("a", "idle"), row("b", "idle")], "e", 10);
     let out = c.apply(vec![upsert(11, "a", "working")]);
     assert_eq!(out, Applied { changed: true, touched: vec!["a".into()], ..Applied::default() });
     assert_eq!(statuses(&c), vec![("a".into(), "working".into()), ("b".into(), "idle".into())]);
@@ -71,7 +71,7 @@ fn session_changes_apply_in_place_without_a_reread() {
 #[test]
 fn queue_counts_and_rekeys_ask_for_the_snapshot_that_carries_them() {
     let mut c = Catalog::default();
-    c.adopt(vec![row("a", "idle")], 1);
+    c.adopt(vec![row("a", "idle")], "e", 1);
     let out = c.apply(vec![CatalogEvent { seq: 2, kind: "session.queue".into(), data: json!({"sessionId": "a", "queueCount": 2}) }]);
     assert!(out.changed && out.reread);
     assert_eq!(c.sessions()[0].queue_count, 2);
@@ -84,7 +84,7 @@ fn queue_counts_and_rekeys_ask_for_the_snapshot_that_carries_them() {
 #[test]
 fn a_decisions_change_names_the_latest_revision_and_nothing_else() {
     let mut c = Catalog::default();
-    c.adopt(Vec::new(), 1);
+    c.adopt(Vec::new(), "e", 1);
     let rev = |seq, r: &str| CatalogEvent { seq, kind: "decisions.changed".into(), data: json!({"rev": r, "own": "o"}) };
     let out = c.apply(vec![rev(2, "r1"), rev(3, "r2")]);
     assert_eq!(out, Applied { rev: Some("r2".into()), ..Applied::default() });
@@ -95,9 +95,9 @@ fn a_snapshot_read_before_events_already_seen_replays_them() {
     let mut c = Catalog::default();
     c.apply(vec![upsert(5, "a", "working")]);
     assert!(c.sessions().is_empty());
-    c.adopt(vec![row("a", "idle")], 4);
+    c.adopt(vec![row("a", "idle")], "e", 4);
     assert_eq!(statuses(&c), vec![("a".into(), "working".into())]);
-    c.adopt(vec![row("a", "done")], 5);
+    c.adopt(vec![row("a", "done")], "e", 5);
     assert_eq!(statuses(&c), vec![("a".into(), "done".into())]);
     let out = c.apply(vec![upsert(5, "a", "working"), upsert(3, "a", "old")]);
     assert_eq!(out, Applied::default());
@@ -117,4 +117,37 @@ fn a_ledger_counts_as_changed_only_when_its_version_moves() {
 #[test]
 fn reconnects_back_off_to_five_seconds() {
     assert_eq!([0, 1, 2, 3, 9].map(backoff), [1, 2, 4, 5, 5].map(Duration::from_secs));
+}
+
+#[test]
+fn a_new_catalog_epoch_drops_events_from_the_old_one() {
+    let mut c = Catalog::default();
+    c.adopt(vec![row("a", "idle")], "e1", 10);
+    c.apply(vec![upsert(50, "a", "old-epoch")]);
+    c.adopt(vec![row("a", "fresh")], "e2", 3);
+    assert_eq!(statuses(&c), vec![("a".into(), "fresh".into())]);
+    let out = c.apply(vec![upsert(4, "a", "working")]);
+    assert!(out.changed);
+    assert_eq!(statuses(&c), vec![("a".into(), "working".into())]);
+}
+
+#[test]
+fn a_gap_forgets_history_before_the_next_snapshot() {
+    let mut c = Catalog::default();
+    c.adopt(vec![row("a", "idle")], "e", 10);
+    c.apply(vec![upsert(11, "a", "stale")]);
+    c.forget();
+    c.adopt(vec![row("a", "fresh")], "e", 5);
+    assert_eq!(statuses(&c), vec![("a".into(), "fresh".into())]);
+}
+
+#[test]
+fn history_stays_short_once_snapshots_cover_it() {
+    let mut c = Catalog::default();
+    for round in 0..3u64 {
+        let base = round * 1500;
+        let out = c.apply((1..=1500).map(|i| upsert(base + i, "a", "working")).collect());
+        assert!(!out.reread, "round {round}");
+        c.adopt(vec![row("a", "idle")], "e", base + 1500);
+    }
 }

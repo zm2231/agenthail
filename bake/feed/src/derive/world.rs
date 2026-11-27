@@ -126,6 +126,10 @@ pub struct Recorded {
     #[serde(default)]
     pub updated_at: String,
     #[serde(default)]
+    pub host_epoch: String,
+    #[serde(default)]
+    pub catalog_seq: u64,
+    #[serde(default)]
     pub projects: Vec<ProjectRecord>,
     #[serde(default)]
     pub sessions: Vec<Session>,

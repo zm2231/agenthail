@@ -40,12 +40,12 @@ fn board_ids(w: &World, project: &str) -> Vec<String> {
 fn an_overview_fetched_before_a_newer_session_snapshot_keeps_the_newer_sessions() {
     let mut ov = Overview::default();
     ov.refresh(fetched("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")], vec![]));
-    assert!(ov.take_sessions("2026-11-24T12:00:04Z", vec![session("a", "p", "2026-11-24T12:00:03Z", "busy")]));
+    assert!(ov.take_sessions("2026-11-24T12:00:04Z", "", 0, vec![session("a", "p", "2026-11-24T12:00:03Z", "busy")]));
     ov.refresh(fetched("2026-11-24T12:00:02Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")], vec![("p", Ok(vec![work("w1", "open")]))]));
     let w = ov.world(&[]);
     assert_eq!(status(&w, "a"), "busy");
     assert_eq!(board_ids(&w, "p"), ["w1"], "the rest of the older refresh still lands");
-    assert!(!ov.take_sessions("2026-11-24T12:00:03Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(!ov.take_sessions("2026-11-24T12:00:03Z", "", 0, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
     assert_eq!(status(&ov.world(&[]), "a"), "busy");
     ov.refresh(fetched("2026-11-24T12:00:04Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")], vec![]));
     assert_eq!(status(&ov.world(&[]), "a"), "busy", "a refresh stamped the same time keeps the sessions held");
@@ -106,9 +106,9 @@ fn a_recording_shows_every_ledger_it_holds() {
 #[test]
 fn an_overview_without_a_valid_time_never_replaces_the_held_sessions() {
     let mut ov = Overview::default();
-    assert!(!ov.take_sessions("", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(!ov.take_sessions("", "", 0, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
     ov.refresh(fetched("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "busy")], vec![]));
-    assert!(!ov.take_sessions("not a time", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(!ov.take_sessions("not a time", "", 0, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
     ov.refresh(fetched("", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")], vec![]));
     assert_eq!(status(&ov.world(&[]), "a"), "busy");
 }
@@ -158,7 +158,7 @@ fn a_burst_of_arrivals_leaves_one_rebuild_pending() {
     ov.refresh(fetched("2026-11-24T12:00:00Z", sessions(), vec![]));
     ov.world(&[]);
     assert!(!ov.stale());
-    assert!(!ov.take_sessions("2026-11-24T11:00:00Z", sessions()));
+    assert!(!ov.take_sessions("2026-11-24T11:00:00Z", "", 0, sessions()));
     assert!(!ov.stale(), "a snapshot that changes nothing asks for no rebuild");
     for id in ["t1", "t2", "t3"] {
         ov.take_tail(id, "2026-11-24T11:59:00Z".into(), Err("timed out".into()));
@@ -176,16 +176,16 @@ fn a_burst_of_arrivals_leaves_one_rebuild_pending() {
 fn a_confirmed_change_outlasts_a_stale_row_until_the_daemon_shows_it() {
     use crate::menu::Patch;
     let mut ov = Overview::default();
-    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", "", 0, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
     assert!(ov.patch("a", Patch::Alias(Some("scout".into())), Instant::now()));
     let w = ov.world(&[]);
     assert_eq!(w.title(w.session("a").unwrap()), "@scout", "names follow the change");
-    assert!(ov.take_sessions("2026-11-24T12:00:04Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.take_sessions("2026-11-24T12:00:04Z", "", 0, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
     assert_eq!(ov.sessions()[0].alias.as_deref(), Some("scout"), "a row read before the change");
     let mut shown = session("a", "p", "2026-11-24T11:00:00Z", "idle");
     shown.alias = Some("scout".into());
-    assert!(ov.take_sessions("2026-11-24T12:00:06Z", vec![shown]));
-    assert!(ov.take_sessions("2026-11-24T12:00:08Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.take_sessions("2026-11-24T12:00:06Z", "", 0, vec![shown]));
+    assert!(ov.take_sessions("2026-11-24T12:00:08Z", "", 0, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
     assert_eq!(ov.sessions()[0].alias, None, "once shown, the daemon's later word wins");
 }
 
@@ -200,14 +200,14 @@ fn a_pull_request_change_holds_only_that_pull_request_until_the_daemon_shows_it(
         x
     };
     let mut ov = Overview::default();
-    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![row(vec![pr(12, false, "pending"), pr(13, false, "")])]));
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", "", 0, vec![row(vec![pr(12, false, "pending"), pr(13, false, "")])]));
     assert!(ov.patch("a", Patch::Pr { pr: pr(12, true, "pending"), linked: true }, Instant::now()));
     assert!(ov.patch("a", Patch::Pr { pr: pr(13, false, ""), linked: false }, Instant::now()), "a change to another pull request is its own");
-    assert!(ov.take_sessions("2026-11-24T12:00:04Z", vec![row(vec![pr(12, false, "failing"), pr(13, false, "")])]));
+    assert!(ov.take_sessions("2026-11-24T12:00:04Z", "", 0, vec![row(vec![pr(12, false, "failing"), pr(13, false, "")])]));
     let shown: Vec<(u64, bool, String)> = ov.sessions()[0].prs.iter().map(|p| (p.number, p.watch, p.checks.clone())).collect();
     assert_eq!(shown, vec![(12, true, "failing".to_string())], "a stale row keeps both changes but its newer checks still show");
-    assert!(ov.take_sessions("2026-11-24T12:00:06Z", vec![row(vec![pr(12, true, "passing")])]));
-    assert!(ov.take_sessions("2026-11-24T12:00:08Z", vec![row(vec![pr(12, false, "passing"), pr(14, false, "")])]));
+    assert!(ov.take_sessions("2026-11-24T12:00:06Z", "", 0, vec![row(vec![pr(12, true, "passing")])]));
+    assert!(ov.take_sessions("2026-11-24T12:00:08Z", "", 0, vec![row(vec![pr(12, false, "passing"), pr(14, false, "")])]));
     let shown: Vec<(u64, bool)> = ov.sessions()[0].prs.iter().map(|p| (p.number, p.watch)).collect();
     assert_eq!(shown, vec![(12, false), (14, false)], "once shown, the daemon's later word wins");
 }
@@ -223,10 +223,10 @@ fn the_same_pull_request_change_confirmed_twice_keeps_its_hold() {
         x
     };
     let mut ov = Overview::default();
-    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![row(Vec::new())]));
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", "", 0, vec![row(Vec::new())]));
     assert!(ov.patch("a", Patch::Pr { pr: pr("pending", true), linked: true }, Instant::now()));
     ov.patch("a", Patch::Pr { pr: pr("passing", true), linked: true }, Instant::now());
-    assert!(ov.take_sessions("2026-11-24T12:00:04Z", vec![row(Vec::new())]));
+    assert!(ov.take_sessions("2026-11-24T12:00:04Z", "", 0, vec![row(Vec::new())]));
     assert_eq!(ov.sessions()[0].prs.len(), 1, "a stale row still shows the linked pull request");
 }
 
@@ -234,7 +234,7 @@ fn the_same_pull_request_change_confirmed_twice_keeps_its_hold() {
 fn a_change_the_daemon_never_shows_gives_way() {
     use crate::menu::Patch;
     let mut ov = Overview::default();
-    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", "", 0, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
     let long_ago = Instant::now().checked_sub(super::live::EXPECT_HOLD).unwrap();
     assert!(!ov.patch("a", Patch::Archived(true), long_ago), "an expired change is not shown");
     assert!(!ov.sessions()[0].archived);
@@ -247,10 +247,10 @@ fn a_late_confirmation_does_not_undo_what_the_daemon_already_shows() {
     let mut ov = Overview::default();
     let mut pinned = session("a", "p", "2026-11-24T11:00:00Z", "idle");
     pinned.pinned_at = Some("2026-11-24T12:00:01Z".into());
-    assert!(ov.take_sessions("2026-11-24T12:00:02Z", vec![pinned]));
+    assert!(ov.take_sessions("2026-11-24T12:00:02Z", "", 0, vec![pinned]));
     assert!(!ov.patch("a", Patch::Pinned(Some("2026-11-24T12:00:03Z".into())), Instant::now()));
     assert_eq!(ov.sessions()[0].pinned_at.as_deref(), Some("2026-11-24T12:00:01Z"));
-    assert!(ov.take_sessions("2026-11-24T12:00:04Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.take_sessions("2026-11-24T12:00:04Z", "", 0, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
     assert!(ov.sessions()[0].pinned_at.is_none(), "an unpin after it wins");
 }
 
@@ -258,11 +258,11 @@ fn a_late_confirmation_does_not_undo_what_the_daemon_already_shows() {
 fn an_older_overview_does_not_count_as_the_daemon_showing_a_change() {
     use crate::menu::Patch;
     let mut ov = Overview::default();
-    assert!(ov.take_sessions("2026-11-24T12:00:05Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.take_sessions("2026-11-24T12:00:05Z", "", 0, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
     assert!(ov.patch("a", Patch::Archived(true), Instant::now()));
     ov.refresh(fetched("2026-11-24T12:00:01Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")], vec![]));
     assert!(ov.sessions()[0].archived);
-    assert!(ov.take_sessions("2026-11-24T12:00:07Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.take_sessions("2026-11-24T12:00:07Z", "", 0, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
     assert!(ov.sessions()[0].archived, "a row read before the archive");
     ov.refresh(fetched("2026-11-24T12:00:09Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")], vec![]));
     assert!(ov.sessions()[0].archived, "a newer overview with the old row still holds");
@@ -272,10 +272,10 @@ fn an_older_overview_does_not_count_as_the_daemon_showing_a_change() {
 fn a_repeated_confirmation_keeps_the_change_held() {
     use crate::menu::Patch;
     let mut ov = Overview::default();
-    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", "", 0, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
     assert!(ov.patch("a", Patch::Pinned(Some("2026-11-24T12:00:01Z".into())), Instant::now()));
     assert!(ov.patch("a", Patch::Pinned(Some("2026-11-24T12:00:02Z".into())), Instant::now()));
-    assert!(ov.take_sessions("2026-11-24T12:00:03Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.take_sessions("2026-11-24T12:00:03Z", "", 0, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
     assert!(ov.sessions()[0].pinned(), "a row read before both pins");
     assert!(ov.patch("a", Patch::Pinned(None), Instant::now()));
     assert!(!ov.sessions()[0].pinned());
@@ -285,13 +285,13 @@ fn a_repeated_confirmation_keeps_the_change_held() {
 fn a_held_change_gives_way_after_the_hold_without_a_newer_snapshot() {
     use crate::menu::Patch;
     let mut ov = Overview::default();
-    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", "", 0, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
     let almost = Instant::now().checked_sub(super::live::EXPECT_HOLD - std::time::Duration::from_millis(300)).unwrap();
     assert!(ov.patch("a", Patch::Archived(true), almost));
     assert!(!ov.expire());
     assert!(ov.sessions()[0].archived);
     std::thread::sleep(std::time::Duration::from_millis(400));
-    assert!(!ov.take_sessions("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]), "the same cached snapshot");
+    assert!(!ov.take_sessions("2026-11-24T12:00:00Z", "", 0, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]), "the same cached snapshot");
     assert!(ov.expire());
     assert!(!ov.sessions()[0].archived, "the daemon's last value");
     assert!(!ov.expire());
@@ -304,10 +304,10 @@ fn chained_read_marks_hold_against_a_row_older_than_both() {
     let mut ov = Overview::default();
     let mut at_a = session("a", "p", "2026-11-24T11:00:00Z", "idle");
     at_a.read_state = Some(ReadState { first_unread: "item-1".into(), revision: "A".into() });
-    assert!(ov.take_sessions("2026-11-24T12:00:00Z", vec![at_a.clone()]));
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", "", 0, vec![at_a.clone()]));
     assert!(ov.patch("a", Patch::Read { receipt: ReadState { first_unread: String::new(), revision: "B".into() }, from: vec!["A".into()] }, Instant::now()));
     assert!(ov.patch("a", Patch::Read { receipt: ReadState { first_unread: "item-1".into(), revision: "C".into() }, from: vec!["B".into()] }, Instant::now()));
-    assert!(ov.take_sessions("2026-11-24T12:00:03Z", vec![at_a]));
+    assert!(ov.take_sessions("2026-11-24T12:00:03Z", "", 0, vec![at_a]));
     assert_eq!(ov.sessions()[0].read_state.as_ref().unwrap().revision, "C");
 }
 
@@ -334,10 +334,28 @@ fn ledgers_held_from_the_change_stream_survive_an_overview_that_skips_them() {
 }
 
 #[test]
-fn an_overview_remembers_every_ledger_and_actor_it_asked_for() {
+fn an_overview_skips_ledgers_the_stream_covers_and_retries_failures_later() {
     let mut known = super::live::Known::default();
-    let f = Fetched { asked: vec!["gone-actor".into()], ..fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(Vec::new())), ("h2::p", Err("status code 404".into()))]) };
+    let mut f = Fetched { asked: vec!["found".into(), "gone".into()], ..fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(Vec::new())), ("h2::p", Err("status code 404".into()))]) };
+    f.recorded.actors.insert("found".into(), Actor::default());
     known.learn(&f);
-    assert!(known.ledgers.contains("p") && known.ledgers.contains("h2::p"));
-    assert!(known.actors.contains("gone-actor"));
+    assert!(known.skips_ledger("p", true), "a read ledger waits for the stream to say it changed");
+    assert!(!known.skips_ledger("p", false), "without the stream every overview reads it");
+    assert!(known.skips_ledger("h2::p", true) && known.skips_ledger("h2::p", false), "a failed read waits a minute");
+    assert!(!known.skips_ledger("q", true));
+    assert!(known.skips_actor("found") && known.skips_actor("gone") && !known.skips_actor("new"));
+}
+
+#[test]
+fn sessions_are_ordered_by_catalog_position_not_by_whose_clock_is_later() {
+    let mut ov = Overview::default();
+    assert!(ov.take_sessions("2026-11-24T12:00:00Z", "e", 100, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.take_sessions("2026-11-24T12:00:01Z", "e", 105, vec![session("a", "p", "2026-11-24T11:59:00Z", "busy")]));
+    let mut older = fetched("2026-11-24T12:00:09Z", vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")], Vec::new());
+    older.recorded.host_epoch = "e".into();
+    older.recorded.catalog_seq = 101;
+    ov.refresh(older);
+    assert_eq!(ov.sessions()[0].status, "busy", "a later read of an earlier catalog position doesn't undo a change");
+    assert!(!ov.take_sessions("2026-11-24T12:00:10Z", "e", 104, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]));
+    assert!(ov.take_sessions("2026-11-24T12:00:11Z", "e2", 3, vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")]), "a restarted catalog starts over");
 }

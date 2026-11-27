@@ -375,6 +375,8 @@ pub struct Snapshot {
     #[serde(default)]
     pub decisions_rev: String,
     #[serde(default)]
+    pub host_epoch: String,
+    #[serde(default)]
     pub catalog_seq: u64,
     #[serde(default)]
     pub event_cursor: u64,
