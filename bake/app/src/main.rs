@@ -46,7 +46,7 @@ pub enum Bg {
     SessionNews,
     SessionsMoved,
     Removed(Vec<feed::watch::Removal>),
-    Item(WorkKey, WorkItem),
+    Item(WorkKey, u64, Option<WorkItem>),
     Overview(Box<Fetched>),
     Ledger(String, std::time::Instant, Result<Ledger, String>),
     Tail(String, String, Result<Tail, String>, Option<tails::Resume>),
@@ -139,6 +139,7 @@ pub struct App {
     pub busy_pick: HashMap<String, Busy>,
     pub rekeyed: HashMap<String, String>,
     pub items: HashMap<WorkKey, WorkItem>,
+    pub item_reads: (u64, HashMap<WorkKey, u64>),
     pub requests: HashMap<String, Vec<OpenRequest>>,
     pub answering: Option<String>,
     pub settled: HashMap<String, Option<std::time::Instant>>,
@@ -344,6 +345,7 @@ fn empty(live: Overview, persist: bool) -> App {
         busy_pick: HashMap::new(),
         rekeyed: HashMap::new(),
         items: HashMap::new(),
+        item_reads: (0, HashMap::new()),
         requests: HashMap::new(),
         answering: None,
         settled: HashMap::new(),
@@ -742,9 +744,22 @@ pub fn send_text(s: &mut App, message: String, tx: &mut Tx) {
 }
 
 fn fetch_item(s: &mut App, key: &WorkKey) {
-    if s.items.contains_key(key) {
-        return;
+    if !s.items.contains_key(key) {
+        read_item(s, key);
     }
+}
+
+fn items_changed(s: &mut App, ledger: Option<&str>) {
+    let shown: Vec<WorkKey> = ui::window::shown(s).into_iter().filter_map(|(_, id)| session(s, &id).and_then(|x| x.primary_work(s.work_pick.get(&id))).map(|w| w.key())).collect();
+    let kept = |k: &WorkKey| shown.contains(k) || ledger.is_some_and(|l| l != k.ledger);
+    s.items.retain(|k, _| kept(k));
+    s.item_reads.1.retain(|k, _| kept(k));
+    for key in shown.iter().filter(|k| ledger.is_none_or(|l| l == k.ledger)) {
+        read_item(s, key);
+    }
+}
+
+fn read_item(s: &mut App, key: &WorkKey) {
     if let Some(f) = &s.fixtures {
         if let Ok(text) = std::fs::read_to_string(format!("{}/items/{}.json", f.dir, key.id)) {
             if let Ok(value) = serde_json::from_str(&text) {
@@ -754,11 +769,13 @@ fn fetch_item(s: &mut App, key: &WorkKey) {
         return;
     }
     if let Some(client) = s.client.clone() {
+        s.item_reads.0 += 1;
+        let seq = s.item_reads.0;
+        s.item_reads.1.insert(key.clone(), seq);
         let (tx, item) = (s.outbox.clone(), key.clone());
         std::thread::spawn(move || {
-            if let Ok(work) = client.work_item(&item.ledger, &item.id) {
-                let _ = tx.send(Bg::Item(item, work));
-            }
+            let work = client.work_item(&item.ledger, &item.id).ok();
+            let _ = tx.send(Bg::Item(item, seq, work));
         });
     }
 }
@@ -1390,11 +1407,13 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Reopened => reopened(s),
             Bg::LedgerChanged(key, at) => {
                 ui::ready::ledger_changed(s, &key);
+                items_changed(s, Some(&key));
                 over::worksearch::ledger_changed(s, Some(&key));
                 ask_overview(s, Ask::Ledger(key, at));
             }
             Bg::LedgersReopened => {
                 ui::ready::reopened(s);
+                items_changed(s, None);
                 over::worksearch::ledger_changed(s, None);
                 ask_overview(s, Ask::Reopened);
             }
@@ -1407,8 +1426,14 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 over::earlier::removed(s, &gone);
                 over::listing::removed(s, &gone);
             }
-            Bg::Item(id, item) => {
-                s.items.insert(id, item);
+            Bg::Item(id, seq, item) => {
+                if s.item_reads.1.get(&id) == Some(&seq) {
+                    s.item_reads.1.remove(&id);
+                    match item {
+                        Some(item) => s.items.insert(id, item),
+                        None => s.items.remove(&id),
+                    };
+                }
             }
             Bg::Overview(fetched) => {
                 s.earlier.activity_missing = fetched.recorded.activity_missing;

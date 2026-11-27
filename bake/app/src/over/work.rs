@@ -10,7 +10,7 @@ use serde_json::Value;
 use feed::catalog::RespondError;
 use feed::ledger::{self, Move};
 
-use feed::derive::phase::{CHECK, SHIP, off_board, phase};
+use feed::derive::phase::{CHECK, SHIP, phase, shown_step, step_word};
 use feed::derive::proof::proof;
 use feed::derive::work::{commit, pr, unchecked};
 
@@ -19,9 +19,12 @@ use crate::over::ui::{self, BODY, BODY_MED, HEAD, META, META_MED, TITLE, base, s
 use crate::over::go;
 use crate::{App, Screen};
 
-fn phase_badge(phase: usize, k: &Kit) -> El {
+fn phase_badge(w: &feed::derive::Work, k: &Kit) -> El {
+    let Some(phase) = shown_step(&w.phase, &w.state) else {
+        return ui::pill(&icons::STATUS, &step_word(&w.phase, &w.state), weak(k), k);
+    };
     let color = if phase == CHECK { k.c.warning.icon } else if phase == SHIP { k.c.success.icon } else { k.c.text_accent };
-    ui::pill(&icons::STATUS, PHASES[phase.min(SHIP)], color, k)
+    ui::pill(&icons::STATUS, PHASES[phase], color, k)
 }
 
 fn tile(i: usize, expected: &str, observed: &str, passed: Option<bool>, k: &Kit) -> El {
@@ -66,7 +69,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, key: &WorkKey, _layer: &mut Vec<El>, main
         .w_full()
         .gap(8.0)
         .child({
-            let mut r = row().gap(8.0).items_center().child(match off_board(&w.state) { Some(word) => ui::pill(&icons::STATUS, word, weak(&k), &k), None => phase_badge(phase, &k) }).child(ui::id_label(&short_id(&w.id), &k)).child(ui::chip(&icons::TASK, &format!("{} · {}", w.priority, w.kind), &k));
+            let mut r = row().gap(8.0).items_center().child(phase_badge(w, &k)).child(ui::id_label(&short_id(&w.id), &k)).child(ui::chip(&icons::TASK, &format!("{} · {}", w.priority, w.kind), &k));
             if let Some(c) = &commit {
                 r = r.child(ui::chip(&icons::BRANCH, c, &k));
             }
@@ -172,7 +175,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, key: &WorkKey, _layer: &mut Vec<El>, main
         .pb(48.0)
         .child(goal)
         .children(moves(s, w, &k))
-        .children(off_board(&w.state).is_none().then(|| ui::card(col().w_full().padding(18.0).child(ui::stepper(phase, &s.ov.d.whose_move(w), &k)), &k)))
+        .children(shown_step(&w.phase, &w.state).is_some().then(|| ui::card(col().w_full().padding(18.0).child(ui::stepper(w, &s.ov.d.whose_move(w), &k)), &k)))
         .child(waiting)
         .child(brief)
         .child(proof)

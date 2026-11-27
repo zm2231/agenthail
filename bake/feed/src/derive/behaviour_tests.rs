@@ -64,7 +64,7 @@ fn the_timeline_marks_a_move_back_to_an_earlier_phase() {
     ]}]}}));
     let steps = timeline::timeline(&w.work[&WorkKey::new("p", "p-W1")], 10);
     let shown: Vec<(&str, bool)> = steps.iter().map(|s| (s.what.as_str(), s.moved_back)).collect();
-    assert_eq!(shown, [("Moved back to Build", true), ("Moved to Check", false)]);
+    assert_eq!(shown, [("Moved back to In progress", true), ("Moved to In review", false)]);
 }
 
 #[test]
@@ -235,6 +235,14 @@ fn jump_lists_every_match_when_you_search_and_three_a_group_when_you_dont() {
     let sessions = |q: &str| w.jump(q, &[], &[]).into_iter().filter(|h| h.group == "Sessions").count();
     assert_eq!(sessions("probe"), 5);
     assert_eq!(sessions(""), 3);
+}
+
+#[test]
+fn jump_orders_work_by_the_step_it_shows_and_merged_review_work_stays_your_move() {
+    let item = |id: &str, phase: &str, at: &str| json!({"id": id, "text": id, "state": "in_review", "phase": phase, "timeline": [{"at": at, "kind": "state", "state": "in_review"}]});
+    let w = world(json!({"ledgers": {"p": [item("p-W1", "ship", "2026-11-24T09:00:00Z"), item("p-W2", "check", "2026-11-24T11:00:00Z")]}}));
+    let rows: Vec<String> = w.jump("p-W", &[], &[]).into_iter().filter(|h| h.group == "Work").map(|h| h.status).collect();
+    assert_eq!(rows, ["Ship · your move · P", "Check · your move · P"]);
 }
 
 #[test]

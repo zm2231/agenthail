@@ -1,3 +1,4 @@
+use feed::derive::PHASES;
 use rune_kit::Kit;
 use super::*;
 
@@ -16,11 +17,10 @@ pub(crate) fn rail_section_with(title: &str, glyph: &'static Icon, trailing: Vec
         .child(col().w_full().px(12.0).py(12.0).radius(14.0).fill(if crate::theme::paint().dark { Color::BLACK.alpha(0.20) } else { Color::BLACK.alpha(0.035) }).border(1.0, crate::theme::ink(0.07)).child(body))
 }
 
-pub(crate) fn phase_stepper(state: &str, k: &Kit) -> El {
-    if let Some(word) = feed::derive::phase::off_board(state) {
-        return row().w_full().child(text(word.to_string()).font(k.text(META)).color(faint()));
-    }
-    let current = catalog::phase(state);
+pub(crate) fn phase_stepper(phase: &str, state: &str, k: &Kit) -> El {
+    let Some(current) = feed::derive::phase::shown_step(phase, state) else {
+        return row().w_full().child(text(feed::derive::phase::step_word(phase, state)).font(k.text(META)).color(faint()));
+    };
     let mut nodes = row().w_full().items_center();
     for i in 0..PHASES.len() {
         let reached = i <= current;
@@ -70,11 +70,12 @@ pub(crate) fn rail(s: &App, x: &Session, k: &Kit) -> El {
     if let Some(work) = x.primary_work(s.work_pick.get(&x.id)) {
         let item = s.items.get(&work.key());
         let state = item.map(|i| i.state.clone()).unwrap_or_else(|| work.state.clone());
+        let phase = item.map(|i| i.phase.as_str()).unwrap_or_default();
         let mut tags = row().gap(6.0).items_center().child(row().px(7.0).py(2.0).radius(6.0).fill(wash()).child(text(work.item_id.clone()).font(k.text(META)).color(muted())));
         if let Some(i) = item {
             tags = tags.child(priority(&i.priority, k)).child(text(i.kind.clone()).font(k.text(META)).color(faint()));
         }
-        let mut body = col().w_full().gap(12.0).child(tags).child(text(work.text.clone()).font(k.text(BODY_BOLD)).color(theme::text()).wrap_anywhere()).child(phase_stepper(&state, k));
+        let mut body = col().w_full().gap(12.0).child(tags).child(text(work.text.clone()).font(k.text(BODY_BOLD)).color(theme::text()).wrap_anywhere()).child(phase_stepper(phase, &state, k));
         if let Some(i) = item.filter(|i| !i.acceptance.is_empty()) {
             body = body.child(note("Expected", done(), i.acceptance.clone(), k));
         }
