@@ -203,9 +203,14 @@ fn settle(s: &mut App, done: Done) {
             let Some(b) = sheets.building.as_mut() else { return };
             let asked = (b.host.id.clone(), message);
             match &result {
-                Err(e) if e.maybe_delivered => sheets.unsure.insert(asked, key),
-                _ => sheets.unsure.remove(&asked),
-            };
+                Err(e) if e.maybe_delivered => {
+                    sheets.unsure.insert(asked, key);
+                }
+                Err(e) if !e.answered => {}
+                _ => {
+                    sheets.unsure.remove(&asked);
+                }
+            }
             b.starting = false;
             let host = b.host.clone();
             match result {
