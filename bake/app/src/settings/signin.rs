@@ -222,6 +222,16 @@ mod tests {
     }
 
     #[test]
+    fn a_reload_rereads_the_page_only_while_it_shows() {
+        let mut s = prefs();
+        super::super::reload(&mut s);
+        assert_eq!(s.seq.get(&Read::Signin), Some(&1));
+        s.signin.page = 0;
+        super::super::reload(&mut s);
+        assert_eq!(s.seq.get(&Read::Signin), Some(&1));
+    }
+
+    #[test]
     fn events_reread_only_once_the_tab_has_loaded() {
         let mut s = prefs();
         changed(&mut s);

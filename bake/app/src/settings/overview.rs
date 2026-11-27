@@ -19,6 +19,7 @@ pub struct Overview {
     tally: Tally,
     needs: usize,
     shown: HashSet<String>,
+    stale: bool,
 }
 
 thread_local! {
@@ -51,6 +52,16 @@ pub fn sessions_changed(sessions: &[Session], needs: usize) {
 pub fn opened(s: &mut Prefs) {
     if s.tab == TAB && s.client.is_some() {
         fetch(s, Read::Permissions);
+        s.overview.stale = true;
+        flush(s);
+    }
+}
+
+pub fn flush(s: &mut Prefs) {
+    if s.overview.stale && !busy(s) {
+        s.overview.stale = false;
+        s.settling.insert(Read::Base);
+        fetch(s, Read::Base);
     }
 }
 
@@ -61,11 +72,11 @@ pub fn focused(s: &mut Prefs) {
 }
 
 pub fn changed(s: &mut Prefs) {
-    if s.tab != TAB || s.client.is_none() || busy(s) {
+    if s.tab != TAB || s.client.is_none() {
         return;
     }
-    s.settling.insert(Read::Base);
-    fetch(s, Read::Base);
+    s.overview.stale = true;
+    flush(s);
 }
 
 fn repair(s: &mut Prefs, surface: String, action: String) {
@@ -252,12 +263,30 @@ mod tests {
     }
 
     #[test]
-    fn permissions_are_read_only_while_the_tab_shows() {
+    fn opening_the_tab_reads_permissions_and_the_surfaces() {
         let mut s = prefs();
         opened(&mut s);
         assert_eq!(s.in_flight, 0);
         s.tab = TAB;
         opened(&mut s);
+        assert_eq!(s.in_flight, 2);
+        assert!(s.settling.contains(&Read::Base));
+    }
+
+    #[test]
+    fn a_change_while_a_write_runs_rereads_once_it_lands() {
+        let mut s = prefs();
+        s.tab = TAB;
+        s.writing = Some("signin-add".into());
+        changed(&mut s);
+        assert_eq!(s.in_flight, 0);
+        assert!(s.overview.stale);
+        s.writing = None;
+        flush(&mut s);
         assert_eq!(s.in_flight, 1);
+        assert!(!s.overview.stale);
+        s.tab = 0;
+        changed(&mut s);
+        assert!(!s.overview.stale);
     }
 }

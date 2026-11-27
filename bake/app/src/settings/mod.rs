@@ -163,7 +163,6 @@ pub fn open() {
                 reload(s);
                 appearance::opened(s);
                 overview::opened(s);
-                signin::opened(s);
             });
             window.open();
             window.focus();
@@ -314,6 +313,7 @@ pub fn reload(s: &mut Prefs) {
     if fresh.is_some() || s.client.is_none() {
         (s.client, s.no_client) = (fresh, why);
     }
+    signin::opened(s);
     if s.client.is_none() {
         for what in ALL {
             fetch(s, what);
@@ -453,6 +453,7 @@ fn watch(s: &Prefs, from: u64) {
                 }
                 true
             });
+            let pause = Duration::from_secs(if result.is_err() { 10 } else { 2 });
             if current.load(Ordering::Acquire) == mine {
                 let why = match result {
                     Err(e) => e.to_string(),
@@ -464,7 +465,7 @@ fn watch(s: &Prefs, from: u64) {
                     }
                 });
             }
-            std::thread::sleep(Duration::from_secs(2));
+            std::thread::sleep(pause);
             if !handle.is_visible() {
                 return;
             }
@@ -493,6 +494,7 @@ fn take(s: &mut Prefs, done: Done) {
         reload(s);
     }
     handoffs::flush(s);
+    overview::flush(s);
 }
 
 fn take_one(s: &mut Prefs, done: Done) {
