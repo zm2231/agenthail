@@ -12,6 +12,7 @@ fn laid_out(scale: f32, screen: &str, dir: &Dir) -> Runtime<App> {
             let items: Vec<feed::Item> = serde_json::from_value(json!([
                 {"id": "u1", "kind": "message", "role": "user", "text": "Make the sidebar rows hold larger text."},
                 {"id": "a1", "kind": "message", "role": "assistant", "text": "Done. The row height now follows the text size, see [the change](https://example.com) and `look.rs`.\n\n- Rows grow\n- Layout stays"},
+                {"id": "h1", "kind": "message", "role": "assistant", "text": "## Next steps"},
                 {"id": "n1", "kind": "notice", "text": "Turn finished"},
             ]))
             .unwrap();
@@ -60,13 +61,56 @@ fn changing_the_text_size_in_an_open_window_grows_the_transcript_rows_already_sh
     }
     let dir = Dir::new("text-scale-live");
     let mut rt = laid_out(1.0, "session", &dir);
-    let before = rect(&rt, "item:a1");
+    let (reply, heading) = (rect(&rt, "item:a1"), rect(&rt, "item:h1"));
     crate::look::hold_text_scale(Some(1.3));
     rt.frame(DT);
     rt.settle_all();
     rt.frame(DT);
     let after = rect(&rt, "item:a1");
-    assert!(after[3] > before[3] * 1.15, "the shown reply grows with the text: {before:?} -> {after:?}");
+    assert!(after[3] > reply[3] * 1.15, "the shown reply grows with the text: {reply:?} -> {after:?}");
+    let after = rect(&rt, "item:h1");
+    assert!(after[3] > heading[3] * 1.15, "a heading grows with the text: {heading:?} -> {after:?}");
+}
+
+struct Capture {
+    gpu: rune::render::Gpu,
+    renderer: rune::render::Renderer,
+    target: rune::render::Offscreen,
+}
+
+impl Capture {
+    fn new() -> Capture {
+        let gpu = rune::render::Gpu::headless();
+        let renderer = rune::render::Renderer::new(&gpu.device, rune::render::OFFSCREEN_FORMAT);
+        let target = rune::render::Offscreen::new(&gpu.device, SIZE.0 as u32, SIZE.1 as u32);
+        Capture { gpu, renderer, target }
+    }
+
+    fn pixels<S: 'static>(&mut self, rt: &mut Runtime<S>) -> Vec<u8> {
+        rt.frame(DT);
+        self.renderer.render_runtime_to_offscreen(&self.gpu.device, &self.gpu.queue, &self.target, rt);
+        self.target.read(&self.gpu.device)
+    }
+}
+
+fn red(rgba: &[u8]) -> usize {
+    rgba.chunks(4).filter(|p| p[0] > 200 && p[1] < 70 && p[2] < 70).count()
+}
+
+#[test]
+fn a_new_link_colour_reaches_the_transcript_rows_already_shown() {
+    if !isolated("text_scale::a_new_link_colour_reaches_the_transcript_rows_already_shown") {
+        return;
+    }
+    let dir = Dir::new("text-roles-live");
+    let mut rt = laid_out(1.0, "session", &dir);
+    let mut screen = Capture::new();
+    assert_eq!(red(&screen.pixels(&mut rt)), 0, "nothing is red before the link colour changes");
+    let view: feed::look::View = serde_json::from_value(json!({"colors": {"link": {"dark": "#ff2020", "light": "#ff2020"}}})).unwrap();
+    crate::look::take_view(crate::look::ticket(), view);
+    rt.frame(DT);
+    rt.settle_all();
+    assert!(red(&screen.pixels(&mut rt)) > 20, "the shown link takes the new link colour");
 }
 
 fn render<S: 'static>(rt: &mut Runtime<S>, size: (f32, f32), path: &std::path::Path) {
