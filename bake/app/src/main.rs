@@ -786,6 +786,7 @@ fn hold(s: &mut App, id: &str, pending: Unsent) {
         let kept = Unsent { unanswered: false, error: format!("the message couldn't be saved first ({error})"), ..held };
         put_back(s, id, &kept);
         s.unsent.add(id, kept);
+        over::layout::save(s);
     }
 }
 
@@ -1011,6 +1012,7 @@ fn dispatch(s: &mut App, id: &str, pending: Unsent, resent: bool, tx: &mut Tx) {
         put_back(s, &id, &pending);
         let maybe_delivered = resent && pending.maybe_delivered;
         s.unsent.add(&id, Unsent { maybe_delivered, unanswered: false, error: format!("the message couldn't be saved first ({error})"), ..pending });
+        over::layout::save(s);
         return;
     }
     tx.scroll_to_bottom(format!("transcript-{id}"));
