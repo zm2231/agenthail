@@ -293,7 +293,7 @@ impl State {
 }
 
 pub fn parse_time(ts: &str) -> Option<OffsetDateTime> {
-    OffsetDateTime::parse(ts, &Rfc3339).ok()
+    OffsetDateTime::parse(ts, &Rfc3339).ok().filter(|t| t.year() > 1970)
 }
 
 pub fn ago(ts: &str, now: OffsetDateTime) -> String {
@@ -1010,5 +1010,18 @@ mod ledger_key_tests {
         assert_eq!(ledger_key("repo:github.com/o/r"), "repo:github.com/o/r");
         assert_eq!(ledger_key("implicit:/work/r"), "implicit:/work/r");
         assert_eq!(ledger_key("h1::p-1"), "h1::p-1");
+    }
+}
+
+#[cfg(test)]
+mod time_tests {
+    use super::{ago, parse_time};
+
+    #[test]
+    fn the_daemons_zero_time_reads_as_no_time() {
+        let now = parse_time("2026-11-26T22:00:00Z").unwrap();
+        assert_eq!(parse_time("0001-01-01T00:00:00.000000000Z"), None);
+        assert_eq!(ago("0001-01-01T00:00:00.000000000Z", now), "");
+        assert!(parse_time("2026-11-26T21:00:00Z").is_some());
     }
 }
