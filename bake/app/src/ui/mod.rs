@@ -172,7 +172,7 @@ fn session_body(s: &App, cx: &mut Cx<App>, chrome: &KitTheme, with_sidebar: bool
 
 fn session_toolbar(s: &App, x: Option<&Session>, c: &Kit) -> rune_kit::shell::Toolbar {
     let bar = rune_kit::shell::Toolbar::new().trailing(crate::over::ui::needs_button(s, c));
-    if let Some(strip) = tabs::strip(s, c) {
+    if let Some(strip) = tabs::strip(s, c, true) {
         return bar.leading(strip);
     }
     let Some(x) = x else { return bar };

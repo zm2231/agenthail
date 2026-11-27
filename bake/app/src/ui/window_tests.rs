@@ -134,3 +134,28 @@ fn a_session_window_draws_the_conversation_without_the_sidebar() {
     assert!(rt.presented("session-tabs").is_none(), "tabs live in the main window only");
     assert_eq!(rt.state.selected.as_deref(), Some("b"));
 }
+
+#[test]
+fn a_result_for_a_window_that_is_not_in_front_lands_in_that_window() {
+    let mut s = app();
+    let w = open(&mut s, "b");
+    enter(&mut s, w);
+    s.menus.renaming = Some("b".into());
+    enter(&mut s, MAIN);
+    assert_eq!(holder(&s, |l| l.renaming() == Some("b")), Some(w));
+    within(&mut s, w, |s| s.menus.rename_saving = true);
+    assert!(s.windows.current() == MAIN && !s.menus.rename_saving);
+    enter(&mut s, w);
+    assert!(s.menus.rename_saving);
+    assert_eq!(holder(&s, |l| l.renaming() == Some("b")), None, "the window in front isn't a holder");
+}
+
+#[test]
+fn the_shown_session_keeps_its_transcript_when_windows_hold_the_rest() {
+    let mut s = app();
+    for i in 0..9 {
+        open(&mut s, &format!("w{i}"));
+    }
+    crate::select(&mut s, "main");
+    assert!(s.panes.contains_key("main"));
+}

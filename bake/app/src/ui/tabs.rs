@@ -11,11 +11,19 @@ use crate::{App, Screen};
 pub const REOPEN_SECS: f64 = 6.0;
 pub const ARCHIVED_SECS: f64 = 10.0;
 
+#[derive(Clone)]
+pub struct Archived {
+    pub id: String,
+    pub title: String,
+    pub until: f64,
+    pub unarchiving: bool,
+}
+
 pub struct State {
     pub tabs: Tabs,
     capacity: usize,
     pub closed: Option<(String, String, f64)>,
-    pub archived: Option<(String, String, f64)>,
+    pub archived: Option<Archived>,
     pub menu: Option<(String, rune::PointerPress)>,
 }
 
@@ -134,39 +142,49 @@ pub fn active_tab(s: &App) -> Option<&str> {
 
 pub fn reconcile(s: &mut App) {
     let rekeyed = s.rekeyed.clone();
-    let archived = |id: &str| crate::session(s, id).is_some_and(|x| x.archived);
-    let gone: Vec<String> = s.tabs.tabs.tabs().iter().map(|t| t.id.clone()).filter(|id| archived(&feed::composer::current(&rekeyed, id))).collect();
     let mut tabs = std::mem::take(&mut s.tabs.tabs);
-    tabs.reconcile(|id| feed::composer::current(&rekeyed, id).to_string(), |id| !gone.iter().any(|g| feed::composer::current(&rekeyed, g) == id));
+    let dropped = tabs.reconcile(|id| feed::composer::current(&rekeyed, id).to_string(), |id| crate::session(s, id).is_some_and(|x| !x.archived));
     s.tabs.tabs = tabs;
     let ids: Vec<String> = s.tabs.tabs.tabs().iter().map(|t| t.id.clone()).collect();
     for id in ids {
         name(s, &id);
     }
-    if let Some(id) = gone.first() {
+    let dropped: Vec<String> = dropped.iter().map(|id| feed::composer::current(&rekeyed, id).to_string()).collect();
+    if let Some(id) = dropped.iter().find(|id| crate::session(s, id).is_some_and(|x| x.archived)) {
         let t = title(s, id, "alias");
-        s.tabs.archived = Some((id.clone(), t, s.clock + ARCHIVED_SECS));
-        if s.screen == Screen::Session && s.selected.as_deref() == Some(id.as_str()) {
-            show_active(s);
-        }
+        s.tabs.archived = Some(Archived { id: id.clone(), title: t, until: s.clock + ARCHIVED_SECS, unarchiving: false });
+    }
+    if s.screen == Screen::Session && s.selected.as_ref().is_some_and(|sel| dropped.contains(sel)) {
+        show_active(s);
     }
 }
 
 pub fn unarchive(s: &mut App) {
-    let Some((id, _, _)) = s.tabs.archived.take() else { return };
+    let Some(a) = s.tabs.archived.as_mut().filter(|a| !a.unarchiving) else { return };
+    a.unarchiving = true;
+    let id = a.id.clone();
     crate::ui::session_menu::run(s, &id, feed::menu::Act::Archive(false));
-    crate::over::open_session(s, &id);
+}
+
+fn stuck(s: &App, a: &Archived) -> bool {
+    a.unarchiving && !crate::ui::session_menu::changing(s, &a.id) && crate::session(s, &a.id).is_none_or(|x| x.archived)
 }
 
 pub fn expire(s: &mut App) -> bool {
     let clock = s.clock;
-    let before = (s.tabs.closed.is_some(), s.tabs.archived.is_some());
+    let before = (s.tabs.closed.is_some(), s.tabs.archived.clone().map(|a| (a.unarchiving, stuck(s, &a))));
+    if let Some(a) = s.tabs.archived.clone().filter(|a| a.unarchiving)
+        && crate::session(s, &a.id).is_some_and(|x| !x.archived)
+    {
+        s.tabs.archived = None;
+        crate::over::open_session(s, &a.id);
+    }
     s.tabs.closed.take_if(|(_, _, until)| clock >= *until);
-    s.tabs.archived.take_if(|(_, _, until)| clock >= *until);
-    before != (s.tabs.closed.is_some(), s.tabs.archived.is_some())
+    s.tabs.archived.take_if(|a| !a.unarchiving && clock >= a.until);
+    before != (s.tabs.closed.is_some(), s.tabs.archived.clone().map(|a| (a.unarchiving, stuck(s, &a))))
 }
 
-pub fn strip(s: &App, k: &Kit) -> Option<El> {
+pub fn strip(s: &App, k: &Kit, sizes: bool) -> Option<El> {
     if !in_main(s) || !on() || s.tabs.tabs.tabs().is_empty() {
         return None;
     }
@@ -196,8 +214,8 @@ pub fn strip(s: &App, k: &Kit) -> Option<El> {
         .on_close(|s: &mut App, id, _| close(s, id))
         .build(k)
         .grow(1.0)
-        .min_w(0.0)
-        .on_layout(|s: &mut App, r: [f32; 4]| set_width(s, r[2]));
+        .min_w(0.0);
+    let strip = if sizes { strip.on_layout(|s: &mut App, r: [f32; 4]| set_width(s, r[2])) } else { strip };
     let mut bar = row().w_full().items_center().gap(8.0).child(strip);
     if let Some(n) = notice(s, k) {
         bar = bar.child(n);
@@ -221,19 +239,22 @@ fn notice(s: &App, k: &Kit) -> Option<El> {
                 .on_press(|s: &mut App| reopen(s)),
         );
     }
-    let (_, t, _) = s.tabs.archived.as_ref()?;
-    Some(
-        row()
-            .key("tab-archived")
-            .gap(4.0)
-            .px(8.0)
-            .py(3.0)
-            .radius(10.0)
-            .fill(k.c.surface_raised)
-            .child(text(format!("{t} was archived ·")).font(META).color(muted()).truncate())
-            .child(text("Unarchive".to_string()).font(META).color(accent()))
-            .on_press(|s: &mut App| unarchive(s)),
-    )
+    let a = s.tabs.archived.as_ref()?;
+    let (said, action) = match (stuck(s, a), a.unarchiving) {
+        (true, _) => (format!("{} is still archived ·", a.title), "Try Again"),
+        (false, true) => (format!("Unarchiving {}…", a.title), ""),
+        (false, false) => (format!("{} was archived ·", a.title), "Unarchive"),
+    };
+    let mut n = row().key("tab-archived").gap(4.0).px(8.0).py(3.0).radius(10.0).fill(k.c.surface_raised).child(text(said).font(META).color(muted()).truncate());
+    if !action.is_empty() {
+        n = n.child(text(action.to_string()).font(META).color(accent())).on_press(|s: &mut App| {
+            if let Some(a) = s.tabs.archived.as_mut() {
+                a.unarchiving = false;
+            }
+            unarchive(s);
+        });
+    }
+    Some(n)
 }
 
 pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {

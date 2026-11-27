@@ -63,6 +63,12 @@ pub struct Popup {
     shown_ids: Vec<String>,
 }
 
+impl Popup {
+    pub fn searching(&self, seq: u64) -> bool {
+        self.search.as_ref().is_some_and(|x| x.seq == seq)
+    }
+}
+
 impl Complete {
     pub fn swap_popup(&mut self, p: &mut Popup) {
         std::mem::swap(&mut self.session, &mut p.session);
@@ -509,6 +515,12 @@ pub fn done(s: &mut App, done: Done) {
             }
         }
         Done::Found(seq, result) => {
+            if s.complete.search.as_ref().is_none_or(|x| x.seq != seq)
+                && let Some(w) = super::window::holder(s, |l| l.popup().searching(seq))
+            {
+                super::window::within(s, w, |s| crate::ui::complete::done(s, Done::Found(seq, result)));
+                return;
+            }
             if let Some(search) = s.complete.search.as_mut().filter(|x| x.seq == seq) {
                 search.ix = 0;
                 match result {

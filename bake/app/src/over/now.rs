@@ -180,6 +180,9 @@ fn focus_card(s: &App, k: &Kit) -> El {
 fn toolbar(s: &App, strip: bool, k: &Kit) -> Toolbar {
     let mut t = Toolbar::new();
     t = if strip { t.leading(row().gap(12.0).items_center().child(text("Now".to_string()).font(BODY_MED).color(strong(k))).child(ui::strip(s, None, k))) } else { t.leading(ui::crumb(&[("Now", true)], k)) };
+    if let Some(tabs) = crate::ui::tabs::strip(s, k, false) {
+        t = t.center(row().max_w(560.0).child(tabs));
+    }
     t.trailing(row().gap(10.0).items_center().child(talk_button(k)).child(ui::new_session_button(None, k)).child(variant(s, k)).child(ui::needs_button(s, k)))
 }
 

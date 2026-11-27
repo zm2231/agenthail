@@ -96,7 +96,67 @@ fn an_archived_tab_closes_and_says_so() {
     s.clock = 5.0;
     reconcile(&mut s);
     assert_eq!((ids(&s), s.selected.as_deref()), (vec!["a"], Some("a")));
-    assert_eq!(s.tabs.archived.as_ref().map(|(id, t, until)| (id.as_str(), t.as_str(), *until)), Some(("b", "@b", 15.0)));
+    assert_eq!(s.tabs.archived.as_ref().map(|a| (a.id.as_str(), a.title.as_str(), a.until)), Some(("b", "@b", 15.0)));
+    s.clock = 20.0;
+    expire(&mut s);
+    assert!(s.tabs.archived.is_none(), "the notice goes after ten seconds");
+}
+
+#[test]
+fn several_archived_at_once_move_off_the_shown_one_and_gone_sessions_drop() {
+    let mut s = app();
+    s.sessions = vec![row("a", false), row("b", false), row("c", false), row("d", false)];
+    open(&mut s, &["a", "b", "c", "d"]);
+    activate(&mut s, "c");
+    s.sessions = vec![row("a", false), row("b", true), row("c", true)];
+    reconcile(&mut s);
+    assert_eq!(ids(&s), ["a"]);
+    assert_eq!(s.selected.as_deref(), Some("a"));
+}
+
+#[test]
+fn unarchiving_keeps_the_notice_until_it_lands_and_offers_a_retry_when_it_does_not() {
+    let mut s = app();
+    s.sessions = vec![row("a", false), row("b", false)];
+    open(&mut s, &["a", "b"]);
+    s.sessions = vec![row("a", false), row("b", true)];
+    reconcile(&mut s);
+    unarchive(&mut s);
+    let a = s.tabs.archived.clone().expect("the notice stays while it is unarchived");
+    assert!(a.unarchiving && stuck(&s, &a), "nothing was sent (no daemon), so it offers Try Again");
+    s.clock = 100.0;
+    expire(&mut s);
+    assert!(s.tabs.archived.is_some(), "a failed unarchive doesn't time out");
+    s.sessions = vec![row("a", false), row("b", false)];
+    expire(&mut s);
+    assert!(s.tabs.archived.is_none());
+    assert_eq!((s.selected.as_deref(), s.tabs.tabs.active()), (Some("b"), Some("b")));
+}
+
+#[test]
+fn a_draft_typed_just_before_switching_keeps_its_tab() {
+    let mut s = app();
+    s.sessions = vec![row("a", false), row("b", false), row("c", false)];
+    open(&mut s, &["a", "b"]);
+    set_width(&mut s, 380.0);
+    activate(&mut s, "a");
+    crate::ui::paste::set_composer(&mut s, "unsaved words");
+    crate::over::open_session(&mut s, "c");
+    assert_eq!(ids(&s), ["a", "c"], "b closes, not a, whose draft was still in the composer");
+}
+
+#[test]
+fn restored_tabs_show_on_now() {
+    let mut s = app();
+    s.sessions = vec![row("a", false)];
+    open(&mut s, &["a"]);
+    crate::over::go(&mut s, Screen::Now);
+    let spec = rune::AppSpec::<App> { ..rune::AppSpec::new("Agenthail", (1440.0, 900.0), crate::init, crate::ui::view) };
+    let mut rt = rune::App::new(spec).init(move || s).headless_runtime((1440.0, 900.0), rune::Env { system_dark: true, scale: 1.0 });
+    rt.frame(1.0 / 60.0);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.presented("session-tabs").is_some());
+    assert_eq!(rt.state.tabs.capacity, usize::MAX, "the Now toolbar doesn't size the strip");
 }
 
 #[test]
@@ -104,6 +164,7 @@ fn a_moved_session_keeps_its_tab() {
     let mut s = app();
     open(&mut s, &["old", "b"]);
     s.rekeyed.insert("old".into(), "new".into());
+    s.sessions = vec![row("new", false), row("b", false)];
     reconcile(&mut s);
     assert_eq!(ids(&s), ["new", "b"]);
 }

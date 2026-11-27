@@ -71,6 +71,16 @@ impl Local {
     }
 }
 
+impl Local {
+    pub fn renaming(&self) -> Option<&str> {
+        self.renaming.as_deref()
+    }
+
+    pub fn popup(&self) -> &super::complete::Popup {
+        &self.popup
+    }
+}
+
 pub struct Opened {
     pub id: Id,
     pub session: String,
@@ -238,6 +248,17 @@ pub fn rekeyed(s: &mut App, old: &str, new: &str) {
             l.composer_for = Some(new.to_string());
         }
     }
+}
+
+pub fn holder(s: &App, holds: impl Fn(&Local) -> bool) -> Option<Id> {
+    s.windows.stash.iter().find(|(id, l)| **id != s.windows.current && holds(l)).map(|(id, _)| *id)
+}
+
+pub fn within(s: &mut App, w: Id, f: impl FnOnce(&mut App)) {
+    let back = s.windows.current;
+    enter(s, w);
+    f(s);
+    enter(s, back);
 }
 
 pub fn key(id: Id) -> String {

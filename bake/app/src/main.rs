@@ -461,8 +461,8 @@ pub fn select(s: &mut App, id: &str) {
     s.selected = Some(id.to_string());
     s.screen = Screen::Session;
     s.tab = Tab::Conversation;
-    ui::tabs::shown(s, id);
     switch_composer(s);
+    ui::tabs::shown(s, id);
     s.composer.focused = true;
     load_pane(s, id);
     if let Some(work) = session(s, id).and_then(|x| x.primary_work(s.work_pick.get(id).map(String::as_str)).cloned()) {
@@ -499,7 +499,7 @@ pub fn load_pane(s: &mut App, id: &str) {
         s.panes.insert(id.to_string(), pane);
     }
     while s.lru.len() > 8 {
-        let Some(at) = s.lru.iter().position(|x| !s.windows.holds(x)) else { break };
+        let Some(at) = s.lru.iter().position(|x| !s.windows.holds(x) && s.selected.as_ref() != Some(x)) else { break };
         let old = s.lru.remove(at);
         s.panes.remove(&old);
     }

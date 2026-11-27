@@ -535,6 +535,12 @@ fn settled(s: &mut App, done: Done) {
             s.ov.notice = Some(failure(verb(&act), &error));
         }
         Done::Renamed(id, seq, result) => {
+            if s.menus.renaming.as_deref() != Some(id.as_str())
+                && let Some(w) = super::window::holder(s, |l| l.renaming() == Some(id.as_str()))
+            {
+                super::window::within(s, w, |s| settled(s, Done::Renamed(id, seq, result)));
+                return;
+            }
             s.menus.busy.remove(&(id.clone(), "menu"));
             super::gone::recheck(s, &id);
             let current = s.menus.renaming.as_deref() == Some(id.as_str()) && s.menus.rename_seq == seq;
