@@ -173,7 +173,7 @@ fn shot() {
     render(&mut rt, SETTINGS, &out.join(format!("roles-{scale}.png")));
 }
 
-const SETTINGS: (f32, f32) = (720.0, 620.0);
+pub(super) const SETTINGS: (f32, f32) = (720.0, 620.0);
 const LONG_ROLE: &str = "release-captain-for-the-weekly-train-42";
 
 fn roles_shown() -> Runtime<crate::settings::Prefs> {

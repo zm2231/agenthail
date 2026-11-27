@@ -73,6 +73,11 @@ pub fn show(s: &mut Prefs, roles: Roles, selected: &str) {
     settle(s);
 }
 
+#[cfg(test)]
+pub fn drafted(s: &Prefs) -> Option<&agents::Definition> {
+    s.agents.draft.as_ref().map(|d| &d.definition)
+}
+
 pub fn opened(s: &mut Prefs) {
     if s.tab == TAB {
         reload(s);
@@ -265,7 +270,7 @@ fn picker(s: &Prefs, key: String, label: &str, choices: Vec<String>, current: Op
     let open = s.agents.open.as_deref() == Some(key.as_str());
     let values = choices.clone();
     let toggled = key.clone();
-    Select::new(key.clone(), &choices)
+    Select::new(format!("settings-{key}"), &choices)
         .appearance(SelectAppearance::Field)
         .width(width)
         .current(current)
@@ -282,7 +287,6 @@ fn picker(s: &Prefs, key: String, label: &str, choices: Vec<String>, current: Op
             }
         })
         .build(k, layer)
-        .key(format!("settings-{key}"))
 }
 
 fn small(label: &str, key: &str, disabled: bool, press: impl Fn(&mut Prefs) + 'static, k: &Kit) -> El {

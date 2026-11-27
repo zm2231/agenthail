@@ -39,7 +39,7 @@ pub enum Read {
 
 pub use overview::sessions_changed;
 #[cfg(test)]
-pub use agents::show as show_agent_roles;
+pub use agents::{drafted as drafted_agent_role, show as show_agent_roles};
 #[cfg(test)]
 pub use keyboard::{PAGE as KEYBOARD_PAGE, opened as keyboard_opened, recorder as keyboard_recorder};
 
