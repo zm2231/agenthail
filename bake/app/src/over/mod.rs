@@ -105,17 +105,26 @@ impl Over {
 
     pub fn rebuild(&mut self, panes: &[(&str, &[feed::Item])]) {
         let d = self.live.world(panes);
-        let needs = d.needs();
+        let focused = self.needs.get(self.need_ix).map(|n| n.target.clone());
         self.hands_on = d.hands_on(&[]).iter().map(|x| x.id.clone()).collect();
-        self.need_ix = self.need_ix.min(needs.len().saturating_sub(1));
-        self.needs = needs;
+        self.needs = d.needs();
         self.d = d;
         self.worksearch.keep(&mut self.d);
-        self.arrange();
+        feed::derive::needs::arrange(&mut self.needs, self.looked_now.as_deref());
+        self.refocus(focused);
     }
 
     pub fn arrange(&mut self) {
+        let focused = self.needs.get(self.need_ix).map(|n| n.target.clone());
         feed::derive::needs::arrange(&mut self.needs, self.looked_now.as_deref());
+        self.refocus(focused);
+    }
+
+    fn refocus(&mut self, focused: Option<Target>) {
+        self.need_ix = match focused.and_then(|t| self.needs.iter().position(|n| n.target == t)) {
+            Some(at) => at,
+            None => self.need_ix.min(self.needs.len().saturating_sub(1)),
+        };
     }
 
     pub fn looked_at(&self, screen: &Screen) -> Option<&str> {

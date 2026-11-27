@@ -185,16 +185,6 @@ fn a_change_rebuilds_only_its_row_on_now() {
 
     assert_eq!(rebuilt(&mut rt, "need-", |s| s.ov.need_ix = 1), ["need-s:a", "need-s:b"], "focus moves between two rows");
 
-    let fresh = |s: &App| Need { kind: NeedKind::Question, group: Group::Waiting, project: "Alpha".into(), project_key: "p1".into(), title: "A new question".into(), who: "d".into(), at: s.ov.needs[0].at.clone(), target: Target::Session("d".into()), label: None };
-    assert_eq!(rebuilt(&mut rt, "need-", |s| {
-        let n = fresh(s);
-        s.ov.needs.insert(0, n);
-        s.ov.need_ix = 2;
-    }), ["need-s:d"], "a need inserted at the top builds only its own row");
-    assert_eq!(rebuilt(&mut rt, "need-", |s| {
-        s.ov.needs.remove(0);
-        s.ov.need_ix = 1;
-    }), Vec::<String>::new(), "removing it builds nothing");
     assert_eq!(rebuilt(&mut rt, "moving-", |s| x(s, "c").status = "idle".into()), Vec::<String>::new(), "a session that stops moving leaves the rows below it");
 
     let any = rebuilt(&mut rt, "", |s| s.ov.needs[2].title = "Third, reworded".into());
@@ -278,4 +268,38 @@ fn a_work_change_rebuilds_only_its_board_card() {
         s.ov.boards.insert("p1".into(), false);
     });
     assert!(lead.contains(&card(&rt, "W1")), "the lead view's compact cards build their own: {lead:?}");
+}
+
+fn asking(id: &str, minute: u64) -> Session {
+    session(id, 0, json!({"name": format!("Asker {id}"), "endTurn": {"headline": format!("Which way for {id}?"), "outcome": "needs_you", "at": format!("2026-11-27T08:{minute:02}:00Z")}}))
+}
+
+#[test]
+fn a_need_arriving_above_the_focused_one_builds_only_its_row() {
+    if !isolated("rows_memo::a_need_arriving_above_the_focused_one_builds_only_its_row") {
+        return;
+    }
+    let dir = Dir::new("rows-arrive");
+    let three = || vec![asking("a", 20), asking("b", 30), asking("c", 40)];
+    let mut rt = runtime(app(three(), &dir), SIZE);
+    rt.update(|s, _| {
+        crate::over::go(s, Screen::Now);
+        s.ov.now_brief = false;
+        crate::over::layout::set_collapsed(s, [false, false, false]);
+        s.ov.need_ix = 1;
+    });
+    settle(&mut rt);
+    let focused = |rt: &Runtime<App>| rt.state.ov.needs.get(rt.state.ov.need_ix).map(|n| n.target.clone());
+    assert_eq!(rt.state.ov.needs.iter().map(|n| n.target.clone()).collect::<Vec<_>>(), ["a", "b", "c"].map(|x| Target::Session(x.into())));
+    assert_eq!(focused(&rt), Some(Target::Session("b".into())));
+    for id in ["need-s:a", "need-s:b", "need-s:c"] {
+        shown(&rt, id);
+    }
+    let mut more = three();
+    more.push(asking("d", 10));
+    assert_eq!(snapshot_rebuilt(&mut rt, 2, "need-", more), ["need-s:d"], "an older need sorts to the top and builds only its row");
+    assert_eq!(rt.state.ov.needs[0].target, Target::Session("d".into()));
+    assert_eq!(focused(&rt), Some(Target::Session("b".into())), "focus stays on the same need");
+    assert_eq!(snapshot_rebuilt(&mut rt, 3, "need-", three()), Vec::<String>::new(), "it leaving builds nothing");
+    assert_eq!(focused(&rt), Some(Target::Session("b".into())), "focus still on the same need");
 }
