@@ -342,6 +342,8 @@ fn refusal(s: &App, item: &WorkKey, m: Move, words: &str) -> Option<&'static str
         Some(SENDING)
     } else if sends.held(item).is_some_and(|h| h != m) {
         Some(ledger::OTHER_HELD)
+    } else if sends.held(item) == Some(m) && !sends.asks_again(item, m) {
+        Some(ledger::ANSWERED_UNKNOWN)
     } else if sends.held_words(item, m) != Some(words) && !ledger::offered(w).contains(&m) {
         Some(ledger::NOT_OFFERED)
     } else {
@@ -440,11 +442,13 @@ fn moves(s: &App, w: &crate::over::Work, k: &Kit) -> Option<El> {
     for m in offered {
         let id = item.clone();
         let variant = if matches!(m, Move::Claim | Move::Submit | Move::Reopen) { ButtonVariant::Outline } else { ButtonVariant::Ghost };
-        r = r.child(Button::new(m.label()).variant(variant).control_size(ControlSize::Small).disabled(busy || held.is_some_and(|h| h != m)).on_press(move |s: &mut App| start(s, &id, m)).build(k).key(format!("work-move-{m:?}")));
+        r = r.child(Button::new(m.label()).variant(variant).control_size(ControlSize::Small).disabled(busy || held.is_some_and(|h| h != m || !s.ov.work.sends.asks_again(&item, m))).on_press(move |s: &mut App| start(s, &id, m)).build(k).key(format!("work-move-{m:?}")));
     }
     if let Some(m) = held.filter(|_| !busy) {
         let (id, words) = (item.clone(), s.ov.work.sends.held_words(&item, m).unwrap_or_default().to_string());
-        r = r.child(Button::new("Ask again").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).help("Asks Agenthail about the same send").on_press(move |s: &mut App| send(s, &id, m, &words)).build(k).key("work-ask-again"));
+        if s.ov.work.sends.asks_again(&item, m) {
+            r = r.child(Button::new("Ask again").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).help("Asks Agenthail about the same send").on_press(move |s: &mut App| send(s, &id, m, &words)).build(k).key("work-ask-again"));
+        }
         let id = item.clone();
         r = r.child(Button::new("Send as new").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).help("Sends it again as a fresh request, so it can show up twice if the first one landed").on_press(move |s: &mut App| send_new(s, &id, m)).build(k).key("work-send-new"));
     }

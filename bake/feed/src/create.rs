@@ -477,7 +477,7 @@ pub fn outcome(reply: std::result::Result<Value, RespondError>, launch: &Launch)
         }
         Err(error) => {
             let session = session_id(&error.reply);
-            if matches!(error.code.as_str(), "create_unknown" | "host_outcome_unknown") {
+            if matches!(error.code.as_str(), "create_unknown" | "host_outcome_unknown") || error.outcome_unknown() {
                 return Outcome::Unknown { session, message: UNKNOWN.into() };
             }
             if let Some(session) = session {
@@ -819,6 +819,7 @@ mod tests {
             (502, r#"{"error":{"code":"create_unknown","message":"initial turn outcome is ambiguous"}}"#),
             (504, r#"{"error":{"code":"host_outcome_unknown","message":"Host mac did not answer"}}"#),
             (502, r#"{"error":{"code":"bad_gateway","message":"host connection reset"}}"#),
+            (409, r#"{"error":{"code":"action_outcome_unknown","message":"This request was interrupted before its outcome was recorded, so it may have happened."},"sessionId":""}"#),
         ]);
         let launch = claude();
         assert_eq!(client.create_session(&launch), Outcome::Started { session: "s2".into(), note: "slow host".into() });
@@ -829,6 +830,7 @@ mod tests {
         assert!(matches!(client.create_session(&launch), Outcome::Unknown { session: None, .. }));
         assert!(matches!(client.create_session(&launch), Outcome::Unknown { session: None, .. }));
         assert!(matches!(client.create_session(&launch), Outcome::Unknown { session: None, .. }));
+        assert_eq!(client.create_session(&launch), Outcome::Unknown { session: None, message: UNKNOWN.into() }, "an interrupted create may have started");
     }
 
     #[test]

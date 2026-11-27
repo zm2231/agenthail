@@ -1,4 +1,5 @@
 mod history;
+mod hotkey;
 mod icons;
 mod instance;
 mod link;
@@ -174,6 +175,8 @@ pub struct App {
     revealed: Option<String>,
     pub missing: Option<ui::gone::Missing>,
     pub notify: notify::State,
+    pub windows: ui::window::Windows,
+    pub tabs: ui::tabs::State,
     last_row: Option<Session>,
     client: Option<Client>,
     overview_poke: Option<Sender<Ask>>,
@@ -377,6 +380,8 @@ fn empty(live: Overview, persist: bool) -> App {
         revealed: None,
         missing: None,
         notify: notify::State::default(),
+        windows: Default::default(),
+        tabs: Default::default(),
         last_row: None,
         client: None,
         overview_poke: None,
@@ -390,6 +395,10 @@ fn empty(live: Overview, persist: bool) -> App {
         #[cfg(test)]
         rebuilds: 0,
     }
+}
+
+fn placeholder() -> App {
+    empty(Overview::default(), false)
 }
 
 fn init() -> App {
@@ -462,6 +471,7 @@ pub fn select(s: &mut App, id: &str) {
     s.screen = Screen::Session;
     s.tab = Tab::Conversation;
     switch_composer(s);
+    ui::tabs::shown(s, id);
     s.composer.focused = true;
     load_pane(s, id);
     if let Some(work) = session(s, id).and_then(|x| x.primary_work(s.work_pick.get(id)).cloned()) {
@@ -498,7 +508,8 @@ pub fn load_pane(s: &mut App, id: &str) {
         s.panes.insert(id.to_string(), pane);
     }
     while s.lru.len() > 8 {
-        let old = s.lru.remove(0);
+        let Some(at) = s.lru.iter().position(|x| !s.windows.holds(x) && s.selected.as_ref() != Some(x)) else { break };
+        let old = s.lru.remove(at);
         s.panes.remove(&old);
     }
 }
@@ -542,7 +553,6 @@ fn selected_changed(s: &mut App, id: &str) {
         ui::queue::fetch(s, id);
     }
     ui::subagents::refresh(s, id);
-    ui::native_queue::changed(s, id);
     if let Some(work) = session(s, id).and_then(|x| x.primary_work(s.work_pick.get(id)).cloned()) {
         fetch_item(s, &work.key());
     }
@@ -571,6 +581,9 @@ fn changed_elsewhere(s: &mut App, wants: feed::watch::Wants) {
     if wants.extensions {
         over::extensions::changed(s);
     }
+    if let Some(id) = wants.native_queue {
+        ui::native_queue::changed(s, &id);
+    }
     if let Some(id) = wants.session
         && s.selected.as_deref() == Some(id.as_str())
     {
@@ -598,6 +611,7 @@ fn reopened(s: &mut App) {
     if let Some(id) = s.selected.clone() {
         selected_changed(s, &id);
         selected_moved(s, &id);
+        ui::native_queue::changed(s, &id);
     }
 }
 
@@ -805,6 +819,10 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
         }
         _ => busy,
     };
+    if s.unsent.list(id).iter().any(|u| u.outcome_unknown && u.same(&message, &attachments)) {
+        note(s, id, ASKED_UNKNOWN.into());
+        return;
+    }
     ui::paste::set_composer(s, "");
     ui::attach::clear(s, id);
     ui::complete::sending(s, id);
@@ -864,11 +882,18 @@ fn clear_sent(s: &mut App, id: &str, unsent: &Unsent) {
     ui::attach::clear(s, id);
 }
 
-pub fn can_retry(s: &App, id: &str) -> bool {
+fn resendable(s: &App, id: &str) -> bool {
     !closed(s, id) && s.unsent.latest(id).is_some_and(|u| feed::attach::missing_upload(&u.error).is_none())
 }
 
+pub fn can_retry(s: &App, id: &str) -> bool {
+    resendable(s, id) && s.unsent.latest(id).is_some_and(|u| !u.outcome_unknown)
+}
+
 pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
+    if !can_retry(s, id) {
+        return;
+    }
     let now = feed::composer::now_ms();
     let oldest = s.unsent.list(id).iter().find(|u| u.redelivering(now)).or(s.unsent.latest(id)).map(|u| (u.key.clone(), u.redelivering(now)));
     if let Some((key, auto)) = oldest {
@@ -995,11 +1020,18 @@ fn shows(s: &App, id: &str, unsent: &Unsent) -> bool {
 }
 
 pub fn offers_new_send(s: &App, id: &str) -> bool {
-    can_retry(s, id) && s.unsent.latest(id).is_some_and(|u| u.offers_new_send())
+    resendable(s, id) && new_send_target(s, id).is_some()
+}
+
+const ASKED_UNKNOWN: &str = "Agenthail can't tell whether this message arrived, and sending it the same way gets the same answer. Check the conversation, then use Send as new.";
+
+fn new_send_target(s: &App, id: &str) -> Option<Unsent> {
+    let list = s.unsent.list(id);
+    list.iter().rev().find(|u| u.outcome_unknown && u.offers_new_send()).or_else(|| list.last().filter(|u| u.offers_new_send())).cloned()
 }
 
 pub fn send_as_new(s: &mut App, id: &str, tx: &mut Tx) {
-    let Some(unsent) = s.unsent.latest(id).cloned().filter(|u| u.offers_new_send()) else { return };
+    let Some(unsent) = new_send_target(s, id) else { return };
     if sending(s, id) || s.client.is_none() || !confirmed(s, id, Confirm::SendNew, true) {
         return;
     }
@@ -1045,6 +1077,7 @@ fn fresh(s: &App, id: &str, text: String, attachments: Vec<feed::attach::Upload>
         sent_at: feed::composer::now_ms(),
         order: feed::composer::send_stamp(feed::composer::now_ms()),
         unanswered: true,
+        outcome_unknown: false,
     }
 }
 
@@ -1188,7 +1221,7 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
     settle(s, &id, &pending.key);
     s.unsent.remove(&id, &pending.key);
     let failure = match result {
-        Ok(Delivered::Unconfirmed) => Some((true, true, "the daemon took it but hasn't confirmed delivery".to_string(), false)),
+        Ok(Delivered::Unconfirmed) => Some((true, true, "the daemon took it but hasn't confirmed delivery".to_string(), false, false)),
         Ok(receipt @ (Delivered::Queued(_) | Delivered::QueuedUntilAnswer(_))) => {
             s.status_line.remove(&id);
             s.queued.entry(id.clone()).or_default().push((s.snapshots, receipt));
@@ -1200,12 +1233,12 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
             ui::complete::delivered(s, &id, &pending.text);
             None
         }
-        Err(error) => Some((error.maybe_delivered, error.answered, error.message.clone(), feed::composer::redelivers(&error))),
+        Err(error) => Some((error.maybe_delivered, error.answered, error.message.clone(), feed::composer::redelivers(&error), error.outcome_unknown())),
     };
     let clock = s.clock;
     match failure {
-        Some((maybe_delivered, answered, error, again)) => {
-            let failed = Unsent { unanswered: again, ..pending.failed(retry, maybe_delivered, answered, error) };
+        Some((maybe_delivered, answered, error, again, outcome_unknown)) => {
+            let failed = Unsent { unanswered: again, outcome_unknown, ..pending.failed(retry, maybe_delivered, answered, error) };
             if failed.redelivering(feed::composer::now_ms()) {
                 s.redeliver.entry(id.clone()).or_insert_with(|| feed::composer::Backoff::starting(clock)).failed(clock);
                 s.unsent.add(&id, failed);
@@ -1297,6 +1330,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         }
         ui::attach::rekey(s, &old, &new);
         ui::complete::rekey(s, &old, &new);
+        ui::window::rekeyed(s, &old, &new);
         move_key(&mut s.status_line, &old, &new);
         move_key(&mut s.busy_pick, &old, &new);
         move_key(&mut s.redeliver, &old, &new);
@@ -1317,6 +1351,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
 }
 
 fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
+    ui::attach::adopt(s);
     s.clock = t;
     let mut changed = false;
     let mut arrived = false;
@@ -1328,6 +1363,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                     s.sessions = s.ov.live.sessions().to_vec();
                     s.notify.sessions_moved = true;
                     feed::holders::pins().prune(&s.sessions);
+                    ui::tabs::reconcile(s);
                     fetch_tails(s);
                     for project in s.ov.live.missing_ledgers() {
                         fetch_ledger(s, &project);
@@ -1377,6 +1413,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.sessions = s.ov.live.sessions().to_vec();
                 s.notify.sessions_moved = true;
                 feed::holders::pins().prune(&s.sessions);
+                ui::tabs::reconcile(s);
                 fetch_tails(s);
                 for project in s.ov.live.missing_ledgers() {
                     fetch_ledger(s, &project);
@@ -1577,6 +1614,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= look::poll(look::Window::Main, tx);
     ui::paste::settle(s);
     changed |= ui::notice::poll(s);
+    changed |= ui::tabs::expire(s);
+    ui::window::open_shown(s);
+    ui::window::note_frames(s);
     switch_composer(s);
     if let Some(id) = s.composer_for.clone() {
         s.drafts.set(&id, &ui::paste::draft(s));
@@ -1588,6 +1628,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     menubar::sync_keys(s);
     menubar::warn(s);
     menubar::badge(s);
+    hotkey::tick();
     if let Some(due) = over::worksearch::wait(s) {
         s.wake.after(tx, due);
     }
@@ -1596,14 +1637,19 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
 }
 
 fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
-    if over::note_open(s) {
+    use ui::window::{Kind, shows};
+    if over::note_open(s) && shows(s, Kind::Note) {
         return over::on_key(s, ev, tx);
     }
     if ev.is_command(',') {
         settings::open();
         return true;
     }
-    (!over::projects::open(s) && ui::new_session::on_key(s, ev, tx)) || over::on_key(s, ev, tx)
+    (shows(s, Kind::NewSession) && !(over::projects::open(s) && shows(s, Kind::Projects)) && ui::new_session::on_key(s, ev, tx)) || over::on_key(s, ev, tx)
+}
+
+fn on_focus(_: &mut App, focused: bool, _: &mut Tx) {
+    hotkey::focus(feed::hotkey::Window::Main, focused);
 }
 
 fn on_quit(s: &mut App, _: &mut Tx) {
@@ -1629,7 +1675,8 @@ fn main() {
     if !rune::single_instance(link::INSTANCE) || !instance::only_copy(link::LOCK) {
         return;
     }
-    let mut app = rune::App::new(AppSpec::<App> {
+    let shared = ui::window::share(init());
+    let main = rune::App::new(AppSpec::<App> {
         poll: Some(poll),
         on_key: Some(on_key),
         setup: Some(ui::attach::setup),
@@ -1637,12 +1684,18 @@ fn main() {
         families: rune_theme_opencode::FAMILIES,
         min_size: Some((1100.0, 700.0)),
         ..AppSpec::new("Agenthail", (1440.0, 900.0), init, ui::view)
-    })
+    });
+    let mut app = rune::WindowSpec::from_app("main", main)
+        .shared(&shared)
+        .app
         .chrome(Chrome { full_size_content: true, traffic_lights: Some((20.0, 20.0)), drag_regions: true })
         .window_options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
         .srgb_blend(true)
         .on_quit(on_quit)
+        .on_focus(on_focus)
         .on_open_url(link::on_open_url);
+    hotkey::keep(app.handle());
+    app.handle().update(|_, _| hotkey::sync());
     let mut prefs = settings::spec();
     prefs.options = WindowOptions { visible: false, resizable: true, ..Default::default() };
     let (handle, window) = app.window(prefs);

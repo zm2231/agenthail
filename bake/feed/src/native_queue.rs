@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::catalog::{Client, RespondError, Session};
+use crate::catalog::{Client, OUTCOME_UNKNOWN, RespondError, Session, unknown_outcome};
 
 pub const TITLE: &str = "Codex queue";
 pub const EMPTY: &str = "Nothing queued in Codex.";
@@ -10,7 +10,6 @@ pub const EMPTY_INPUT: &str = "Empty input";
 pub const LOADING: &str = "Loading Codex's queue";
 pub const EDITOR_NOTE: &str = "Codex starts queued input after the current turn, in order.";
 const STILL_FINISHING: &str = "Agenthail is still finishing this request.";
-const UNKNOWN_SUFFIX: &str = "The outcome is unknown; check the session before retrying.";
 
 pub fn shown(x: &Session) -> bool {
     x.surface == "codex"
@@ -129,12 +128,11 @@ pub enum Outcome {
 impl Outcome {
     pub fn of(result: Result<(), RespondError>) -> Outcome {
         let Err(error) = result else { return Outcome::Done };
-        let unknown = |message: &str| format!("{} {UNKNOWN_SUFFIX}", message.trim_end());
         match error.code.as_str() {
-            "session_operation_unknown" | "host_outcome_unknown" => Outcome::Unknown(unknown(&error.message)),
-            "submitted" => Outcome::Pending(unknown(STILL_FINISHING)),
-            _ if error.status == 0 && error.maybe_delivered => Outcome::Pending(unknown(&error.message)),
-            _ if error.status == 504 && error.maybe_delivered => Outcome::Pending(unknown(&error.message)),
+            "session_operation_unknown" | "host_outcome_unknown" | OUTCOME_UNKNOWN => Outcome::Unknown(unknown_outcome(&error.message)),
+            "submitted" => Outcome::Pending(unknown_outcome(STILL_FINISHING)),
+            _ if error.status == 0 && error.maybe_delivered => Outcome::Pending(unknown_outcome(&error.message)),
+            _ if error.status == 504 && error.maybe_delivered => Outcome::Pending(unknown_outcome(&error.message)),
             _ => Outcome::Failed(error.message),
         }
     }
@@ -203,6 +201,11 @@ impl Keys {
         }
     }
 
+    pub fn abandon(&mut self, session: &str, act: &Act) {
+        let identity = act.identity(session);
+        self.pending.retain(|p| p.identity != identity);
+    }
+
     pub fn read_started(&mut self) -> u64 {
         self.seq += 1;
         self.seq
@@ -231,6 +234,10 @@ pub struct Queue {
 }
 
 impl Queue {
+    pub fn of(session: &str, generation: u64) -> Queue {
+        Queue { session: Some(session.to_string()), generation, ..Queue::default() }
+    }
+
     pub fn reset(&mut self, session: &str) {
         if self.session.as_deref() == Some(session) {
             return;

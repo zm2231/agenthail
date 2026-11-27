@@ -207,7 +207,7 @@ fn a_long_role_name_stays_inside_the_role_list_at_larger_text() {
     assert!(row[3] > lead[3] * 1.5, "the long name wraps onto more lines: {row:?} vs {lead:?}");
 }
 
-fn settings_on(tab: usize, page: usize) -> Runtime<crate::settings::Prefs> {
+pub(super) fn settings_on(tab: usize, page: usize) -> Runtime<crate::settings::Prefs> {
     let spec = AppSpec::<crate::settings::Prefs> {
         poll: Some(crate::settings::poll),
         fonts: rune_theme_opencode::FONTS,

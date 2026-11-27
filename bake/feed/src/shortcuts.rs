@@ -6,11 +6,13 @@ pub const DOMAIN: &str = "com.agenthail.app";
 pub const KEY: &str = "keyboardShortcuts";
 pub const ANY_APP_KEY: &str = "KeyboardShortcuts_openPalette";
 pub const ANY_APP: &str = "Open sessions from any app";
+pub const ANY_APP_ID: &str = "openPalette";
 
 const CMD: i64 = 0x100;
 const SHIFT: i64 = 0x200;
 const OPTION: i64 = 0x800;
 const CONTROL: i64 = 0x1000;
+const MAC: bool = cfg!(target_os = "macos");
 const MODS: [(i64, &str); 4] = [(CONTROL, "ctrl"), (OPTION, "alt"), (SHIFT, "shift"), (CMD, "mod")];
 
 const KEYS: &[(i64, &str)] = &[
@@ -68,6 +70,29 @@ impl Stored {
     }
 
     pub fn spec(&self) -> Option<String> {
+        self.spec_with("mod")
+    }
+
+    pub fn global_spec(&self) -> Option<String> {
+        self.spec_with("super")
+    }
+
+    fn in_app_twins(self, mac: bool) -> Vec<Stored> {
+        if mac {
+            return vec![self];
+        }
+        if self.carbon_modifiers & CMD != 0 {
+            return Vec::new();
+        }
+        let mut out = vec![self];
+        if self.carbon_modifiers & CONTROL != 0 {
+            out.push(Stored { carbon_modifiers: self.carbon_modifiers & !CONTROL | CMD, ..self });
+            out.push(Stored { carbon_modifiers: self.carbon_modifiers | CMD, ..self });
+        }
+        out
+    }
+
+    fn spec_with(&self, command: &str) -> Option<String> {
         let (_, key) = KEYS.iter().find(|(code, _)| *code == self.carbon_key_code)?;
         if self.carbon_modifiers & !(CMD | SHIFT | OPTION | CONTROL) != 0 {
             return None;
@@ -75,7 +100,7 @@ impl Stored {
         let mut out = String::new();
         for (bit, name) in MODS {
             if self.carbon_modifiers & bit != 0 {
-                out.push_str(name);
+                out.push_str(if bit == CMD { command } else { name });
                 out.push('+');
             }
         }
@@ -133,6 +158,12 @@ pub const COMMANDS: &[Command] = &[
     cmd("previousSession", "Previous session", "mod+up", Group::Sessions),
     cmd("nextSession", "Next session", "mod+down", Group::Sessions),
     cmd("talk", "Talk to orchestrator", "alt+mod+t", Group::Sessions),
+    Command { id: "openInNewWindow", title: "Open session in new window", default: None, group: Group::Sessions },
+    cmd("newTab", "New tab", "mod+t", Group::Sessions),
+    cmd("closeTab", "Close tab", "mod+w", Group::Sessions),
+    cmd("nextTab", "Next tab", "shift+mod+bracketright", Group::Sessions),
+    cmd("previousTab", "Previous tab", "shift+mod+bracketleft", Group::Sessions),
+    cmd("toggleInspector", "Show or hide inspector", "alt+mod+i", Group::View),
     cmd("jumpToLatest", "Jump to latest", "mod+l", Group::View),
     cmd("refresh", "Refresh", "mod+r", Group::View),
     cmd("textBigger", "Make text bigger", "mod+equal", Group::View),
@@ -169,7 +200,6 @@ pub const FIXED: &[(&str, &str)] = &[
     ("shift+alt+mod+2", "Focus the second pane"),
     ("shift+alt+mod+3", "Focus the third pane"),
     ("mod+q", "Quit Agenthail"),
-    ("mod+w", "Close window"),
     ("mod+h", "Hide Agenthail"),
     ("mod+m", "Minimize"),
     ("mod+c", "Copy"),
@@ -186,16 +216,10 @@ pub const MAC_APP_ONLY: &[(&str, &str, Option<&str>)] = &[
     ("showAll", "Show All", Some("mod+3")),
     ("showArchived", "Show Archived", Some("mod+4")),
     ("toggleSidebar", "Show or hide sidebar", Some("ctrl+mod+s")),
-    ("toggleInspector", "Show or hide inspector", Some("alt+mod+i")),
     ("expandAgentMessages", "Expand agent messages", Some("alt+mod+e")),
     ("send", "Send", Some("mod+enter")),
     ("sendAlternate", "Send the other way (queue or steer)", Some("alt+mod+enter")),
     ("rename", "Rename session", None),
-    ("openInNewWindow", "Open session in new window", None),
-    ("newTab", "New tab", Some("mod+t")),
-    ("closeTab", "Close tab", Some("mod+w")),
-    ("nextTab", "Next tab", Some("shift+mod+bracketright")),
-    ("previousTab", "Previous tab", Some("shift+mod+bracketleft")),
 ];
 
 pub fn command(id: &str) -> Option<&'static Command> {
@@ -238,14 +262,46 @@ impl Shortcuts {
     }
 
     pub fn any_customized(&self) -> bool {
-        COMMANDS.iter().any(|c| self.customized(c.id))
+        self.any_app.is_some() || COMMANDS.iter().any(|c| self.customized(c.id))
+    }
+
+    pub fn any_app(&self) -> Option<Stored> {
+        self.any_app
+    }
+
+    pub fn any_app_json(&self) -> Option<String> {
+        self.any_app.and_then(|s| serde_json::to_string(&s).ok())
+    }
+
+    pub fn set_any_app(&mut self, shortcut: Option<Stored>) -> Result<(), &'static str> {
+        self.set_any_app_on(shortcut, MAC)
+    }
+
+    pub fn any_app_owner(&self, shortcut: Stored) -> Option<&'static str> {
+        self.any_app_owner_on(shortcut, MAC)
+    }
+
+    fn any_app_owner_on(&self, shortcut: Stored, mac: bool) -> Option<&'static str> {
+        shortcut.in_app_twins(mac).into_iter().find_map(|s| self.owner_on(s, ANY_APP_ID, mac))
+    }
+
+    fn set_any_app_on(&mut self, shortcut: Option<Stored>, mac: bool) -> Result<(), &'static str> {
+        if let Some(owner) = shortcut.and_then(|s| self.any_app_owner_on(s, mac)) {
+            return Err(owner);
+        }
+        self.any_app = shortcut;
+        Ok(())
     }
 
     pub fn owner(&self, shortcut: Stored, except: &str) -> Option<&'static str> {
+        self.owner_on(shortcut, except, MAC)
+    }
+
+    fn owner_on(&self, shortcut: Stored, except: &str, mac: bool) -> Option<&'static str> {
         if let Some(c) = COMMANDS.iter().find(|c| c.id != except && self.get(c.id) == Some(shortcut)) {
             return Some(c.title);
         }
-        if self.any_app == Some(shortcut) {
+        if except != ANY_APP_ID && self.any_app.is_some_and(|a| a.in_app_twins(mac).contains(&shortcut)) {
             return Some(ANY_APP);
         }
         let mac_app = |(id, _, default): &&(&str, &str, Option<&str>)| match self.overrides.get(*id) {
@@ -284,6 +340,7 @@ impl Shortcuts {
 
     pub fn reset_all(&mut self) -> Vec<(&'static str, &'static str)> {
         let before = self.overrides.clone();
+        self.any_app = None;
         for c in COMMANDS {
             self.overrides.remove(c.id);
         }
@@ -335,9 +392,35 @@ mod tests {
     }
 
     #[test]
+    fn the_shortcut_from_any_app_names_the_super_key_on_every_desktop() {
+        assert_eq!(s("super+alt+k").global_spec().as_deref(), Some("alt+super+k"));
+        assert_eq!(s("ctrl+super+k").global_spec().as_deref(), Some("ctrl+super+k"));
+        assert_eq!(s("ctrl+alt+space").global_spec().as_deref(), Some("ctrl+alt+space"));
+        assert_eq!(s("mod+k").spec().as_deref(), Some("mod+k"), "in-app shortcuts keep the platform's primary key");
+    }
+
+    #[test]
+    fn off_macos_the_shortcut_from_any_app_clashes_by_the_keys_it_presses() {
+        let mut sc = Shortcuts::default();
+        assert_eq!(sc.set_any_app_on(Some(s("super+k")), false), Ok(()), "Super+K isn't Go to session's Ctrl+K");
+        assert_eq!(sc.owner_on(s("mod+k"), "goToSession", false), None);
+        assert_eq!(sc.set_any_app_on(Some(s("ctrl+k")), false), Err("Go to session"), "Ctrl+K is Go to session off macOS");
+        assert_eq!(sc.set_any_app_on(Some(s("ctrl+s")), false), Err("Stash the draft, or bring it back"));
+        assert_eq!(sc.set_any_app_on(Some(s("ctrl+alt+g")), false), Ok(()));
+        assert_eq!(sc.owner_on(s("alt+mod+g"), "refresh", false), Some(ANY_APP), "an in-app Ctrl+Alt+G would clash");
+        assert_eq!(sc.owner_on(s("ctrl+alt+g"), "refresh", false), Some(ANY_APP));
+        assert_eq!(sc.owner_on(s("ctrl+alt+mod+g"), "refresh", false), Some(ANY_APP), "Ctrl+⌘ folds to Ctrl off macOS");
+        let mut folded = Shortcuts::load(Some(br#"{"refresh":{"carbonKeyCode":5,"carbonModifiers":4352}}"#), None);
+        assert_eq!(folded.set_any_app_on(Some(s("ctrl+g")), false), Err("Refresh"));
+        let mut mac = Shortcuts::default();
+        assert_eq!(mac.set_any_app_on(Some(s("super+k")), true), Err("Go to session"), "on macOS Super is ⌘");
+        assert_eq!(mac.set_any_app_on(Some(s("ctrl+k")), true), Ok(()));
+    }
+
+    #[test]
     fn every_default_parses_and_none_clash() {
         let sc = Shortcuts::default();
-        for c in COMMANDS {
+        for c in COMMANDS.iter().filter(|c| c.default.is_some()) {
             let mine = sc.get(c.id).unwrap_or_else(|| panic!("{} parses", c.id));
             assert_eq!(sc.owner(mine, c.id), None, "{} clashes", c.id);
         }
@@ -431,9 +514,28 @@ mod tests {
 
     #[test]
     fn the_mac_apps_shortcut_from_any_app_is_taken() {
-        let mut sc = Shortcuts::load(None, Some(r#"{"carbonKeyCode":40,"carbonModifiers":2304}"#));
-        assert_eq!(sc.set("refresh", Some(s("alt+mod+k"))), Err(ANY_APP));
-        assert_eq!(Shortcuts::load(None, Some("false")).set("refresh", Some(s("alt+mod+k"))), Ok(()));
+        let sc = Shortcuts::load(None, Some(r#"{"carbonKeyCode":40,"carbonModifiers":2304}"#));
+        assert_eq!(sc.owner_on(s("alt+mod+k"), "refresh", true), Some(ANY_APP));
+        assert_eq!(sc.owner_on(s("alt+mod+k"), "refresh", false), None, "off macOS it is Super+Alt+K, not Ctrl+Alt+K");
+        assert_eq!(Shortcuts::load(None, Some("false")).owner_on(s("alt+mod+k"), "refresh", true), None);
+    }
+
+    #[test]
+    fn the_shortcut_from_any_app_is_chosen_like_a_command_and_saved_as_the_mac_app_does() {
+        let mut sc = Shortcuts::default();
+        assert_eq!(sc.any_app(), None, "the Mac app ships it unset");
+        assert!(!sc.any_customized());
+        assert_eq!(sc.set_any_app_on(Some(s("mod+k")), true), Err("Go to session"));
+        assert_eq!(sc.set_any_app_on(Some(s("mod+q")), true), Err("Quit Agenthail"));
+        assert_eq!(sc.set_any_app_on(Some(s("alt+mod+k")), true), Ok(()));
+        assert_eq!(sc.set_any_app_on(Some(s("alt+mod+k")), true), Ok(()), "its own shortcut is not a clash");
+        assert_eq!(sc.any_app_json().as_deref(), Some(r#"{"carbonKeyCode":40,"carbonModifiers":2304}"#));
+        assert_eq!(Shortcuts::load(None, sc.any_app_json().as_deref()).any_app(), Some(s("alt+mod+k")));
+        assert!(sc.any_customized(), "Restore Defaults clears it");
+        sc.reset_all();
+        assert_eq!(sc.any_app(), None);
+        assert_eq!(sc.any_app_json(), None);
+        assert_eq!(sc.set_any_app(None), Ok(()));
     }
 
     #[test]

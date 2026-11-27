@@ -12,6 +12,8 @@ use crate::{App, Bg, Fixtures, Screen};
 
 #[path = "text_scale_tests.rs"]
 mod text_scale;
+#[path = "keyboard_tests.rs"]
+mod keyboard;
 
 const DT: f64 = 1.0 / 60.0;
 const EPOCH: &str = "e1";

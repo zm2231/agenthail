@@ -54,6 +54,10 @@ pub fn open_read(s: &mut App, row: Session) {
     crate::over::open_session(s, &id);
 }
 
+pub fn activity_open(s: &App) -> bool {
+    s.ov.search.activity.panel.is_some()
+}
+
 pub fn activity_view(s: &App, layer: &mut Vec<El>, k: &Kit) {
     activity::view(s, layer, k);
 }
@@ -150,7 +154,7 @@ pub fn can_stop(s: &App, id: &str) -> bool {
 }
 
 pub fn run(s: &mut App, command: Command, tx: &mut Tx) {
-    s.ov.jump = None;
+    crate::over::close_palette(s);
     match command {
         Command::NewSession => {
             let prefill = crate::ui::new_session::prefill_for(s);
@@ -166,6 +170,12 @@ pub fn run(s: &mut App, command: Command, tx: &mut Tx) {
                 crate::ui::session_menu::run(s, &id, feed::menu::Act::Rename);
             }
         }
+        Command::Window => {
+            if let Some(id) = selected(s) {
+                crate::ui::window::show(s, &id);
+            }
+        }
+        Command::Inspector => s.ov.inspector.toggle(),
         Command::Refresh => refresh(s),
         Command::Restart => crate::ui::connect::start_daemon(s),
         Command::Activity => activity::open(s, tx),

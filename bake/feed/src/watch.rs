@@ -56,10 +56,30 @@ pub struct Wants {
     pub extensions: bool,
     pub reset: bool,
     pub session: Option<String>,
+    pub native_queue: Option<String>,
     pub scoped: bool,
 }
 
 impl Wants {
+    pub fn merge(&mut self, other: Wants) {
+        if *self == Wants::default() {
+            *self = other;
+            return;
+        }
+        self.scoped = self.scoped && other.scoped && self.session == other.session;
+        self.snapshot |= other.snapshot;
+        self.overview |= other.overview;
+        self.hosts |= other.hosts;
+        self.extensions |= other.extensions;
+        self.reset |= other.reset;
+        if other.session.is_some() {
+            self.session = other.session;
+        }
+        if other.native_queue.is_some() {
+            self.native_queue = other.native_queue;
+        }
+    }
+
     pub fn overview_unless(&self, known: impl Fn(&str) -> bool) -> bool {
         self.overview && !(self.scoped && self.session.as_deref().is_some_and(known))
     }
@@ -71,9 +91,10 @@ pub fn wants(event: &Event) -> Wants {
     let hosts = matches!(kind, "host.paired" | "host.removed" | "host.state");
     let snapshot = reset || hosts || matches!(kind, "state.changed" | "settings.updated" | "signin.changed");
     let extensions = reset || hosts || matches!(kind, "extension.changed" | "extension.badge");
-    let session = event.data["entityId"].as_str().filter(|e| !e.is_empty()).map(String::from);
+    let entity = event.data["entityId"].as_str().filter(|e| !e.is_empty()).map(String::from);
+    let (session, native_queue) = if kind == "native.queue.changed" { (None, entity) } else { (entity, None) };
     let scoped = kind == "state.changed" && session.is_some();
-    Wants { snapshot, overview: snapshot, hosts, extensions, reset, session, scoped }
+    Wants { snapshot, overview: snapshot, hosts, extensions, reset, session, native_queue, scoped }
 }
 
 #[derive(Debug, Clone, PartialEq)]

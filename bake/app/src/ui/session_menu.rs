@@ -271,7 +271,7 @@ pub(super) fn not_sent(s: &mut App) -> bool {
 
 fn verb(act: &Act) -> &'static str {
     match act {
-        Act::Rename => "Renaming",
+        Act::Window | Act::Rename => "Renaming",
         Act::Terminal => "Opening the terminal",
         Act::Call => "Calling",
         Act::Pr(_) => "Opening the pull request",
@@ -299,6 +299,9 @@ pub(super) fn failure(what: &str, error: &RespondError) -> String {
 pub fn run(s: &mut App, id: &str, act: Act) {
     s.menus.open = None;
     match act {
+        Act::Window => {
+            super::window::show(s, id);
+        }
         Act::Rename => start_rename(s, id),
         Act::Pr(url) => open_link(&url),
         Act::PrLink => super::pr_link::start(s, id),
@@ -337,7 +340,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
                     Act::Archive(on) => c.session_archive(&id, *on).map(|_| Some(Patch::Archived(*on))),
                     Act::Snooze(_) => c.session_snooze(&id, until).map(|snooze| Some(Patch::Snoozed(snooze))),
                     Act::Wake => c.session_wake(&id).map(|_| Some(Patch::Snoozed(None))),
-                    Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink | Act::Call | Act::Adopt | Act::Move | Act::MakeLead | Act::Process(_) | Act::Fork => Ok(None),
+                    Act::Window | Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink | Act::Call | Act::Adopt | Act::Move | Act::MakeLead | Act::Process(_) | Act::Fork => Ok(None),
                 };
                 Some(Done::Acted(id, act, result))
             });
@@ -348,6 +351,16 @@ pub fn run(s: &mut App, id: &str, act: Act) {
 pub fn changing(s: &App, id: &str) -> bool {
     let now = feed::composer::current(&s.rekeyed, id);
     s.menus.busy.iter().any(|(k, what)| *what == "menu" && feed::composer::current(&s.rekeyed, k) == now)
+}
+
+impl Menus {
+    pub fn renaming_with(&self, id: &str, seq: u64) -> bool {
+        self.renaming.as_deref() == Some(id) && self.rename_seq == seq
+    }
+
+    pub fn swap_rename_seq(&mut self, seq: &mut u64) {
+        std::mem::swap(&mut self.rename_seq, seq);
+    }
 }
 
 pub fn open_at(s: &mut App, id: &str, at: PointerPress) {
@@ -532,6 +545,12 @@ fn settled(s: &mut App, done: Done) {
             s.ov.notice = Some(failure(verb(&act), &error));
         }
         Done::Renamed(id, seq, result) => {
+            if !s.menus.renaming_with(&id, seq)
+                && let Some(w) = super::window::holder(s, |l| l.renaming() == Some(id.as_str()) && l.rename_seq() == seq)
+            {
+                super::window::within(s, w, |s| settled(s, Done::Renamed(id, seq, result)));
+                return;
+            }
             s.menus.busy.remove(&(id.clone(), "menu"));
             super::gone::recheck(s, &id);
             let current = s.menus.renaming.as_deref() == Some(id.as_str()) && s.menus.rename_seq == seq;
