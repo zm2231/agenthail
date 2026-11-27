@@ -84,6 +84,7 @@ fn a_session_change_rebuilds_only_its_sidebar_row() {
     assert_eq!(snapshot_rebuilt(&mut rt, 4, "s-", with("b", json!({"name": "Bravo renamed", "status": "busy"}))), ["s-b"], "busy");
     assert_eq!(snapshot_rebuilt(&mut rt, 5, "s-", with("b", json!({"name": "Bravo renamed", "status": "busy", "display": {"label": "Waiting on you"}}))), ["s-b"], "waiting");
     assert_eq!(rebuilt(&mut rt, "s-", |s| crate::over::open_session(s, "c")), ["s-c"], "selection draws on the opened row only");
+    assert_eq!(rebuilt(&mut rt, "s-", |_| crate::look::hold_text_scale(Some(1.2))), ["s-a", "s-b", "s-c"], "a new text size redraws every row");
 }
 
 #[test]
