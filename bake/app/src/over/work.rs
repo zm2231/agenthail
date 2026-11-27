@@ -440,7 +440,7 @@ fn moves(s: &App, w: &crate::over::Work, k: &Kit) -> Option<El> {
     for m in offered {
         let id = item.clone();
         let variant = if matches!(m, Move::Claim | Move::Submit | Move::Reopen) { ButtonVariant::Outline } else { ButtonVariant::Ghost };
-        r = r.child(Button::new(m.label()).variant(variant).control_size(ControlSize::Small).disabled(busy || held.is_some_and(|h| h != m)).on_press(move |s: &mut App| start(s, &id, m)).build(k).key(format!("work-move-{m:?}")));
+        r = r.child(Button::new(m.label()).variant(variant).control_size(ControlSize::Small).disabled(busy || held.is_some_and(|h| h != m || !s.ov.work.sends.asks_again(&item, m))).on_press(move |s: &mut App| start(s, &id, m)).build(k).key(format!("work-move-{m:?}")));
     }
     if let Some(m) = held.filter(|_| !busy) {
         let (id, words) = (item.clone(), s.ov.work.sends.held_words(&item, m).unwrap_or_default().to_string());

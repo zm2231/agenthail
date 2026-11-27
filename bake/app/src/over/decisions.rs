@@ -155,7 +155,13 @@ fn reply_panel(s: &App, i: usize, d: &Decision, who: &str, k: &Kit) -> El {
         .on_edit(move |s: &mut App| s.ov.inbox.replies.entry(lens.clone()).or_insert_with(|| TextEdit::new("")))
         .on_submit(move |s: &mut App, _: &mut Tx| inbox::reply(s, &de));
     let field = col().w_full().px(10.0).py(8.0).radius(8.0).fill(k.c.surface_base).border(1.0, ui::rule(k)).child(input);
-    let send = Button::new(if sending { "Sending…".to_string() } else { format!("Send to {}", ui::short_title(who, 24)) }).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(!ready).on_press(move |s: &mut App| inbox::reply(s, &dd)).build(k).key(format!("decision-{i}-reply-send"));
+    let send = Button::new(if sending {
+        "Sending…".to_string()
+    } else if st.reply_unknown.contains(&id) {
+        "Send as new".to_string()
+    } else {
+        format!("Send to {}", ui::short_title(who, 24))
+    }).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(!ready).on_press(move |s: &mut App| inbox::reply(s, &dd)).build(k).key(format!("decision-{i}-reply-send"));
     let mut c = col().key(format!("decision-reply-{id}")).w_full().gap(8.0).pl(4.0);
     if let Some(sent) = st.replied.get(&id) {
         c = c.child(row().gap(6.0).items_center().child(icon(&icons::CIRCLE_CHECK, k.text_size(12.0)).color(base(k))).child(text(sent.clone()).font(k.text(META_MED)).color(base(k))));
@@ -297,9 +303,16 @@ pub fn section(s: &App, k: &Kit, main_kit: &Kit) -> El {
 
 pub fn brief_button(s: &App, project: &str, k: &Kit) -> El {
     let asking = s.ov.inbox.briefs.get(project).is_some_and(|b| b.asking);
+    let unknown = s.ov.inbox.briefs.get(project).is_some_and(|b| b.unknown);
     let lead = s.ov.d.project(project).filter(|p| p.lead.is_some()).map(|p| p.lead_name.clone()).unwrap_or_else(|| "the lead".into());
     let key = project.to_string();
-    Button::new(if asking { "Asking…" } else { "Catch me up" })
+    Button::new(if asking {
+        "Asking…"
+    } else if unknown {
+        inbox::BRIEF_AS_NEW
+    } else {
+        "Catch me up"
+    })
         .variant(ButtonVariant::Ghost)
         .control_size(ControlSize::Small)
         .disabled(asking)

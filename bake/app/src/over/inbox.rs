@@ -34,6 +34,7 @@ pub struct BriefState {
     pub asking: bool,
     pub notice: Option<String>,
     pub failed: bool,
+    pub unknown: bool,
     key: Option<String>,
 }
 
@@ -59,13 +60,14 @@ pub struct State {
     pub replying: HashSet<String>,
     pub replied: HashMap<String, String>,
     reply_keys: HashMap<String, (String, String)>,
+    pub reply_unknown: HashSet<String>,
     answered: HashMap<String, String>,
 }
 
 impl Default for State {
     fn default() -> Self {
         let (tx, rx) = channel();
-        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, reads: 0, review_old: HashMap::new(), note: None, daemon: None, newest: None, rev: None, ask: None, open: None, replies: HashMap::new(), replying: HashSet::new(), replied: HashMap::new(), reply_keys: HashMap::new(), answered: HashMap::new() }
+        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, reads: 0, review_old: HashMap::new(), note: None, daemon: None, newest: None, rev: None, ask: None, open: None, replies: HashMap::new(), replying: HashSet::new(), replied: HashMap::new(), reply_keys: HashMap::new(), reply_unknown: HashSet::new(), answered: HashMap::new() }
     }
 }
 
@@ -220,13 +222,21 @@ pub fn drain(s: &mut crate::App) -> bool {
                     Ok(brief) => {
                         b.notice = Some(brief.notice(time::OffsetDateTime::now_utc()));
                         b.failed = false;
+                        b.unknown = false;
                         b.key = None;
                     }
                     Err(e) => {
                         if !e.maybe_delivered {
                             b.key = None;
                         }
-                        b.notice = Some(if e.maybe_delivered { format!("Asked, not confirmed: {}", e.message) } else { format!("Couldn't ask: {}", e.message) });
+                        b.unknown = e.outcome_unknown();
+                        b.notice = Some(if b.unknown {
+                            format!("{} {BRIEF_AS_NEW} asks as a new request.", feed::catalog::unknown_outcome(&e.message))
+                        } else if e.maybe_delivered {
+                            format!("Asked, not confirmed: {}", e.message)
+                        } else {
+                            format!("Couldn't ask: {}", e.message)
+                        });
                         b.failed = true;
                     }
                 }
@@ -240,12 +250,14 @@ pub fn drain(s: &mut crate::App) -> bool {
                             st.replies.remove(&id);
                         }
                         st.reply_keys.remove(&id);
+                        st.reply_unknown.remove(&id);
                         st.replied.insert(id, outcome);
                     }
                     Err(e) => {
                         let hold = st.inbox.as_ref().and_then(|i| i.decisions.iter().find(|d| d.id() == id)).map(Decision::hold_key).unwrap_or_default();
                         let why = if e.outcome_unknown() {
-                            format!("{} Edit the words to send them as a new message.", feed::catalog::unknown_outcome(&e.message))
+                            st.reply_unknown.insert(id.clone());
+                            format!("{} Send as new sends it as a new message.", feed::catalog::unknown_outcome(&e.message))
                         } else if e.maybe_delivered {
                             format!("Sent to {who}, not confirmed: {}", e.message)
                         } else {
@@ -354,8 +366,9 @@ pub fn reply(s: &mut crate::App, d: &Decision) {
     s.ov.inbox.notes.remove(&id);
     s.ov.inbox.replied.remove(&id);
     let message = d.parked_reply(&words);
+    let as_new = s.ov.inbox.reply_unknown.remove(&id);
     let key = match s.ov.inbox.reply_keys.get(&id) {
-        Some((sent, key)) if *sent == message => key.clone(),
+        Some((sent, key)) if *sent == message && !as_new => key.clone(),
         _ => request_key(),
     };
     s.ov.inbox.reply_keys.insert(id.clone(), (message.clone(), key.clone()));
@@ -461,6 +474,8 @@ pub fn send_changes(s: &mut crate::App) {
     }
 }
 
+pub const BRIEF_AS_NEW: &str = "Ask again as new";
+
 pub fn ask_brief(s: &mut crate::App, project: &str) {
     let Some(client) = s.client.clone() else {
         s.ov.inbox.briefs.insert(project.into(), BriefState { notice: Some("Fixture mode: not sent".into()), failed: true, ..Default::default() });
@@ -471,6 +486,9 @@ pub fn ask_brief(s: &mut crate::App, project: &str) {
         return;
     }
     b.asking = true;
+    if std::mem::take(&mut b.unknown) {
+        b.key = None;
+    }
     let key = b.key.get_or_insert_with(request_key).clone();
     let (tx, project) = (s.ov.inbox.tx.clone(), project.to_string());
     std::thread::spawn(move || {

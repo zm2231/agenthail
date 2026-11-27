@@ -805,6 +805,10 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
         }
         _ => busy,
     };
+    if s.unsent.latest(id).is_some_and(|u| u.outcome_unknown && u.same(&message, &attachments)) {
+        send_as_new(s, id, tx);
+        return;
+    }
     ui::paste::set_composer(s, "");
     ui::attach::clear(s, id);
     ui::complete::sending(s, id);
@@ -864,11 +868,18 @@ fn clear_sent(s: &mut App, id: &str, unsent: &Unsent) {
     ui::attach::clear(s, id);
 }
 
-pub fn can_retry(s: &App, id: &str) -> bool {
+fn resendable(s: &App, id: &str) -> bool {
     !closed(s, id) && s.unsent.latest(id).is_some_and(|u| feed::attach::missing_upload(&u.error).is_none())
 }
 
+pub fn can_retry(s: &App, id: &str) -> bool {
+    resendable(s, id) && s.unsent.latest(id).is_some_and(|u| !u.outcome_unknown)
+}
+
 pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
+    if !can_retry(s, id) {
+        return;
+    }
     let now = feed::composer::now_ms();
     let oldest = s.unsent.list(id).iter().find(|u| u.redelivering(now)).or(s.unsent.latest(id)).map(|u| (u.key.clone(), u.redelivering(now)));
     if let Some((key, auto)) = oldest {
@@ -995,7 +1006,7 @@ fn shows(s: &App, id: &str, unsent: &Unsent) -> bool {
 }
 
 pub fn offers_new_send(s: &App, id: &str) -> bool {
-    can_retry(s, id) && s.unsent.latest(id).is_some_and(|u| u.offers_new_send())
+    resendable(s, id) && s.unsent.latest(id).is_some_and(|u| u.offers_new_send())
 }
 
 pub fn send_as_new(s: &mut App, id: &str, tx: &mut Tx) {
