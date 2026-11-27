@@ -562,6 +562,14 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
             return;
         }
     };
+    let refusal = session(s, id).and_then(|x| feed::attach::steer_refusal(&attachments, &x.capabilities));
+    let busy = match (busy.or_else(|| send_busy(s, id)), refusal) {
+        (Some(Busy::Steer), Some(why)) => {
+            note(s, id, why.into());
+            Some(Busy::Queue)
+        }
+        _ => busy,
+    };
     let focused = s.composer.focused;
     s.composer = TextEdit::new("");
     s.composer.focused = focused;
