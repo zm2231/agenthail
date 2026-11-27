@@ -157,10 +157,14 @@ pub fn choose_image(s: &mut Prefs, tx: &mut Tx) {
     let options = FileDialogOptions { title: "Choose a background image".into(), ..Default::default() }.filter("Images", &["png", "jpg", "jpeg", "webp"]);
     tx.open_file(options, |s: &mut Prefs, result, _| match result {
         Ok(Some(path)) => upload(s, path),
-        Ok(None) => s.appearance.writing = false,
+        Ok(None) => {
+            s.appearance.writing = false;
+            changed(s);
+        }
         Err(e) => {
             s.appearance.writing = false;
             s.appearance.error = Some(Failure::new(format!("Couldn't open the file picker: {e}")));
+            changed(s);
         }
     });
 }
@@ -183,6 +187,9 @@ fn upload(s: &mut Prefs, path: std::path::PathBuf) {
         Got::Wrote(ticket, c.ui_change(fl::device_class(), &device, &Change::set(&scope, "background", &format!("image: {stored}"), &format!("background to {name}"))))
     });
     s.appearance.writing = started;
+    if !started {
+        changed(s);
+    }
 }
 
 pub fn take(s: &mut Prefs, got: Got) {

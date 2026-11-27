@@ -329,17 +329,16 @@ fn cached(s: &mut State, key: String, build: impl FnOnce() -> Kit) -> &'static K
     *s.kits.entry(key).or_insert_with(|| Box::leak(Box::new(build())))
 }
 
-fn accented(k: &mut Kit, accent: Option<Color>) {
-    if let Some(a) = accent {
-        k.c.bg_accent = a;
-        k.c.text_accent = a;
-        k.c.icon_accent = a;
-        k.c.border_focus = a;
-    }
+fn accented(k: &mut Kit, a: Color) {
+    k.c.bg_accent = a;
+    k.c.text_accent = a;
+    k.c.icon_accent = a;
+    k.c.border_focus = a;
 }
 
 pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool) {
     let system_dark = cx.system_dark();
+    let system_accent = srgb(cx.accent());
     let (paint, kit, chrome, scale) = STATE.with_borrow_mut(|s| {
         let dark = s.look.dark(system_dark);
         let mut paint = if dark { Paint::dark() } else { Paint::light() };
@@ -350,14 +349,11 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool) {
         paint.attention = role("needs-you", paint.attention);
         paint.done = role("done", paint.done);
         paint.failed = role("error", paint.failed);
-        let accent = s.look.accent.map(|(d, l)| if dark { d } else { l });
-        if let Some(a) = accent {
-            paint.accent = rgb(a);
-            paint.accent_deep = rgb(fl::blend(a, [0.0; 3], 0.35));
-        }
-        let accent_rgb = accent.unwrap_or_else(|| srgb(paint.accent));
+        let accent_rgb = s.look.accent.map(|(d, l)| if dark { d } else { l }).unwrap_or(system_accent);
+        paint.accent = rgb(accent_rgb);
+        paint.accent_deep = rgb(fl::blend(accent_rgb, [0.0; 3], 0.35));
         let translucent = glass && s.look.translucent(dark);
-        let mut key = format!("{dark}:{translucent}:{accent:?}:{:?}:{:?}", srgb(paint.text).map(quant), srgb(paint.muted).map(quant));
+        let mut key = format!("{dark}:{translucent}:{:?}:{:?}:{:?}", accent_rgb.map(quant), srgb(paint.text).map(quant), srgb(paint.muted).map(quant));
         if translucent {
             let ground = ground_rgb(dark);
             let tint = tint_rgb(&s.look, dark, accent_rgb);
@@ -384,7 +380,7 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool) {
                 k.c.bg_base = Color::WHITE.alpha(0.025);
                 k.c.border_muted = paint.border;
             }
-            accented(&mut k, accent.map(|_| paint.accent));
+            accented(&mut k, paint.accent);
             k
         });
         let chrome = cached(s, format!("chrome:{key}"), || {
@@ -400,7 +396,7 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool) {
             k.c.text_strong = paint.text;
             k.c.text_base = paint.text;
             k.c.text_weak = paint.muted;
-            accented(&mut k, accent.map(|_| paint.accent));
+            accented(&mut k, paint.accent);
             k
         });
         (paint, kit, chrome, s.look.text_scale)
