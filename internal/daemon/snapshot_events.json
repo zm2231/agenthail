@@ -8,6 +8,7 @@
   {"event": "host.state", "cache": true, "reread": true, "why": "a paired host's shown connection state"},
   {"event": "session.updated", "cache": true, "reread": false, "why": "session rows in the full cached state; clients get rows from the catalog stream and the base snapshot carries none"},
   {"event": "turn.completed", "cache": true, "reread": false, "why": "session rows in the full cached state; clients get rows from the catalog and session streams"},
+  {"event": "native.queue.changed", "cache": false, "reread": false, "why": "native queues are not in the snapshot; an open queue view lists the session's queue again"},
   {"event": "device.paired", "cache": false, "reread": false, "why": "devices are not in the snapshot; the Mac reloads them with Operations"},
   {"event": "device.revoked", "cache": false, "reread": false, "why": "devices are not in the snapshot; the Mac reloads them with Operations"},
   {"event": "device.push.updated", "cache": false, "reread": false, "why": "devices are not in the snapshot; the Mac reloads them with Operations"},

@@ -86,6 +86,12 @@ func (s *sessionSource) run() {
 		var streamed atomic.Bool
 		streamErr := s.adapter.Stream(streamContext, &current, "", func(event surface.StreamEvent) {
 			streamed.Store(true)
+			if event.Kind == surface.StreamKindNativeQueue {
+				if changed := s.manager.nativeQueueChanged; changed != nil {
+					changed(s.session.ID)
+				}
+				return
+			}
 			s.append(event)
 		}, 30*time.Minute)
 		stopStream()

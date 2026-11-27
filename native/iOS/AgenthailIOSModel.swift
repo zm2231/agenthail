@@ -51,6 +51,7 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting, ListingR
     let rowMemory = TranscriptRowMemory()
     private(set) var creationHosts: [CreationHost] = []
     private(set) var projects: [String: ListedProject] = [:]
+    private(set) var nativeQueueChanges: [String: Int] = [:]
     private(set) var projectOrder: [String] = []
     private(set) var holderPicks: [String: HolderPin] = [:]
     @ObservationIgnored lazy var decisionFeed = DecisionFeed(key: { [unowned self] in decisionsKey }, load: { [unowned self] in await loadDecisions() })
@@ -1906,6 +1907,11 @@ final class AgenthailIOSModel: HostConnectionDelegate, ComposerRouting, ListingR
     func host(_ host: HostConnection, receivedEventFor entity: String) {
         guard connections[host.id] === host else { return }
         refreshUnsupportedSession(HostCatalog.qualify(host.id, entity))
+    }
+
+    func host(_ host: HostConnection, nativeQueueChangedFor session: String) {
+        guard connections[host.id] === host else { return }
+        nativeQueueChanges[HostCatalog.qualify(host.id, session), default: 0] &+= 1
     }
 
     func host(_ host: HostConnection, rekeyed retired: [String: String]) {

@@ -13,8 +13,9 @@ import (
 )
 
 type sessionSourceManager struct {
-	registry *registry.Registry
-	prompts  func(surface.Session, sessionJournalPayload)
+	registry           *registry.Registry
+	prompts            func(surface.Session, sessionJournalPayload)
+	nativeQueueChanged func(sessionID string)
 	// hookCaptured says whether a ledger still holds a hook capture of the session's words that its journal has not checked.
 	hookCaptured func(sessionID string) bool
 	rederives    chan struct{}

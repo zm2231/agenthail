@@ -303,6 +303,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		}
 	}
 	d.sources.prompts = d.backfillPrompt
+	d.sources.nativeQueueChanged = func(sessionID string) { d.publishNativeQueueChanged(sessionID, "codex") }
 	d.sources.hookCaptured = d.holdsUncheckedHookCapture
 	d.ui = newUIState(reg)
 	d.snapshots = newSnapshotRelay()

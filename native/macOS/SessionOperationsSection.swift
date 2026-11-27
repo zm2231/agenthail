@@ -95,6 +95,9 @@ struct NativeQueueSection: View {
             queue.reset(sessionID: session.id)
             await queue.reload(model.api)
         }
+        .onChange(of: model.nativeQueueChanges[session.id]) {
+            Task { await queue.refresh(model.api) }
+        }
         .sheet(item: $editor) { current in
             QueueEditorSheet(editor: current) { text in
                 if let item = current.item { return await queue.update(item, text: text, api: model.api) }

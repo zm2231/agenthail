@@ -65,6 +65,9 @@ struct IOSQueueSection: View {
             queue.reset(sessionID: target.sessionID)
             await queue.reload(target.api)
         }
+        .onChange(of: model.nativeQueueChanges[session.id]) {
+            Task { await queue.refresh(target.api) }
+        }
         .sheet(item: $editor) { current in
             IOSQueueEditorSheet(editor: current) { text in
                 if let item = current.item { return await queue.update(item, text: text, api: target.api) }

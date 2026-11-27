@@ -2711,6 +2711,18 @@
     },
     "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"this session has no worktree of its own\"}}\n"
   },
+  "api/action work-review incomplete": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"work-review needs ledgerKey and workItem\"}}\n"
+  },
   "api/v1/actions alias": {
     "status": 200,
     "header": {
@@ -5422,5 +5434,17 @@
       ]
     },
     "body": "{\"error\":{\"code\":\"not_found\",\"message\":\"this session has no worktree of its own\"}}\n"
+  },
+  "api/v1/actions work-review incomplete": {
+    "status": 400,
+    "header": {
+      "Cache-Control": [
+        "no-store"
+      ],
+      "Content-Type": [
+        "application/json; charset=utf-8"
+      ]
+    },
+    "body": "{\"error\":{\"code\":\"invalid_request\",\"message\":\"work-review needs ledgerKey and workItem\"}}\n"
   }
 }

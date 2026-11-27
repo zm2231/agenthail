@@ -65,6 +65,5 @@ func (d *Daemon) doLeadReplacementAck(_ context.Context, _ principal, request da
 	if !acknowledged {
 		return actionResult{}, actionFailed(http.StatusNotFound, "not_found", "no open lead replacement has that id")
 	}
-	d.publishEvent("state.changed", "", map[string]any{"source": "lead-replacement"})
 	return actionOK(map[string]any{"ok": true, "acknowledged": request.ReplacementID}), nil
 }

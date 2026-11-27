@@ -28,6 +28,7 @@ func dispatchedActionNames(t *testing.T) []string {
 	}
 	names := map[string]bool{}
 	prefixes := map[string]bool{}
+	constants := packageConstants(t, ".")
 	fset := token.NewFileSet()
 	for _, name := range files {
 		if strings.HasSuffix(name, "_test.go") {
@@ -54,21 +55,21 @@ func dispatchedActionNames(t *testing.T) []string {
 				switch node := node.(type) {
 				case *ast.CallExpr:
 					if call, ok := node.Fun.(*ast.SelectorExpr); ok && call.Sel.Name == "HasPrefix" && len(node.Args) == 2 && isActionExpr(node.Args[0]) {
-						addLiteral(prefixes, node.Args[1])
+						addName(prefixes, node.Args[1], constants)
 					}
 				case *ast.BinaryExpr:
 					if node.Op == token.EQL || node.Op == token.NEQ {
 						if isActionExpr(node.X) {
-							addLiteral(names, node.Y)
+							addName(names, node.Y, constants)
 						} else if isActionExpr(node.Y) {
-							addLiteral(names, node.X)
+							addName(names, node.X, constants)
 						}
 					}
 				case *ast.SwitchStmt:
 					if node.Tag != nil && isActionExpr(node.Tag) {
 						for _, stmt := range node.Body.List {
 							for _, value := range stmt.(*ast.CaseClause).List {
-								addLiteral(names, value)
+								addName(names, value, constants)
 							}
 						}
 					}
@@ -120,7 +121,7 @@ func addTableKeys(t *testing.T, names map[string]bool, gen *ast.GenDecl) {
 					if literal, ok := pair.Key.(*ast.BasicLit); !ok || literal.Kind != token.STRING {
 						t.Fatalf("typedActions keys must be string literals so the guard can read them; found %T", pair.Key)
 					}
-					addLiteral(names, pair.Key)
+					addName(names, pair.Key, nil)
 				}
 			}
 		}
@@ -156,7 +157,15 @@ func isActionExpr(expr ast.Expr) bool {
 	return false
 }
 
-func addLiteral(names map[string]bool, expr ast.Expr) {
+// addName records a compared action name, written as a string literal or a
+// package string constant.
+func addName(names map[string]bool, expr ast.Expr, constants map[string]string) {
+	if ident, ok := expr.(*ast.Ident); ok {
+		if value := constants[ident.Name]; value != "" {
+			names[value] = true
+		}
+		return
+	}
 	literal, ok := expr.(*ast.BasicLit)
 	if !ok || literal.Kind != token.STRING {
 		return
@@ -169,7 +178,7 @@ func addLiteral(names map[string]bool, expr ast.Expr) {
 func TestDispatchedActionNamesAreFound(t *testing.T) {
 	names := dispatchedActionNames(t)
 	t.Logf("%d actions: %s", len(names), strings.Join(names, " "))
-	for _, want := range []string{"send", "steer", "respond", "session-create", "session-fork", "coordinator-send", "project-add", "channel-send", "relay-add", "goal-set", "session-lifecycle-resume", "codex-launch"} {
+	for _, want := range []string{"send", "steer", "respond", "session-create", "session-fork", "coordinator-send", "project-add", "channel-send", "relay-add", "goal-set", "session-lifecycle-resume", "codex-launch", "work-review"} {
 		if sort.SearchStrings(names, want) == len(names) || names[sort.SearchStrings(names, want)] != want {
 			t.Fatalf("the scan missed %q; it found %v", want, names)
 		}
