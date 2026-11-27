@@ -250,13 +250,39 @@ pub fn fetch(client: &Client, known: &Known, settled: Option<Instant>) -> Result
         .ok()
         .map(|hv| std::iter::once(json!({"name": hv["host"]["name"], "state": hv["host"]["state"]})).chain(hv["hosts"].as_array().cloned().unwrap_or_default().into_iter().map(|x| json!({"name": x["name"], "state": x["state"]}))).collect())
         .unwrap_or_default();
-    let raw = json!({"updatedAt": snap["updatedAt"], "hostEpoch": snap["hostEpoch"], "catalogSeq": snap["catalogSeq"], "projects": snap["projects"], "usage": usage, "hosts": hosts, "tileOrder": snap["tileOrder"]});
+    let activity = client.project_activity().ok();
+    let activity_missing = activity.is_none();
+    let projects = with_activity(snap["projects"].clone(), activity.unwrap_or_default());
+    let raw = json!({"updatedAt": snap["updatedAt"], "hostEpoch": snap["hostEpoch"], "catalogSeq": snap["catalogSeq"], "projects": projects, "usage": usage, "hosts": hosts, "tileOrder": snap["tileOrder"]});
     let mut recorded: Recorded = serde_json::from_value(raw)?;
     let pool: BTreeSet<String> = ledgers.values().filter_map(|r| r.as_ref().ok()).flatten().flat_map(|w| &w.timeline).map(|t| t.actor.clone()).chain(known.candidates.iter().cloned()).collect();
     let (found, asked) = actors(client, &sessions, |a| known.skips_actor(a), pool);
     recorded.actors = found;
     recorded.sessions = sessions;
+    recorded.activity_missing = activity_missing;
     Ok(Fetched { recorded, ledgers, held, asked, started, usage: fresh, moved })
+}
+
+pub fn with_activity(mut projects: Value, activity: Vec<crate::activity::ProjectActivity>) -> Value {
+    for p in projects.as_array_mut().into_iter().flatten() {
+        let Some(a) = activity.iter().find(|a| p["id"].as_str() == Some(a.id.as_str())) else { continue };
+        p["sessionCount"] = json!(a.session_count);
+        if !a.last_active.is_empty() {
+            p["lastActive"] = json!(a.last_active);
+        }
+    }
+    projects
+}
+
+fn keep_activity(projects: &mut [crate::derive::world::ProjectRecord], before: &[crate::derive::world::ProjectRecord]) {
+    for p in projects {
+        if let Some(old) = before.iter().find(|o| o.id == p.id) {
+            p.session_count = old.session_count;
+            if p.last_active.is_empty() {
+                p.last_active = old.last_active.clone();
+            }
+        }
+    }
 }
 
 pub fn ledger(client: &Client, project: &str, known: &Known) -> Result<Ledger, String> {
@@ -433,6 +459,9 @@ impl Overview {
             recorded.host_epoch = std::mem::take(&mut self.base.host_epoch);
             recorded.catalog_seq = self.base.catalog_seq;
             recorded.sessions = std::mem::take(&mut self.base.sessions);
+        }
+        if recorded.activity_missing {
+            keep_activity(&mut recorded.projects, &self.base.projects);
         }
         let actors = std::mem::replace(&mut recorded.actors, std::mem::take(&mut self.base.actors));
         recorded.transcripts = std::mem::take(&mut self.base.transcripts);

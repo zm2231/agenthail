@@ -214,6 +214,10 @@ pub struct Session {
     pub moving: Option<crate::moves::Move>,
     #[serde(default)]
     pub worktree: Option<crate::projects::Worktree>,
+    #[serde(default)]
+    pub waiting_on: Option<Value>,
+    #[serde(default)]
+    pub ask: Option<Value>,
 }
 
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq)]

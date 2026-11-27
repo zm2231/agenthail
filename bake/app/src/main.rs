@@ -43,6 +43,7 @@ pub enum Bg {
     LedgerChanged(String, std::time::Instant),
     LedgersReopened,
     SessionNews,
+    Removed(Vec<String>),
     Item(String, WorkItem),
     Overview(Box<Fetched>),
     Ledger(String, std::time::Instant, Result<Ledger, String>),
@@ -158,6 +159,9 @@ pub struct App {
     redeliver: HashMap<String, feed::composer::Backoff>,
     pub inspect: ui::inspect::Inspect,
     pub roles: ui::role::Roles,
+    pub delivery: ui::delivery::Delivery,
+    pub readies: ui::ready::Readies,
+    pub earlier: over::earlier::Earlier,
     pub new_session: Option<ui::new_session::Sheet>,
     bar: menubar::Bar,
     pub attach: ui::attach::Attach,
@@ -353,6 +357,9 @@ fn empty(live: Overview, persist: bool) -> App {
         redeliver: HashMap::new(),
         inspect: ui::inspect::Inspect::new(),
         roles: ui::role::Roles::new(),
+        delivery: ui::delivery::Delivery::default(),
+        readies: ui::ready::Readies::default(),
+        earlier: over::earlier::Earlier::default(),
         new_session: None,
         bar: menubar::Bar::default(),
         attach: ui::attach::Attach::default(),
@@ -541,6 +548,7 @@ fn changed_elsewhere(s: &mut App, wants: feed::watch::Wants) {
     }
     if wants.snapshot {
         ui::connect::changed(s);
+        ui::delivery::stale(s);
     }
     if wants.overview {
         ask_overview(s, Ask::Refresh);
@@ -568,6 +576,8 @@ fn reopened(s: &mut App) {
     let clock = s.clock;
     s.redeliver.values_mut().for_each(|b| b.wake(clock));
     ui::connect::retry(s);
+    ui::delivery::stale(s);
+    over::earlier::reopened(s);
     ask_overview(s, Ask::Reset);
     over::inbox::reopened(s);
     over::extensions::reopened(s);
@@ -1321,13 +1331,21 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             }
             Bg::Changed(wants) => changed_elsewhere(s, wants),
             Bg::Reopened => reopened(s),
-            Bg::LedgerChanged(key, at) => ask_overview(s, Ask::Ledger(key, at)),
-            Bg::LedgersReopened => ask_overview(s, Ask::Reopened),
+            Bg::LedgerChanged(key, at) => {
+                ui::ready::ledger_changed(s, &key);
+                ask_overview(s, Ask::Ledger(key, at));
+            }
+            Bg::LedgersReopened => {
+                ui::ready::reopened(s);
+                ask_overview(s, Ask::Reopened);
+            }
             Bg::SessionNews => ask_overview(s, Ask::Refresh),
+            Bg::Removed(ids) => over::earlier::removed(s, &ids),
             Bg::Item(id, item) => {
                 s.items.insert(id, item);
             }
             Bg::Overview(fetched) => {
+                s.earlier.activity_missing = fetched.recorded.activity_missing;
                 s.ov.live.refresh(*fetched);
                 s.sessions = s.ov.live.sessions().to_vec();
                 s.notify.sessions_moved = true;
@@ -1518,6 +1536,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= transcript::take_behind_moved();
     changed |= over::extensions::drain(s);
     changed |= over::projects::drain(s);
+    changed |= ui::delivery::poll(s) | ui::ready::poll(s) | over::earlier::poll(s);
     if s.ov.live.tail_retry_due() {
         fetch_tails(s);
     }

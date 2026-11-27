@@ -50,6 +50,7 @@ pub enum Section {
     Devices,
     Relays,
     Channels,
+    Queue,
 }
 
 enum Done {
@@ -273,7 +274,10 @@ fn fetch(s: &mut Prefs, what: Read) {
     let tx = s.tx.clone();
     std::thread::spawn(move || {
         let got = match what {
-            Read::Base => Got::Base(client.base_settings()),
+            Read::Base => Got::Base(client.base_settings().map(|mut base| {
+                base.handoffs.history = Some(client.recent_history());
+                base
+            })),
             Read::Settings => Got::Settings(client.settings()),
             Read::Remote => Got::Remote(client.remote_control()),
             Read::Compaction => Got::Compaction(client.compaction()),

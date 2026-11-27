@@ -40,6 +40,10 @@ pub struct Queued {
     pub service_tier: String,
     #[serde(default)]
     pub output_schema: Option<Value>,
+    #[serde(default)]
+    pub target: String,
+    #[serde(default)]
+    pub ask_id: String,
     #[serde(skip)]
     pub host: String,
 }
@@ -101,6 +105,33 @@ impl Queued {
         parts.join(" · ")
     }
 
+    pub fn status_label(&self) -> String {
+        match self.status.as_str() {
+            "pending" => "Waiting".into(),
+            "dead" => "Needs a decision".into(),
+            "delivered" => "Delivered".into(),
+            "canceled" => "Canceled".into(),
+            "inflight" => "Sending".into(),
+            other => crate::search::kind_label(other),
+        }
+    }
+
+    pub fn stuck(&self) -> bool {
+        self.status == "dead"
+    }
+
+    pub fn can_cancel(&self) -> bool {
+        self.status == "pending"
+    }
+
+    pub fn can_take_back(&self) -> bool {
+        self.status == "pending" && matches!(self.operation.as_str(), "" | "message") && self.take_back_refusal().is_none()
+    }
+
+    pub fn row(&self) -> crate::catalog::QueueRow {
+        crate::catalog::QueueRow { id: self.id, session_id: self.session_id.clone(), status: self.status.clone() }
+    }
+
     pub fn steer_refusal(&self, caps: &Capabilities) -> Option<&'static str> {
         if !caps.steer {
             return Some("This session can't take a steer. It sends when the turn ends.");
@@ -130,6 +161,17 @@ impl Queued {
 
 pub fn waiting(rows: &[Queued], rekeyed: &HashMap<String, String>, session: &str) -> Vec<Queued> {
     let mut out: Vec<Queued> = rows.iter().filter(|r| r.status == "pending" && matches!(r.operation.as_str(), "" | "message") && current(rekeyed, &r.session_id) == session).cloned().collect();
+    out.sort_by_key(|r| r.id);
+    out
+}
+
+pub fn undelivered(rows: &[Queued], rekeyed: &HashMap<String, String>, session: &str) -> Vec<Queued> {
+    let mut out: Vec<Queued> = Vec::new();
+    for r in rows.iter().filter(|r| r.status != "delivered" && current(rekeyed, &r.session_id) == session) {
+        if !out.iter().any(|o| o.id == r.id && o.host == r.host) {
+            out.push(r.clone());
+        }
+    }
     out.sort_by_key(|r| r.id);
     out
 }
@@ -285,6 +327,32 @@ mod tests {
         let rekeyed: HashMap<String, String> = [("old".to_string(), "s1".to_string())].into();
         let ids: Vec<i64> = waiting(&rows, &rekeyed, "s1").iter().map(|r| r.id).collect();
         assert_eq!(ids, vec![3, 9]);
+    }
+
+    #[test]
+    fn undelivered_keeps_every_row_not_yet_delivered_once_oldest_first() {
+        let mut far = row(4, "s1", "pending");
+        far.host = "vps".into();
+        let rows = vec![row(9, "s1", "dead"), row(3, "old", "pending"), row(5, "s1", "delivered"), row(6, "s2", "pending"), far.clone(), row(3, "old", "pending")];
+        let rekeyed: HashMap<String, String> = [("old".to_string(), "s1".to_string())].into();
+        let got: Vec<(i64, String)> = undelivered(&rows, &rekeyed, "s1").into_iter().map(|r| (r.id, r.host)).collect();
+        assert_eq!(got, vec![(3, String::new()), (4, "vps".into()), (9, String::new())]);
+    }
+
+    #[test]
+    fn status_labels_and_actions_follow_the_rows_state() {
+        let pending = row(1, "s1", "pending");
+        assert_eq!((pending.status_label().as_str(), pending.can_cancel(), pending.can_take_back(), pending.stuck()), ("Waiting", true, true, false));
+        let dead = row(2, "s1", "dead");
+        assert_eq!((dead.status_label().as_str(), dead.can_cancel(), dead.can_take_back(), dead.stuck()), ("Needs a decision", false, false, true));
+        assert_eq!(row(3, "s1", "delivered").status_label(), "Delivered");
+        assert_eq!(row(3, "s1", "needs_retry").status_label(), "Needs retry");
+        let steer = Queued { operation: "steer".into(), ..pending.clone() };
+        assert!(steer.can_cancel() && !steer.can_take_back());
+        assert!(!Queued { author: "agent".into(), ..pending.clone() }.can_take_back());
+        assert_eq!(pending.row(), crate::catalog::QueueRow { id: 1, session_id: "s1".into(), status: "pending".into() });
+        let read: Queued = serde_json::from_value(json!({"id": 4, "target": "@b", "status": "pending", "askId": "q1"})).unwrap();
+        assert_eq!((read.target.as_str(), read.ask_id.as_str()), ("@b", "q1"));
     }
 
     #[test]

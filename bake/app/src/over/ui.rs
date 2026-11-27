@@ -658,6 +658,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
         others = others.row(r.build(k).key(format!("p-{}", p.key)).on_secondary_press(move |s: &mut App, at, _: &mut rune::Tx| crate::over::projects::open_menu(s, &menu_key, Some(at))));
     }
     let hidden: Vec<String> = order.iter().skip(if current_project.is_some() { 1 } else { 0 }).skip(10).map(|p| p.key.clone()).collect();
+    others = others.rows(crate::over::earlier::activity_note(s));
     for extra in crate::over::projects::sidebar_rows(s, hidden) {
         others = others.row(extra);
     }

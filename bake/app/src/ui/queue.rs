@@ -65,7 +65,7 @@ pub(crate) fn take(s: &mut App, id: String, asked: u64, result: Result<feed::que
     }
 }
 
-fn run(s: &mut App, id: &str, row: Queued, op: Op) {
+pub(crate) fn run(s: &mut App, id: &str, row: Queued, op: Op) {
     let Some(client) = s.client.clone() else { return };
     let working = (row.host.clone(), row.id);
     if !s.queue_working.insert(working.clone()) {

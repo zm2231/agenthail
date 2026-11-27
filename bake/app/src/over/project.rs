@@ -195,7 +195,9 @@ pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
                 .children(rows_note(s, key))
                 .child(group(s, key, LANES[0], &cols[0], "Nothing waits on you here."))
                 .child(group(s, key, LANES[1], &cols[1], "Nothing is being built."))
-                .child(group(s, key, LANES[2], &cols[2], "The queue is empty.")),
+                .child(group(s, key, LANES[2], &cols[2], "The queue is empty."))
+                .child(crate::over::earlier::section(s, key))
+                .children(crate::over::earlier::folders(s, key)),
         );
     let main = match &p.lead {
         Some(lead) => {
@@ -209,6 +211,7 @@ pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
                 .child(ui::avatar(&p.lead_name, 22.0))
                 .child(col().gap(1.0).child(text(format!("{}, the lead", p.lead_name)).font(BODY_MED).color(strong())).child(text(s.ov.d.session(lead).map(|x| s.ov.d.gist(x)).unwrap_or_default()).font(META).color(weak()).truncate().max_w(620.0)))
                 .child(ui::spacer())
+                .children(crate::ui::ready::link(s, key))
                 .child(Button::new("Workers").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).icon(&icons::BULLET_LIST).on_press_tx(|s: &mut App, tx: &mut Tx| crate::over::open_jump(s, tx)).build(kit()));
             crate::ui::attach::drop_target(col()
                 .w_full()
@@ -309,7 +312,9 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
         .child(since)
         .children(rows_note(s, key))
         .child(board.mt(8.0))
-        .children(crate::over::projects::merged(s, key).map(|m| m.mt(8.0)));
+        .children(crate::over::projects::merged(s, key).map(|m| m.mt(8.0)))
+        .child(crate::over::earlier::section(s, key).mt(8.0))
+        .children(crate::over::earlier::folders(s, key).map(|f| f.mt(8.0)));
     let hint = row()
         .gap(6.0)
         .items_center()
