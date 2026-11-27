@@ -168,7 +168,7 @@ impl Over {
 }
 
 fn leave(s: &mut App) {
-    let Ok(at) = s.ov.d.now.format(&time::format_description::well_known::Rfc3339) else { return };
+    let Ok(at) = crate::quiet::wall(s).format(&time::format_description::well_known::Rfc3339) else { return };
     match &s.screen {
         Screen::Now => {
             s.ov.looked_now = Some(at);

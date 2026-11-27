@@ -225,3 +225,44 @@ fn a_session_crossing_into_idle_within_the_minute_shows_as_a_fresh_build_would()
     assert_eq!(built::views(), views, "a refresh later in the same minute skips the view");
     matches_fresh(&mut rt, "three hours since the session's turn, passed within the minute");
 }
+
+#[test]
+fn the_app_clock_moving_to_another_minute_runs_the_view() {
+    if !isolated("now_regions::the_app_clock_moving_to_another_minute_runs_the_view") {
+        return;
+    }
+    use super::rows_memo_lines::people;
+    use crate::over::rows::built;
+    let dir = Dir::new("now-regions-clock");
+    let mut rt = world(&dir);
+    now(&mut rt, false);
+    send(&rt, snapshot(2, people(), None));
+    rt.frame(DT);
+    rt.frame(DT);
+    rt.update(|s, _| s.now -= time::Duration::hours(3));
+    rt.frame(DT);
+    let views = built::views();
+    send(&rt, snapshot(2, people(), None));
+    rt.frame(DT);
+    rt.frame(DT);
+    assert!(built::views() > views, "a repeated snapshot that moves the app clock to another minute redraws what reads it");
+}
+
+#[test]
+fn leaving_now_marks_the_moment_it_was_left() {
+    if !isolated("now_regions::leaving_now_marks_the_moment_it_was_left") {
+        return;
+    }
+    let dir = Dir::new("now-regions-left");
+    let mut rt = world(&dir);
+    now(&mut rt, false);
+    let before = time::OffsetDateTime::now_utc().replace_nanosecond(0).unwrap();
+    rt.update(|s, _| {
+        let fixtures = s.fixtures.take();
+        crate::over::go(s, Screen::Sessions);
+        s.fixtures = fixtures;
+    });
+    let looked = rt.state.ov.looked_now.clone().expect("leaving Now records a look");
+    let looked = feed::catalog::parse_time(&looked).expect("the look is a time");
+    assert!(looked >= before, "the look is when Now was left ({looked}), not when the overview was last rebuilt ({})", rt.state.ov.d.now);
+}

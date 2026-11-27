@@ -1409,6 +1409,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 let now = OffsetDateTime::now_utc();
                 if feed::wake::minute_of(now) != feed::wake::minute_of(s.now) {
                     s.now = now;
+                    changed = true;
                 }
                 s.status = "live".into();
                 ui::connect::up(s);
