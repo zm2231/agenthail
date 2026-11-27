@@ -495,13 +495,49 @@ fn a_session_window_on_changes_follows_new_edits() {
         let item: feed::Item = serde_json::from_value(serde_json::json!({"id": format!("e{n}"), "kind": "toolCall", "title": "Write", "text": serde_json::json!({"file_path": format!("/w/f{n}.txt"), "content": "hi"}).to_string()})).unwrap();
         feed::wire::Event::Upsert(item)
     };
+    let key = |s: &mut App| {
+        let mut key = (String::new(), 0);
+        within(s, w, |s| key = s.diff_key.clone());
+        key
+    };
     s.panes.get_mut("b").unwrap().transcript.apply(1, vec![edit(1)]);
-    as_window(&mut s, w, crate::show_changes);
-    assert_eq!(as_window(&mut s, w, |s| s.diff_key.clone()), ("b".to_string(), 1));
+    within(&mut s, w, crate::show_changes);
+    assert_eq!(key(&mut s), ("b".to_string(), 1));
 
     s.panes.get_mut("b").unwrap().transcript.apply(2, vec![edit(2)]);
     s.outbox.send(crate::Bg::SessionsMoved).unwrap();
     turn(&mut s, &mut main, "main");
-    assert_eq!(as_window(&mut s, w, |s| s.diff_key.clone()), ("b".to_string(), 2), "the window's diff follows the edit");
+    assert_eq!(key(&mut s), ("b".to_string(), 2), "the window's diff follows the edit");
     assert_eq!(s.diff_key.0, "", "main's own diff is untouched");
+}
+
+#[test]
+fn a_session_main_left_for_now_is_refreshed_as_the_window_that_shows_it() {
+    let (mut s, w) = beside(false);
+    crate::select(&mut s, "b");
+    s.screen = Screen::Now;
+    assert_eq!(shown(&s), vec![(w, "b".to_string())], "the window on the session, not main on Now");
+    crate::select(&mut s, "a");
+    s.screen = Screen::Session;
+    let mut ids: Vec<String> = shown(&s).into_iter().map(|(_, id)| id).collect();
+    ids.sort();
+    assert_eq!(ids, ["a", "b"]);
+}
+
+#[test]
+fn a_role_read_that_failed_for_a_window_s_session_is_tried_again() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::role::forget(&mut s);
+    crate::ui::role::failed_a_while_ago(&mut s, "b");
+    crate::ui::role::drain(&mut s);
+    assert!(crate::ui::role::asked(&s, "b"), "retried though main shows another session");
+    crate::ui::role::load(&mut s, "a");
+    assert!(crate::ui::role::asked(&s, "b"), "selecting in main keeps what a window shows");
+}
+
+#[test]
+fn subagent_rows_a_window_shows_are_held_while_main_shows_another_session() {
+    let (s, _) = beside(false);
+    assert!(crate::ui::subagents::holds(&s, "a") && crate::ui::subagents::holds(&s, "b"));
 }

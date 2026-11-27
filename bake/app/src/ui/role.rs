@@ -14,7 +14,7 @@ pub struct Roles {
     shown: HashMap<String, SessionRole>,
     seq: u64,
     newest: HashMap<String, u64>,
-    failed: Option<(String, Instant)>,
+    failed: HashMap<String, Instant>,
     tx: Sender<Read>,
     rx: Receiver<Read>,
 }
@@ -22,14 +22,15 @@ pub struct Roles {
 impl Roles {
     pub fn new() -> Roles {
         let (tx, rx) = channel();
-        Roles { shown: HashMap::new(), seq: 0, newest: HashMap::new(), failed: None, tx, rx }
+        Roles { shown: HashMap::new(), seq: 0, newest: HashMap::new(), failed: HashMap::new(), tx, rx }
     }
 }
 
 pub fn load(s: &mut App, id: &str) {
-    s.roles.shown.retain(|k, _| k == id);
-    s.roles.newest.retain(|k, _| k == id);
-    s.roles.failed = None;
+    let keep: Vec<String> = super::window::shown(s).into_iter().map(|(_, x)| x).chain(std::iter::once(id.to_string())).collect();
+    s.roles.shown.retain(|k, _| keep.contains(k));
+    s.roles.newest.retain(|k, _| keep.contains(k));
+    s.roles.failed.retain(|k, _| keep.contains(k) && k != id);
     refresh(s, id);
 }
 
@@ -44,6 +45,21 @@ pub fn refresh(s: &mut App, id: &str) {
     });
 }
 
+#[cfg(test)]
+pub fn failed_a_while_ago(s: &mut App, id: &str) {
+    s.roles.failed.insert(id.to_string(), Instant::now() - RETRY);
+}
+
+#[cfg(test)]
+pub fn forget(s: &mut App) {
+    s.roles.newest.clear();
+}
+
+#[cfg(test)]
+pub fn asked(s: &App, id: &str) -> bool {
+    s.roles.newest.contains_key(id)
+}
+
 pub fn drain(s: &mut App) -> bool {
     let mut changed = false;
     while let Ok((id, seq, read)) = s.roles.rx.try_recv() {
@@ -52,19 +68,22 @@ pub fn drain(s: &mut App) -> bool {
         }
         match read {
             Ok(role) => {
-                s.roles.failed.take_if(|(failed, _)| *failed == id);
+                s.roles.failed.remove(&id);
                 match role {
                     Some(role) => s.roles.shown.insert(id, role),
                     None => s.roles.shown.remove(&id),
                 };
                 changed = true;
             }
-            Err(_) => s.roles.failed = Some((id, Instant::now())),
+            Err(_) => {
+                s.roles.failed.insert(id, Instant::now());
+            }
         }
     }
-    let due = s.roles.failed.as_ref().filter(|(id, at)| at.elapsed() >= RETRY && s.screen == crate::Screen::Session && s.selected.as_deref() == Some(id.as_str())).map(|(id, _)| id.clone());
-    if let Some(id) = due {
-        s.roles.failed = None;
+    let shown = super::window::shown_sessions(s);
+    let due: Vec<String> = s.roles.failed.iter().filter(|(id, at)| at.elapsed() >= RETRY && shown.contains(id)).map(|(id, _)| id.clone()).collect();
+    for id in due {
+        s.roles.failed.remove(&id);
         refresh(s, &id);
     }
     changed

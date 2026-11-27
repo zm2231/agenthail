@@ -220,26 +220,15 @@ pub fn ids(s: &App) -> Vec<Id> {
 }
 
 pub fn shown(s: &App) -> Vec<(Id, String)> {
-    let mut out: Vec<(Id, String)> = Vec::new();
-    for w in ids(s) {
-        let selected = if w == s.windows.current { s.selected.clone() } else { s.windows.stash.get(&w).and_then(|l| l.selected.clone()) };
-        if let Some(id) = selected.filter(|id| !out.iter().any(|(_, x)| x == id)) {
-            out.push((w, id));
-        }
+    let mut out: Vec<(Id, String)> = shown_sessions(s).into_iter().filter_map(|id| showing(s, &id).map(|w| (w, id))).collect();
+    if let Some(id) = s.selected.clone().filter(|id| !out.iter().any(|(_, x)| x == id)) {
+        out.push((s.windows.current, id));
     }
     out
 }
 
 pub fn shows_changes(s: &App, w: Id) -> bool {
     if w == s.windows.current { s.tab == Tab::Changes } else { s.windows.stash.get(&w).is_some_and(|l| l.tab == Tab::Changes) }
-}
-
-pub fn as_window<T>(s: &mut App, w: Id, f: impl FnOnce(&mut App) -> T) -> T {
-    let back = s.windows.current;
-    enter(s, w);
-    let out = f(s);
-    enter(s, back);
-    out
 }
 
 pub fn open(s: &mut App, session: &str) -> Id {

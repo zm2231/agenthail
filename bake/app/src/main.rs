@@ -587,7 +587,7 @@ fn changed_elsewhere(s: &mut App, wants: feed::watch::Wants) {
     if let Some(id) = wants.session
         && let Some((w, _)) = ui::window::shown(s).into_iter().find(|(_, x)| *x == id)
     {
-        ui::window::as_window(s, w, |s| {
+        ui::window::within(s, w, |s| {
             selected_changed(s, &id);
             selected_moved(s, &id);
         });
@@ -611,7 +611,7 @@ fn reopened(s: &mut App) {
     over::inbox::reopened(s);
     over::extensions::reopened(s);
     for (w, id) in ui::window::shown(s) {
-        ui::window::as_window(s, w, |s| {
+        ui::window::within(s, w, |s| {
             selected_changed(s, &id);
             selected_moved(s, &id);
             ui::native_queue::changed(s, &id);
@@ -1378,7 +1378,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 ui::connect::up(s);
                 link::listed(s);
                 for (w, id) in ui::window::shown(s).into_iter().filter(|(_, id)| touched.as_ref().is_none_or(|t| t.contains(id))) {
-                    ui::window::as_window(s, w, |s| {
+                    ui::window::within(s, w, |s| {
                         selected_changed(s, &id);
                         if touched.is_some() {
                             selected_moved(s, &id);
@@ -1574,7 +1574,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     }
     let on_changes: Vec<ui::window::Id> = ui::window::ids(s).into_iter().filter(|w| ui::window::shows_changes(s, *w)).collect();
     for w in on_changes {
-        ui::window::as_window(s, w, |s| {
+        ui::window::within(s, w, |s| {
             if changed || s.diff_key.0 != s.selected.clone().unwrap_or_default() {
                 refresh_diff(s);
             }
