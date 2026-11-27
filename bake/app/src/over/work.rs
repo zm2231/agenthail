@@ -76,7 +76,8 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>, main_kit:
             r
         })
         .child(text(plain(&w.text)).font(TITLE.lh(30.0)).color(strong(&k)).wrap())
-        .child(text(plain(&w.description)).font(BODY).color(base(&k)).wrap().max_lines(3));
+        .child(text(plain(&w.description)).font(BODY).color(base(&k)).wrap().max_lines(3))
+        .children(crate::over::worksearch::note(s, id).map(|n| text(n).font(META).color(ui::needs_color(&k)).wrap()));
 
     let listed = crate::over::work_review(s, id);
     let review = listed.clone().unwrap_or_default();

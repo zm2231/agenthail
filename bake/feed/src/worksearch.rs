@@ -93,23 +93,29 @@ fn state_word(state: &str) -> String {
 }
 
 impl World {
-    pub fn found_rows(&self, search: &Search, listed: impl Fn(&str) -> bool) -> Vec<Row> {
+    pub fn found_extra(&self, f: &Found) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(h) = f.host.as_deref().filter(|h| !h.is_empty()) {
+            let name = self.hosts.iter().find(|x| x.id == h).map(|x| x.name.as_str()).filter(|n| !n.is_empty()).unwrap_or(h);
+            out.push(format!("on {name}"));
+        }
+        if let Some(s) = f.snippet.as_deref().map(one_line).filter(|s| !s.is_empty()) {
+            out.push(s);
+        }
+        out
+    }
+
+    pub fn found_rows(&self, search: &Search, listed: impl Fn(&Found) -> bool) -> Vec<Row> {
         search
             .items
             .iter()
-            .filter(|f| !listed(&f.id))
+            .filter(|f| !listed(f))
             .map(|f| {
                 let mut status = vec![state_word(&f.state)];
                 if !f.project_name.is_empty() {
                     status.push(f.project_name.clone());
                 }
-                if let Some(h) = f.host.as_deref().filter(|h| !h.is_empty()) {
-                    let name = self.hosts.iter().find(|x| x.id == h).map(|x| x.name.as_str()).filter(|n| !n.is_empty()).unwrap_or(h);
-                    status.push(format!("on {name}"));
-                }
-                if let Some(s) = f.snippet.as_deref().map(one_line).filter(|s| !s.is_empty()) {
-                    status.push(s);
-                }
+                status.extend(self.found_extra(f));
                 Row { title: plain(&f.title), status: status.join(" · "), badge: short_id(&f.id), avatar: f.project_name.clone(), ledger: f.project_key.clone(), id: f.id.clone() }
             })
             .collect()
@@ -179,7 +185,9 @@ mod tests {
         let w = world();
         let item = |id: &str, host: Option<&str>, snippet: Option<&str>| Found { project_key: "repo:x/y".into(), project_name: "Y".into(), host: host.map(String::from), id: id.into(), title: format!("{id} export"), state: "parked".into(), snippet: snippet.map(String::from) };
         let search = Search { items: vec![item("y-W1", None, None), item("y-W2", Some("h2"), Some("…drops\n rows…")), item("y-W3", Some("h9"), None), item("y-W4", None, None)], truncated: false };
-        let rows = w.found_rows(&search, |id| id == "y-W4");
+        let rows = w.found_rows(&search, |f| f.id == "y-W4");
+        assert_eq!(w.found_extra(&search.items[1]), ["on build-box", "…drops rows…"]);
+        assert!(w.found_extra(&search.items[0]).is_empty());
         let seen: Vec<(&str, &str, &str)> = rows.iter().map(|r| (r.id.as_str(), r.status.as_str(), r.ledger.as_str())).collect();
         assert_eq!(seen, [("y-W1", "Parked · Y", "repo:x/y"), ("y-W2", "Parked · Y · on build-box · …drops rows…", "repo:x/y"), ("y-W3", "Parked · Y · on h9", "repo:x/y")]);
         assert_eq!((rows[0].badge.as_str(), rows[0].avatar.as_str()), (short_id("y-W1").as_str(), "Y"));

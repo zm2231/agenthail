@@ -458,6 +458,7 @@ fn ledger_api(paths: std::sync::mpsc::Sender<String>) -> String {
     use std::io::{BufRead, BufReader, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
+    let w8 = std::sync::atomic::AtomicUsize::new(0);
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let mut stream = stream.unwrap();
@@ -472,16 +473,17 @@ fn ledger_api(paths: std::sync::mpsc::Sender<String>) -> String {
                 }
             }
             paths.send(path.clone()).unwrap();
-            let item = |id: &str, title: &str| json!({"projectKey": "shared:z", "projectName": "Zed", "id": id, "title": title, "state": "parked", "updatedAt": "2026-09-01T00:00:00Z", "matched": "title"});
+            let item = |id: &str, title: &str| json!({"projectKey": "shared:z", "projectName": "Zed", "id": id, "title": title, "state": "parked", "updatedAt": "2026-09-01T00:00:00Z", "matched": "description", "snippet": "…a parked\nexport…"});
             let (status, body) = if path.starts_with("/api/v1/ledger/search?q=exp&") {
                 std::thread::sleep(std::time::Duration::from_millis(300));
                 (200, json!({"items": [item("z-W1", "Old export")], "truncated": false}))
             } else if path.starts_with("/api/v1/ledger/search?q=export&") {
                 (200, json!({"items": [item("z-W9", "Parked export")], "truncated": false}))
-            } else if path.starts_with("/api/v1/ledger/search?") {
+            } else if path.starts_with("/api/v1/ledger/search?") || (path == "/api/v1/ledger?projectKey=shared%3Az&view=item&id=z-W8" && w8.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0) {
                 (500, json!({"error": {"code": "internal", "message": "the ledger store is busy"}}))
-            } else if path == "/api/v1/ledger?projectKey=shared%3Az&view=item&id=z-W9" {
-                (200, json!({"item": {"item": {"id": "z-W9", "text": "Parked export", "state": "parked", "type": "task", "priority": "P3"}}}))
+            } else if path.starts_with("/api/v1/ledger?projectKey=shared%3Az&view=item&id=") {
+                let id = path.rsplit('=').next().unwrap_or_default();
+                (200, json!({"item": {"item": {"id": id, "text": "Parked export", "state": "parked", "type": "task", "priority": "P3"}}}))
             } else {
                 (404, json!({"error": {"code": "unknown_route", "message": "no"}}))
             };
@@ -548,14 +550,16 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     assert!(asked(&paths).is_empty(), "no search before typing settles");
     rt.frame(wake_in(&rt));
     typed(&mut rt, "export");
-    rt.frame(0.2);
-    std::thread::sleep(std::time::Duration::from_millis(100));
-    assert_eq!(asked(&paths), ["/api/v1/ledger/search?q=exp&limit=20"], "a newer query waits for the one in flight instead of piling on");
     assert_eq!(highlighted_session(&rt), Some("exporter".into()));
+    rt.frame(0.2);
     until(&mut rt, |s| work_found(s).is_some());
-    assert_eq!(work_found(&rt.state), Some(Ok(vec!["z-W9".to_string()])), "the older search's reply is dropped");
-    assert_eq!(asked(&paths), ["/api/v1/ledger/search?q=export&limit=20"]);
     assert_eq!(highlighted_session(&rt), Some("exporter".into()), "arriving matches don't move the highlight");
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    quiet(&mut rt);
+    assert_eq!(work_found(&rt.state), Some(Ok(vec!["z-W9".to_string()])), "the older, slower search's reply is dropped");
+    let mut both = asked(&paths);
+    both.sort();
+    assert_eq!(both, ["/api/v1/ledger/search?q=exp&limit=20", "/api/v1/ledger/search?q=export&limit=20"], "the newer query doesn't wait for the older one");
     assert!(rt.presented("hit-1").is_some() && rt.presented("hit-2").is_none(), "the work match and the session are listed");
 
     typed(&mut rt, "broken");
@@ -591,6 +595,7 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W9");
     let mut loaded = Fetched { recorded: recorded(3, sessions(&["a"])), ledgers: HashMap::new(), held: Vec::new(), asked: Vec::new(), started: std::time::Instant::now(), usage: None, moved: Vec::new() };
     let row: feed::derive::world::Work = serde_json::from_value(json!({"id": "z-W9", "text": "Parked export", "state": "in_progress"})).unwrap();
+    loaded.recorded.projects[0].ledger_key = "shared:z".into();
     loaded.ledgers.insert("p1".into(), Ok(vec![row]));
     send(&rt, Bg::Overview(Box::new(loaded)));
     rt.frame(DT);
@@ -601,5 +606,23 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W9");
     quiet(&mut rt);
     assert!(asked(&paths).is_empty(), "a loaded item opens without a read");
+
+    typed(&mut rt, "export");
+    rt.frame(0.2);
+    until(&mut rt, |s| work_found(s).is_some());
+    assert_eq!(crate::over::jump::shown(&rt.state), [("Parked export".to_string(), "Build · Someone's move · Alpha · …a parked export…".to_string())], "a loaded match takes the search's snippet instead of listing twice");
+    assert_eq!(asked(&paths), ["/api/v1/ledger/search?q=export&limit=20"]);
+
+    crate::over::worksearch::open(&mut rt.state, "shared:q", "z-W9");
+    assert!(rt.state.ov.notice.as_deref().is_some_and(|n| n.contains("same id")), "{:?}", rt.state.ov.notice);
+    quiet(&mut rt);
+    assert!(asked(&paths).is_empty(), "work that shares an id with another project's isn't read or opened as the other");
+
+    crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W8");
+    until(&mut rt, |s| s.ov.d.work.contains_key("z-W8"));
+    crate::over::open_target(&mut rt.state, &crate::over::Target::Work("z-W8".into()));
+    quiet(&mut rt);
+    assert_eq!(rt.state.ov.d.work["z-W8"].state, "parked", "a failed refresh keeps what it last had");
+    assert_eq!(crate::over::worksearch::note(&rt.state, "z-W8").as_deref(), Some("Couldn't refresh this work item, so it may be out of date: the ledger store is busy"));
     assert_eq!(crate::over::worksearch::note(&rt.state, "z-W9"), None);
 }

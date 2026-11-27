@@ -4,6 +4,7 @@ use rune_theme_opencode::icons;
 
 use feed::catalog::Session;
 use feed::search::{Command, Selected, commands, commands_lead, one_line};
+use feed::worksearch::Found;
 
 use crate::icons as ah;
 use crate::over::search;
@@ -83,13 +84,29 @@ fn entries(s: &App) -> Vec<Entry> {
     out
 }
 
+fn lists(s: &App, e: &Entry, f: &Found) -> bool {
+    match &e.pick {
+        Some(Pick::Target(Target::Work(x))) => *x == f.id && s.ov.d.work.get(x).is_some_and(|w| w.ledger_key() == f.project_key),
+        Some(Pick::Found(ledger, x)) => *x == f.id && *ledger == f.project_key,
+        _ => false,
+    }
+}
+
 fn work_found(s: &App, out: &mut Vec<Entry>, lead: bool) {
     let Some(Some(found)) = crate::over::worksearch::found_for(s) else { return };
     let note = |text: String| Entry { group: "Work", title: text, status: String::new(), badge: String::new(), look: Look::Icon(&icons::TASK), pick: None };
     let rows: Vec<Entry> = match found {
         Err(e) => vec![note(e.clone())],
         Ok(search) => {
-            let listed = |id: &str| out.iter().any(|e| matches!(&e.pick, Some(Pick::Target(Target::Work(x)) | Pick::Found(_, x)) if x == id));
+            for f in &search.items {
+                let extra = s.ov.d.found_extra(f);
+                if let Some(e) = out.iter_mut().find(|e| lists(s, e, f))
+                    && !extra.is_empty()
+                {
+                    e.status = std::iter::once(e.status.clone()).filter(|t| !t.is_empty()).chain(extra).collect::<Vec<_>>().join(" · ");
+                }
+            }
+            let listed = |f: &Found| out.iter().any(|e| lists(s, e, f));
             let mut rows: Vec<Entry> = s.ov.d.found_rows(search, listed).into_iter().map(|r| Entry { group: "Work", title: r.title, status: r.status, badge: r.badge, look: Look::Avatar(r.avatar), pick: Some(Pick::Found(r.ledger, r.id)) }).collect();
             rows.extend(search.note().map(note));
             rows
@@ -97,6 +114,11 @@ fn work_found(s: &App, out: &mut Vec<Entry>, lead: bool) {
     };
     let at = feed::worksearch::work_slot(out.iter().map(|e| e.group), lead);
     out.splice(at..at, rows);
+}
+
+#[cfg(test)]
+pub fn shown(s: &App) -> Vec<(String, String)> {
+    entries(s).into_iter().filter(|e| e.group == "Work").map(|e| (e.title, e.status)).collect()
 }
 
 fn query(s: &App) -> &str {
@@ -111,7 +133,7 @@ fn highlighted(s: &App) -> usize {
 fn same(a: &Pick, b: &Pick) -> bool {
     match (a, b) {
         (Pick::Target(x), Pick::Target(y)) => x == y,
-        (Pick::Found(_, x), Pick::Found(_, y)) => x == y,
+        (Pick::Found(a, x), Pick::Found(b, y)) => a == b && x == y,
         (Pick::Codex(x), Pick::Codex(y)) => x.id == y.id,
         (Pick::Command(x), Pick::Command(y)) => x == y,
         _ => false,

@@ -21,7 +21,6 @@ pub struct State {
     asked: Option<Asked>,
     typed: Option<(String, f64)>,
     requests: u64,
-    flying: bool,
     reads: HashMap<String, u64>,
     found: HashMap<String, Work>,
     opening: HashMap<String, Option<String>>,
@@ -32,7 +31,7 @@ pub struct State {
 impl Default for State {
     fn default() -> State {
         let (tx, rx) = channel();
-        State { asked: None, typed: None, requests: 0, flying: false, reads: HashMap::new(), found: HashMap::new(), opening: HashMap::new(), tx, rx }
+        State { asked: None, typed: None, requests: 0, reads: HashMap::new(), found: HashMap::new(), opening: HashMap::new(), tx, rx }
     }
 }
 
@@ -72,7 +71,6 @@ fn ask(s: &mut App, q: String) {
     };
     let st = &mut s.ov.worksearch;
     st.asked = Some((q.clone(), seq, None));
-    st.flying = true;
     let tx = st.tx.clone();
     std::thread::spawn(move || {
         let _ = tx.send(Reply::Search(seq, client.search_work(&q)));
@@ -97,7 +95,7 @@ fn settle(s: &mut App) -> bool {
     }
     let due = st.typed.as_ref().is_some_and(|(_, at)| clock - at >= SETTLE.as_secs_f64());
     let asked = st.asked.as_ref().is_some_and(|(a, _, _)| *a == q);
-    if due && !asked && !st.flying {
+    if due && !asked {
         ask(s, q);
         return true;
     }
@@ -108,7 +106,7 @@ pub fn wait(s: &App) -> Option<Duration> {
     let st = &s.ov.worksearch;
     let (typed, at) = st.typed.as_ref()?;
     let asked = st.asked.as_ref().is_some_and(|(a, _, _)| a == typed);
-    (!asked && !st.flying).then(|| SETTLE.saturating_sub(Duration::from_secs_f64((s.clock - at).max(0.0))))
+    (!asked).then(|| SETTLE.saturating_sub(Duration::from_secs_f64((s.clock - at).max(0.0))))
 }
 
 pub fn drain(s: &mut App) -> bool {
@@ -116,7 +114,6 @@ pub fn drain(s: &mut App) -> bool {
     while let Ok(reply) = s.ov.worksearch.rx.try_recv() {
         match reply {
             Reply::Search(seq, found) => {
-                s.ov.worksearch.flying = false;
                 if s.ov.worksearch.asked.as_ref().is_some_and(|(_, asked, _)| *asked == seq) {
                     super::jump::keep_highlight(s, |s| {
                         if let Some((_, _, slot)) = s.ov.worksearch.asked.as_mut() {
@@ -157,14 +154,16 @@ fn loaded(s: &App, id: &str) -> bool {
     s.ov.d.work.contains_key(id) && !s.ov.worksearch.found.contains_key(id)
 }
 
+fn taken(s: &App, ledger: &str, id: &str) -> bool {
+    s.ov.d.work.get(id).is_some_and(|w| w.ledger_key() != ledger)
+}
+
 fn read(s: &mut App, ledger: &str, id: &str) {
     let Some(client) = s.client.clone() else {
         s.ov.worksearch.opening.insert(id.into(), Some("Opening this work item needs a running Agenthail.".into()));
         return;
     };
-    if !s.ov.d.work.contains_key(id) {
-        s.ov.worksearch.opening.insert(id.into(), None);
-    }
+    s.ov.worksearch.opening.insert(id.into(), None);
     let st = &mut s.ov.worksearch;
     st.requests += 1;
     let seq = st.requests;
@@ -177,6 +176,11 @@ fn read(s: &mut App, ledger: &str, id: &str) {
 }
 
 pub fn open(s: &mut App, ledger: &str, id: &str) {
+    if taken(s, ledger, id) {
+        s.ov.jump = None;
+        s.ov.notice = Some(format!("{id} in {ledger} has the same id as work in another project, so it can't open here."));
+        return;
+    }
     if !loaded(s, id) {
         read(s, ledger, id);
     }
@@ -190,8 +194,11 @@ pub fn reread(s: &mut App, id: &str) {
 }
 
 pub fn note(s: &App, id: &str) -> Option<String> {
+    let shown = s.ov.d.work.contains_key(id);
     match s.ov.worksearch.opening.get(id)? {
+        None if shown => None,
         None => Some("Loading this work item…".into()),
+        Some(e) if shown => Some(format!("Couldn't refresh this work item, so it may be out of date: {e}")),
         Some(e) => Some(format!("Couldn't open this work item: {e}")),
     }
 }
