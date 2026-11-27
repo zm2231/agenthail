@@ -163,6 +163,20 @@ fn an_older_answer_does_not_retire_a_key_a_newer_send_still_uses() {
 }
 
 #[test]
+fn a_failed_send_does_not_erase_an_earlier_unknown_outcome() {
+    let mut keys = Keys::default();
+    let add = Act::Add("Ship it".into());
+    let first = keys.key("s", &add);
+    let second = keys.key("s", &add);
+    keys.settled(&first, &unknown());
+    keys.settled(&second, &Outcome::Failed("nope".into()));
+    assert_eq!(send(&mut keys, "s", &add, unknown()), first, "the retry keeps the key and message id of the unknown send");
+    let read = keys.read_started();
+    keys.observed("s", read);
+    assert_ne!(send(&mut keys, "s", &add, Outcome::Done), first, "a later read resolves it");
+}
+
+#[test]
 fn a_done_change_starts_the_session_over_like_native() {
     let mut keys = Keys::default();
     let add = Act::Add("Ship it".into());

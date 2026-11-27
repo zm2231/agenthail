@@ -151,7 +151,7 @@ struct Pending {
     session: String,
     key: String,
     sent: u32,
-    answered: bool,
+    unresolved: bool,
     recorded: Option<u64>,
 }
 
@@ -169,7 +169,7 @@ impl Keys {
             return p.key.clone();
         }
         let key = crate::catalog::request_key();
-        self.pending.push(Pending { identity, session: session.to_string(), key: key.clone(), sent: 1, answered: false, recorded: None });
+        self.pending.push(Pending { identity, session: session.to_string(), key: key.clone(), sent: 1, unresolved: false, recorded: None });
         key
     }
 
@@ -179,18 +179,22 @@ impl Keys {
         let Some(p) = self.pending.iter_mut().find(|p| p.key == key) else { return };
         p.sent = p.sent.saturating_sub(1);
         match outcome {
-            Outcome::Done | Outcome::Failed(_) => p.answered = true,
+            Outcome::Done => {
+                p.unresolved = false;
+                p.recorded = None;
+            }
+            Outcome::Failed(_) => {}
             Outcome::Unknown(_) => {
-                p.answered = false;
+                p.unresolved = true;
                 p.recorded = Some(at);
             }
             Outcome::Pending(_) => {
-                p.answered = false;
+                p.unresolved = true;
                 p.recorded = None;
             }
         }
         let done = (*outcome == Outcome::Done).then(|| p.session.clone());
-        self.pending.retain(|p| p.sent > 0 || (!p.answered && done.as_deref() != Some(p.session.as_str())));
+        self.pending.retain(|p| p.sent > 0 || (p.unresolved && done.as_deref() != Some(p.session.as_str())));
     }
 
     pub fn read_started(&mut self) -> u64 {
