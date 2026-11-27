@@ -186,6 +186,15 @@ pub(crate) fn changed(s: &mut App, id: &str) {
     fetch_context(s, id, Duration::ZERO);
 }
 
+pub(crate) fn streamed_context(s: &mut App, id: &str, usage: Option<ContextUsage>) {
+    s.menus.supersede(id, "context");
+    s.menus.context_error.remove(id);
+    match usage {
+        Some(usage) => s.menus.context.insert(id.to_string(), usage),
+        None => s.menus.context.remove(id),
+    };
+}
+
 pub fn ensure_models(s: &mut App, id: &str) {
     if s.client.is_none() || session(s, id).is_none() {
         return;

@@ -17,6 +17,16 @@ pub struct Data {
     pub reason: Option<String>,
     #[serde(default)]
     pub version: u64,
+    #[serde(default)]
+    pub context: serde_json::Value,
+    #[serde(default)]
+    pub goal: serde_json::Value,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Streamed {
+    Context(Option<crate::settings::ContextUsage>),
+    Goal(Option<crate::inspect::Goal>),
 }
 
 #[derive(Deserialize, Clone, Debug)]
@@ -45,7 +55,7 @@ pub enum Event {
     Remove(String),
     Done,
     SourceError(String),
-    State(String),
+    State(Streamed),
 }
 
 pub enum Outcome {
@@ -87,8 +97,10 @@ impl Rebuild {
             let bytes = item.text.len();
             self.rows.insert(item.id.clone(), (item.clone(), bytes));
             events.push(Event::Upsert(item));
-        } else if matches!(data.kind.as_str(), "context" | "goal") {
-            events.push(Event::State(data.kind.clone()));
+        } else if data.kind == "context" {
+            events.push(Event::State(Streamed::Context(serde_json::from_value(data.context.clone()).ok())));
+        } else if data.kind == "goal" {
+            events.push(Event::State(Streamed::Goal(serde_json::from_value::<crate::inspect::Goal>(data.goal.clone()).ok().filter(|g| !g.objective.is_empty()))));
         }
         if data.kind == "done" {
             events.push(Event::Done);
@@ -132,12 +144,17 @@ mod tests {
     }
 
     #[test]
-    fn a_context_or_goal_row_arrives_as_state_without_an_item() {
-        for kind in ["context", "goal"] {
-            let raw = format!(r#"{{"seq":9,"type":"item","data":{{"itemId":"state:{kind}","providerKey":"state:{kind}","version":1,"op":"replace","kind":"{kind}"}}}}"#);
-            let wire: Wire = serde_json::from_str(&raw).unwrap();
+    fn a_context_or_goal_row_arrives_as_state_with_its_value() {
+        let apply = |raw: &str| {
+            let wire: Wire = serde_json::from_str(raw).unwrap();
             let Outcome::Events(9, events) = Rebuild::default().apply(wire) else { panic!("no events") };
-            assert!(matches!(&events[..], [Event::State(k)] if k == kind), "{events:?}");
-        }
+            events
+        };
+        let context = apply(r#"{"seq":9,"type":"item","data":{"itemId":"state:context","version":1,"op":"replace","kind":"context","context":{"usedTokens":12,"contextWindow":100}}}"#);
+        assert!(matches!(&context[..], [Event::State(Streamed::Context(Some(c)))] if c.used_tokens == 12 && c.context_window == 100), "{context:?}");
+        let goal = apply(r#"{"seq":9,"type":"item","data":{"itemId":"state:goal","version":1,"op":"replace","kind":"goal","goal":{"objective":"ship it","status":"active"}}}"#);
+        assert!(matches!(&goal[..], [Event::State(Streamed::Goal(Some(g)))] if g.objective == "ship it"), "{goal:?}");
+        let cleared = apply(r#"{"seq":9,"type":"item","data":{"itemId":"state:goal","version":2,"op":"replace","kind":"goal","goal":null}}"#);
+        assert!(matches!(&cleared[..], [Event::State(Streamed::Goal(None))]), "{cleared:?}");
     }
 }

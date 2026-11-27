@@ -339,8 +339,8 @@ pub fn can_save(act: GoalAct, text: &str, budget: Option<i64>) -> bool {
     }
 }
 
-pub fn moves_metadata(events: &[crate::wire::Event]) -> bool {
-    events.iter().any(|e| matches!(e, crate::wire::Event::State(_)))
+pub fn streamed(events: &[crate::wire::Event]) -> Vec<crate::wire::Streamed> {
+    events.iter().filter_map(|e| if let crate::wire::Event::State(x) = e { Some(x.clone()) } else { None }).collect()
 }
 
 pub fn lifecycle(x: &Session) -> Lifecycle {
@@ -594,11 +594,12 @@ mod tests {
     }
 
     #[test]
-    fn a_goal_or_context_event_in_the_stream_asks_for_a_reread() {
-        let item = crate::wire::Event::Upsert(crate::Item { kind: "message".into(), ..Default::default() });
-        assert!(moves_metadata(&[item.clone(), crate::wire::Event::State("goal".into())]));
-        assert!(moves_metadata(&[crate::wire::Event::State("context".into())]));
-        assert!(!moves_metadata(&[item, crate::wire::Event::Done]));
+    fn streamed_context_and_goal_values_are_picked_out_of_a_batch() {
+        use crate::wire::{Event, Streamed};
+        let item = Event::Upsert(crate::Item { kind: "message".into(), ..Default::default() });
+        let goal = Streamed::Goal(Some(Goal { objective: "ship it".into(), ..Default::default() }));
+        assert_eq!(streamed(&[item.clone(), Event::State(goal.clone()), Event::State(Streamed::Context(None))]), vec![goal, Streamed::Context(None)]);
+        assert!(streamed(&[item, Event::Done]).is_empty());
     }
 
     #[test]

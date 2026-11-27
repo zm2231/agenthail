@@ -94,6 +94,19 @@ pub(crate) fn read(s: &mut App, id: &str, ticket: u64, result: Result<Metadata, 
     }
 }
 
+pub(crate) fn streamed(s: &mut App, id: &str, x: feed::wire::Streamed) {
+    match x {
+        feed::wire::Streamed::Context(usage) => super::session_menu::streamed_context(s, id, usage),
+        feed::wire::Streamed::Goal(goal) => {
+            let ticket = s.inspect.reads.ticket();
+            s.inspect.reads.accept(id, ticket);
+            let meta = s.inspect.meta.entry(id.to_string()).or_default();
+            meta.goal = goal;
+            meta.goal_failed = false;
+        }
+    }
+}
+
 pub(crate) fn metadata_moved(s: &mut App, id: &str) {
     if !showing(s, id) || s.client.is_none() || !s.inspect.reads.want(id) {
         return;

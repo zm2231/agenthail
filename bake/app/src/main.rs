@@ -1256,7 +1256,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     let mut counter = s.counter;
     let mut panes_moved = false;
     let mut caught: Vec<String> = Vec::new();
-    let mut rereads: Vec<String> = Vec::new();
+    let mut streamed: Vec<(String, feed::wire::Streamed)> = Vec::new();
     for (id, pane) in s.panes.iter_mut() {
         let mut moved = false;
         if let Some(replay) = &mut pane.replay {
@@ -1273,9 +1273,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             for message in arrived {
                 match message {
                     Message::Batch(b) => {
-                        if feed::inspect::moves_metadata(&b.events) {
-                            rereads.push(id.clone());
-                        }
+                        streamed.extend(feed::inspect::streamed(&b.events).into_iter().map(|x| (id.clone(), x)));
                         history::batch_arrived(pane, t);
                         moved |= pane.transcript.apply(b.seq, b.events);
                     }
@@ -1306,8 +1304,8 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     for id in caught {
         history::caught_up(s, &id);
     }
-    for id in rereads {
-        ui::inspect::metadata_moved(s, &id);
+    for (id, x) in streamed {
+        ui::inspect::streamed(s, &id, x);
     }
     if s.ov.live.stale() || (s.panes_moved && s.clock - s.built_at >= PANE_REBUILD_SECS) {
         rebuild(s);
