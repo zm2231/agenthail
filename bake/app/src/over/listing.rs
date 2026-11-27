@@ -11,11 +11,12 @@ const SETTLE: Duration = Duration::from_millis(300);
 const TYPING: Duration = Duration::from_millis(250);
 const SOONEST: Duration = Duration::from_secs(1);
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 enum Read {
     First,
     More,
     Again,
+    Fill(String),
 }
 
 enum Got {
@@ -38,6 +39,7 @@ pub struct State {
     projects: Vec<(String, String)>,
     shown: Option<Request>,
     failed: Option<Request>,
+    filled: HashSet<String>,
     asked: Option<(u64, Read, Request)>,
     typed: Option<(Request, Instant)>,
     due: Option<Instant>,
@@ -64,6 +66,7 @@ impl Default for State {
             projects: Vec::new(),
             shown: None,
             failed: None,
+            filled: HashSet::new(),
             asked: None,
             typed: None,
             due: None,
@@ -113,7 +116,7 @@ fn ask(s: &mut App, read: Read, request: Request) {
     let Some(client) = s.client.clone() else { return };
     let st = &mut s.ov.list;
     st.seq += 1;
-    if read != Read::More {
+    if matches!(read, Read::First | Read::Again) {
         st.due = None;
         st.stale = false;
     }
@@ -122,12 +125,13 @@ fn ask(s: &mut App, read: Read, request: Request) {
     st.error = None;
     let (seq, tx) = (st.seq, st.tx.clone());
     let (cursor, families) = (st.listing.as_ref().and_then(|l| l.next.clone()), st.listing.as_ref().map_or(0, Listing::families));
-    st.asked = Some((seq, read, request.clone()));
+    st.asked = Some((seq, read.clone(), request.clone()));
     std::thread::spawn(move || {
-        let got = match read {
+        let got = match &read {
             Read::First => client.listing_page(&request, None).map(Got::Page),
             Read::More => client.listing_page(&request, cursor.as_deref()).map(Got::Page),
             Read::Again => client.listing_reread(&request, families).map(Got::Whole),
+            Read::Fill(project) => client.listing_project(&request, project).map(Got::Page),
         };
         let _ = tx.send((seq, read, request, got));
     });
@@ -195,6 +199,12 @@ fn refresh_at(listing: &Listing) -> Option<Duration> {
 fn take(s: &mut App, read: Read, request: Request, got: Result<Got, String>) {
     let st = &mut s.ov.list;
     match got {
+        Ok(Got::Page(page)) if matches!(read, Read::Fill(_)) => {
+            if let Some(held) = st.listing.as_mut() {
+                held.fill(page);
+            }
+        }
+        Err(error) if matches!(read, Read::Fill(_)) => st.error = Some(error),
         Ok(got) => {
             let listing = match (got, st.listing.take()) {
                 (Got::Page(page), Some(mut held)) if read == Read::More => {
@@ -217,6 +227,9 @@ fn take(s: &mut App, read: Read, request: Request, got: Result<Got, String>) {
             }
             if read == Read::First {
                 st.expanded.clear();
+            }
+            if read != Read::More {
+                st.filled.clear();
             }
             let wait = refresh_at(&listing);
             st.listing = Some(listing);
@@ -246,7 +259,6 @@ pub fn poll(s: &mut App) -> bool {
         take(s, read, request, got);
     }
     let visible = matches!(s.screen, Screen::Sessions);
-    let entered = visible && !s.ov.list.visible;
     s.ov.list.visible = visible;
     if !visible || s.client.is_none() {
         return changed;
@@ -270,12 +282,19 @@ pub fn poll(s: &mut App) -> bool {
     if s.ov.list.asked.is_some() {
         return changed;
     }
-    if entered && s.ov.list.stale {
+    if s.ov.list.stale {
         s.ov.list.due = Some(Instant::now());
     }
     if s.ov.list.due.is_some_and(|d| Instant::now() >= d) {
         ask(s, Read::Again, want);
-        changed = true;
+        return true;
+    }
+    let st = &s.ov.list;
+    let short = st.listing.as_ref().map(Listing::short).unwrap_or_default();
+    if let Some(project) = short.into_iter().find(|p| st.expanded.contains(p) && !st.filled.contains(p)) {
+        s.ov.list.filled.insert(project.clone());
+        ask(s, Read::Fill(project), want);
+        return true;
     }
     changed
 }

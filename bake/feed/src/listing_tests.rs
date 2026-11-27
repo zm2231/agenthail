@@ -104,6 +104,7 @@ fn a_remote_root_names_its_host_and_keeps_its_own_checkout() {
     let t = tree(&v, |id| rows.get(id));
     let hosts: Vec<(String, Option<String>)> = t[0].checkouts.iter().map(|c| (c.id.clone(), c.host.clone())).collect();
     assert_eq!(hosts, vec![("/r/app@h2".to_string(), Some("forge".to_string())), ("/r/app".to_string(), None)]);
+    assert_eq!(t[0].hosts(), vec!["forge".to_string()]);
 }
 
 #[test]
@@ -113,14 +114,28 @@ fn a_project_shows_its_collapsed_families_and_the_selection_until_expanded() {
     let v = view(json!([{"id": "p", "name": "p", "counts": {"families": 6, "sessions": 6}, "collapsedFamilyIds": ["f1", "f2"]}]), ids.iter().map(|id| family(id, "p", "c", &[(id, 0)])).collect());
     let p = &tree(&v, |id| rows.get(id))[0];
     assert_eq!(p.shown(false, None).family_count(), 2);
-    assert_eq!(p.more_label(false, None).as_deref(), Some("Show 2 more"), "only families already read are promised");
+    assert_eq!(p.more_label(false, None).as_deref(), Some("Show 4 more"), "the daemon's total, like the Mac app");
     assert_eq!(p.shown(false, Some("f4")).family_count(), 3);
-    assert_eq!(p.more_label(false, Some("f4")).as_deref(), Some("Show 1 more"));
+    assert_eq!(p.more_label(false, Some("f4")).as_deref(), Some("Show 3 more"));
     assert_eq!(p.shown(true, None).family_count(), 4);
     assert_eq!(p.more_label(true, None).as_deref(), Some("Show less"));
     let small = view(json!([{"id": "p", "name": "p", "counts": {"families": 2, "sessions": 2}, "collapsedFamilyIds": ["f1", "f2"]}]), ids[..2].iter().map(|id| family(id, "p", "c", &[(id, 0)])).collect());
     let p = &tree(&small, |id| rows.get(id))[0];
     assert_eq!((p.more_label(false, None), p.more_label(true, None)), (None, None));
+}
+
+#[test]
+fn a_project_with_unread_families_is_filled_from_its_own_scoped_read() {
+    let first = Page { sessions: vec![session("a", "/r", None, false)], view: view(json!([{"id": "p", "name": "p", "counts": {"families": 3, "sessions": 3}, "collapsedFamilyIds": ["a"]}, {"id": "q", "name": "q", "counts": {"families": 1, "sessions": 1}, "collapsedFamilyIds": ["z"]}]), vec![family("a", "p", "c", &[("a", 0)]), family("z", "q", "c", &[("z", 0)])]), next: Some("n".into()) };
+    let mut listing = Listing::first(first);
+    assert_eq!(listing.short(), vec!["p".to_string()]);
+    let body = json!({"sessions": [{"id": "b"}, {"id": "c"}], "view": {"projects": [], "families": [family("a", "p", "c", &[("a", 0)]), family("b", "p", "c", &[("b", 0)]), family("c", "p", "c", &[("c", 0)])]}}).to_string();
+    let (client, seen) = daemon(replies(&[(200, &body)]));
+    let request = Request { scope: "all".into(), surface: Some("codex".into()), ..Request::default() };
+    listing.fill(client.listing_project(&request, "p").unwrap());
+    assert_eq!(seen.recv().unwrap().0, "/api/v1/snapshot?scope=all&members=1&limit=200&projectId=p&surface=codex");
+    assert!(listing.short().is_empty());
+    assert_eq!((listing.families(), listing.rows.len(), listing.next.as_deref(), listing.view.count("all")), (4, 3, Some("n"), Some(9)), "the list's own cursor and counts stay");
 }
 
 #[test]

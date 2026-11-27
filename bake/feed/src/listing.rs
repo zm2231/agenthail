@@ -177,6 +177,15 @@ impl Listing {
         self.view.families.len()
     }
 
+    pub fn fill(&mut self, page: Page) {
+        self.view.merge(page.view);
+        self.rows.extend(page.sessions.into_iter().map(|x| (x.id.clone(), x)));
+    }
+
+    pub fn short(&self) -> Vec<String> {
+        self.view.projects.iter().filter(|p| !p.id.is_empty() && self.view.families.iter().filter(|f| f.project_id == p.id).count() < p.counts.families).map(|p| p.id.clone()).collect()
+    }
+
     pub fn remove(&mut self, id: &str) -> bool {
         self.rows.remove(id).is_some()
     }
@@ -192,6 +201,11 @@ fn read(client: &Client, path: &str) -> Result<Page, String> {
 impl Client {
     pub fn listing_page(&self, request: &Request, cursor: Option<&str>) -> Result<Page, String> {
         read(self, &request.path(cursor, PAGE))
+    }
+
+    pub fn listing_project(&self, request: &Request, project: &str) -> Result<Page, String> {
+        let scoped = Request { project: Some(project.to_string()), ..request.clone() };
+        read(self, &scoped.path(None, REREAD_PAGE))
     }
 
     pub fn listing_reread(&self, request: &Request, families: usize) -> Result<Listing, String> {
@@ -247,6 +261,20 @@ impl<'a> TreeProject<'a> {
         self.checkouts.iter().map(|c| c.families.len()).sum()
     }
 
+    pub fn family_total(&self) -> usize {
+        self.counts.families.max(self.family_count())
+    }
+
+    pub fn hosts(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for h in self.checkouts.iter().filter_map(|c| c.host.clone()) {
+            if !out.contains(&h) {
+                out.push(h);
+            }
+        }
+        out
+    }
+
     pub fn sessions_label(&self) -> String {
         if self.counts.sessions == 1 { "1 session".into() } else { format!("{} sessions", self.counts.sessions) }
     }
@@ -277,7 +305,7 @@ impl<'a> TreeProject<'a> {
 
     pub fn more_label(&self, expanded: bool, keeping: Option<&str>) -> Option<String> {
         let shown = self.shown(expanded, keeping).family_count();
-        let total = self.family_count();
+        let total = self.family_total();
         if total <= shown && !(expanded && total > self.collapsed.len()) {
             return None;
         }

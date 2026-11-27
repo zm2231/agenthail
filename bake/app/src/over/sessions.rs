@@ -146,6 +146,10 @@ fn project_group(s: &App, p: &TreeProject, k: &Kit) -> El {
         .child(ui::avatar(&p.name, 20.0))
         .child(text(p.name.clone()).font(HEAD).color(strong(k)))
         .child(Badge::new(p.sessions_label()).variant(BadgeVariant::Subtle).build(k));
+    let hosts = p.hosts();
+    if !hosts.is_empty() {
+        head = head.child(text(format!("on {}", hosts.join(", "))).font(META).color(weak(k)));
+    }
     if needs > 0 {
         head = head.child(text(format!("{needs} need you")).font(META_MED).color(ui::needs_color(k)));
     }
