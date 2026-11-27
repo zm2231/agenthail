@@ -36,7 +36,7 @@ pub(super) fn override_chip(s: &Prefs, view: &View, key: &'static str, k: &Kit) 
 
 pub(super) fn row_for(s: &Prefs, view: &View, key: &'static str, label: &str, control: El, k: &Kit) -> El {
     let control = row().gap(8.0).items_center().child(control).children(override_chip(s, view, key, k));
-    parts::line(label, None, control)
+    parts::line(label, None, control, k)
 }
 
 pub(super) fn segmented(s: &Prefs, view: &View, key: &'static str, label: &'static str, choices: &'static [(&'static str, &'static str)], fallback: &str, disabled: bool, k: &Kit) -> El {
@@ -75,7 +75,7 @@ pub(super) fn slider(s: &Prefs, view: &View, key: &'static str, label: &'static 
                 .on_change(move |s: &mut Prefs, n, done| slide(s, key, &label.to_lowercase(), n, done))
                 .build(k),
         )
-        .child(text(format!("{}{unit}", number(v))).font(META).color(muted()).w(44.0));
+        .child(text(format!("{}{unit}", number(v))).font(k.text(META)).color(muted()).w(44.0));
     row_for(s, view, key, label, control, k)
 }
 
@@ -116,7 +116,7 @@ pub(super) fn accents(s: &Prefs, view: &View, k: &Kit) -> El {
         let c = fl::hex(&current).unwrap_or([0.5; 3]);
         el().fill(Color { r: fl::linear(c[0]), g: fl::linear(c[1]), b: fl::linear(c[2]), a: 1.0 })
     } else {
-        el().fill(theme::wash()).border(1.0, theme::faint()).center().child(text("+").font(META).color(theme::text()))
+        el().fill(theme::wash()).border(1.0, theme::faint()).center().child(text("+").font(k.text(META)).color(theme::text()))
     };
     r = r.child(swatch(any, custom, "Any colour", |s: &mut Prefs| {
         if !writing(s) {

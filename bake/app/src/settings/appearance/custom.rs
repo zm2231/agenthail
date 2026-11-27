@@ -145,7 +145,7 @@ pub(super) fn mesh_editor(s: &Prefs, k: &Kit) -> Option<El> {
             .py(12.0)
             .gap(10.0)
             .key("appearance-mesh-editor")
-            .child(text("Pick each corner and edge of a 3 by 3 gradient.").font(META).color(muted()))
+            .child(text("Pick each corner and edge of a 3 by 3 gradient.").font(k.text(META)).color(muted()))
             .child(row().gap(18.0).child(left).child(picker))
             .child(row().w_full().justify_end().child(actions)),
     )

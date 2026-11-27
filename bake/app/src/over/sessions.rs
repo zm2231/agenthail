@@ -71,20 +71,20 @@ pub fn session_row(s: &App, x: &Session, depth: u8, selected: bool, k: &Kit) -> 
     }
     let (line, color, live) = status_line(s, x, k);
     let trailing = if busy(x) {
-        row().gap(5.0).items_center().child(el().size(6.0, 6.0).radius(3.0).fill(k.c.text_accent)).child(text("live".to_string()).font(META).color(k.c.text_accent))
+        row().gap(5.0).items_center().child(el().size(6.0, 6.0).radius(3.0).fill(k.c.text_accent)).child(text("live".to_string()).font(k.text(META)).color(k.c.text_accent))
     } else if x.state(s.ov.d.now) == State::Done {
-        row().gap(5.0).items_center().child(icon(&icons::CIRCLE_CHECK, 12.0).color(k.c.success.icon)).child(text(format!("done {}", s.ov.d.ago(&x.last_active))).font(META).color(weak(k)))
+        row().gap(5.0).items_center().child(icon(&icons::CIRCLE_CHECK, k.text_size(12.0)).color(k.c.success.icon)).child(text(format!("done {}", s.ov.d.ago(&x.last_active))).font(k.text(META)).color(weak(k)))
     } else {
-        text(format!("idle {}", s.ov.d.ago(&x.last_active))).font(META).color(weak(k))
+        text(format!("idle {}", s.ov.d.ago(&x.last_active))).font(k.text(META)).color(weak(k))
     };
     let mut status = row().gap(6.0).items_center();
     if live {
-        status = status.child(Spinner::new().size(11.0).build(k));
+        status = status.child(Spinner::new().size(k.text_size(11.0)).build(k));
     }
-    status = status.child(text(line).font(META).color(color).truncate().shrink());
-    let mut headline = row().w_full().gap(8.0).items_center().child(text(s.ov.d.title(x)).font(BODY_MED).color(strong(k)).truncate().shrink()).child(crate::ui::session_menu::marks(x));
+    status = status.child(text(line).font(k.text(META)).color(color).truncate().shrink());
+    let mut headline = row().w_full().gap(8.0).items_center().child(text(s.ov.d.title(x)).font(k.text(BODY_MED)).color(strong(k)).truncate().shrink()).child(crate::ui::session_menu::marks(x, k));
     if let Some((h, _)) = feed::derive::needs::headline(x).filter(|_| need_of(s, x).is_some() || busy(x)) {
-        headline = headline.child(text(ui::short_title(&crate::over::plain(&h), 60)).font(META).color(weak(k)).truncate().shrink());
+        headline = headline.child(text(ui::short_title(&crate::over::plain(&h), 60)).font(k.text(META)).color(weak(k)).truncate().shrink());
     }
     headline = headline.child(ui::spacer()).child(trailing);
     let mut r = row()
@@ -106,7 +106,7 @@ pub fn session_row(s: &App, x: &Session, depth: u8, selected: bool, k: &Kit) -> 
                 .min_w(0.0)
                 .gap(3.0)
                 .child(headline)
-                .child(row().gap(4.0).items_center().child(icon(&icons::BRANCH, 11.0).color(weak(k))).child(text(place.join(" · ")).font(META).color(weak(k)).truncate().shrink()))
+                .child(row().gap(4.0).items_center().child(icon(&icons::BRANCH, k.text_size(11.0)).color(weak(k))).child(text(place.join(" · ")).font(k.text(META)).color(weak(k)).truncate().shrink()))
                 .child(status),
         );
     r = if selected { r.fill(k.c.surface_raised_hover).border(1.0, ui::edge()) } else { r.hover(k.c.surface_raised_hover) };
@@ -137,6 +137,8 @@ pub fn view(s: &App, cx: &mut Cx<App>, layer: &mut Vec<El>, main_kit: &Kit) -> E
         .build(&k, layer);
     let search = row()
         .w(240.0)
+        .shrink()
+        .min_w(120.0)
         .gap(8.0)
         .items_center()
         .px(10.0)
@@ -144,9 +146,9 @@ pub fn view(s: &App, cx: &mut Cx<App>, layer: &mut Vec<El>, main_kit: &Kit) -> E
         .radius(8.0)
         .fill(k.c.surface_base)
         .border(1.0, ui::edge())
-        .child(icon(&icons::MAGNIFYING_GLASS, 14.0).color(k.c.icon_base))
+        .child(icon(&icons::MAGNIFYING_GLASS, k.text_size(14.0)).color(k.c.icon_base))
         .child(
-            text_input(&s.ov.sessions_query, TextStyle::new(13.0, 440.0).lh(18.0))
+            text_input(&s.ov.sessions_query, k.text(TextStyle::new(13.0, 440.0).lh(18.0)))
                 .single_line()
                 .key("sessions-search")
                 .label("Search sessions")
@@ -161,7 +163,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, layer: &mut Vec<El>, main_kit: &Kit) -> E
     let groups = groups(&all, &needy);
     let mut list = col().w_full().gap(18.0).px(24.0).pt(16.0).pb(32.0).child(bar);
     if groups.is_empty() {
-        list = list.child(text(if s.ov.sessions_filter == 4 { "No archived sessions in the snapshot." } else { "No sessions match." }.to_string()).font(META).color(weak(&k)).pt(20.0));
+        list = list.child(text(if s.ov.sessions_filter == 4 { "No archived sessions in the snapshot." } else { "No sessions match." }.to_string()).font(k.text(META)).color(weak(&k)).pt(20.0));
     }
     for g in groups {
         let (name, key, rows) = (g.name, g.key, g.sessions);
@@ -174,13 +176,13 @@ pub fn view(s: &App, cx: &mut Cx<App>, layer: &mut Vec<El>, main_kit: &Kit) -> E
             .px(12.0)
             .pb(4.0)
             .child(ui::avatar(&name, 20.0))
-            .child(text(name.clone()).font(HEAD).color(strong(&k)))
+            .child(text(name.clone()).font(k.text(HEAD)).color(strong(&k)))
             .child(Badge::new(rows.len().to_string()).variant(BadgeVariant::Subtle).build(&k));
         if needs > 0 {
-            head = head.child(text(format!("{needs} need you")).font(META_MED).color(ui::needs_color(&k)));
+            head = head.child(text(format!("{needs} need you")).font(k.text(META_MED)).color(ui::needs_color(&k)));
         }
         if working > 0 {
-            head = head.child(text(format!("{working} working")).font(META_MED).color(k.c.text_accent));
+            head = head.child(text(format!("{working} working")).font(k.text(META_MED)).color(k.c.text_accent));
         }
         head = head.child(ui::spacer());
         if let Some(key) = key {

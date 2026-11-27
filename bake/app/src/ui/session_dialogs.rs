@@ -12,21 +12,21 @@ pub fn has_marks(x: &Session) -> bool {
     x.unread() || x.pinned() || x.snoozed(time::OffsetDateTime::now_utc())
 }
 
-pub fn marks(x: &Session) -> El {
+pub fn marks(x: &Session, k: &Kit) -> El {
     let mut r = row().gap(4.0).items_center();
     if x.unread() {
         r = r.child(el().size(7.0, 7.0).radius(3.5).fill(accent()));
     }
     if x.pinned() {
-        r = r.child(icon(&icons::PIN, 11.0).color(faint()));
+        r = r.child(icon(&icons::PIN, k.text_size(11.0)).color(faint()));
     }
     if x.snoozed(time::OffsetDateTime::now_utc()) {
-        r = r.child(icon(&icons::CLOCK, 11.0).color(faint()).label("Snoozed"));
+        r = r.child(icon(&icons::CLOCK, k.text_size(11.0)).color(faint()).label("Snoozed"));
     }
     r
 }
 
-pub fn button(x: &Session) -> El {
+pub fn button(x: &Session, k: &Kit) -> El {
     let id = x.id.clone();
     col()
         .key("session-menu-trigger")
@@ -43,7 +43,7 @@ pub fn button(x: &Session) -> El {
                 _ => Some(Open { session: id.clone(), at: None, sub: false }),
             };
         })
-        .child(icon(&icons::MORE, 16.0).color(muted()))
+        .child(icon(&icons::MORE, k.text_size(16.0)).color(muted()))
 }
 
 fn act_icon(act: &Act) -> &'static rune::Icon {
@@ -126,7 +126,7 @@ fn rename_dialog(s: &App, id: &str, layer: &mut Vec<El>, k: &Kit) {
     let unchanged = menu::unchanged(&text_now, current.as_deref());
     let clearing = menu::clears(&text_now, current.as_deref());
     let title = crate::ui::gone::shown(s, id).map(|x| x.title()).unwrap_or_default();
-    let input = text_input(&s.menus.rename_text, BODY)
+    let input = text_input(&s.menus.rename_text, k.text(BODY))
         .single_line()
         .key("rename-input")
         .label("Name")
@@ -136,10 +136,10 @@ fn rename_dialog(s: &App, id: &str, layer: &mut Vec<El>, k: &Kit) {
         .placeholder("name", faint())
         .on_edit(|s: &mut App| &mut s.menus.rename_text)
         .on_submit(|s: &mut App, _: &mut Tx| save_rename(s));
-    let field = row().w_full().gap(6.0).items_center().px(10.0).py(7.0).radius(8.0).fill(theme::wash()).border(1.0, theme::line()).child(text("@").font(BODY).color(muted())).child(input);
+    let field = row().w_full().gap(6.0).items_center().px(10.0).py(7.0).radius(8.0).fill(theme::wash()).border(1.0, theme::line()).child(text("@").font(k.text(BODY)).color(muted())).child(input);
     let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0).child(field);
     if let Some(message) = s.menus.rename_error.clone().or_else(|| (!text_now.is_empty()).then_some(problem).flatten().map(String::from)) {
-        body = body.child(text(message).font(META).color(failed()).wrap().w_full());
+        body = body.child(text(message).font(k.text(META)).color(failed()).wrap().w_full());
     }
     let save_label = if s.menus.rename_saving { "Saving…" } else if clearing { "Clear name" } else { "Save" };
     let buttons = row()

@@ -13,7 +13,7 @@ fn remote(s: &Prefs, rc: &RemoteControl, k: &Kit) -> El {
         .iter()
         .map(|root| {
             let control = match root.problem.as_deref().filter(|p| !p.is_empty()) {
-                Some(problem) => text(problem.to_string()).font(META).color(failed()).wrap().max_w(260.0),
+                Some(problem) => text(problem.to_string()).font(k.text(META)).color(failed()).wrap().max_w(260.0),
                 None => {
                     let on = root.at_startup == Some(true);
                     let path = root.root.clone();
@@ -25,14 +25,13 @@ fn remote(s: &Prefs, rc: &RemoteControl, k: &Kit) -> El {
                 }
             };
             let detail = (root.problem.is_none() && root.at_startup.is_none()).then(|| "Not set; Claude's default applies".to_string());
-            line(&root.name, detail, control)
+            line(&root.name, detail, control, k)
         })
         .collect();
     section(
         "Claude Remote Control at startup",
         rows,
-        Some("New Claude sessions on an account with this on start Remote Control, so what you write here reaches them as your own turn. Sessions already running keep what they started with.".into()),
-    )
+        Some("New Claude sessions on an account with this on start Remote Control, so what you write here reaches them as your own turn. Sessions already running keep what they started with.".into()), k)
 }
 
 fn holds(s: &Prefs, root: &CompactRoot, all: &[Hold], k: &Kit) -> Option<El> {
@@ -48,7 +47,7 @@ fn holds(s: &Prefs, root: &CompactRoot, all: &[Hold], k: &Kit) -> Option<El> {
         }
     });
     for l in lines {
-        c = c.child(text(l).font(META).color(muted()).wrap());
+        c = c.child(text(l).font(k.text(META)).color(muted()).wrap());
     }
     Some(row().w_full().px(6.0).py(4.0).child(c.build(k).w_full()))
 }
@@ -59,17 +58,17 @@ fn titles(s: &Prefs, c: &Compaction) -> Vec<String> {
 
 fn root_card(s: &Prefs, title: &str, root: &CompactRoot, all: &[Hold], k: &Kit) -> El {
     let idle = &root.agenthail_idle_compaction;
-    let mut rows = vec![fact("Window", prefs::window_label(root.auto_compact_window.as_ref()))];
-    rows.extend(prefs::model_lines(root).into_iter().map(|(model, window)| fact(&model, window)));
-    rows.push(fact("Autocompact", prefs::toggle_label(root.auto_compact_enabled).into()));
-    rows.push(fact("Idle compaction", prefs::toggle_label(root.idle_compaction).into()));
-    rows.push(fact("Agenthail idle compaction", prefs::agenthail_idle_label(idle)));
+    let mut rows = vec![fact("Window", prefs::window_label(root.auto_compact_window.as_ref()), k)];
+    rows.extend(prefs::model_lines(root).into_iter().map(|(model, window)| fact(&model, window, k)));
+    rows.push(fact("Autocompact", prefs::toggle_label(root.auto_compact_enabled).into(), k));
+    rows.push(fact("Idle compaction", prefs::toggle_label(root.idle_compaction).into(), k));
+    rows.push(fact("Agenthail idle compaction", prefs::agenthail_idle_label(idle), k));
     if let Some(pre) = prefs::pre_limit_label(idle) {
-        rows.push(fact("Before a usage limit", pre));
+        rows.push(fact("Before a usage limit", pre, k));
     }
-    rows.extend(prefs::override_lines(root).into_iter().map(parts::words));
+    rows.extend(prefs::override_lines(root).into_iter().map(|w| parts::words(w, k)));
     rows.extend(holds(s, root, all, k));
-    section(title, rows, Some(root.settings_path.clone()))
+    section(title, rows, Some(root.settings_path.clone()), k)
 }
 
 fn tri(key: &'static str, value: Option<bool>, set: fn(&mut CompactDraft, Option<bool>), k: &Kit) -> El {
@@ -117,47 +116,46 @@ fn change(s: &Prefs, c: &Compaction, layer: &mut Vec<El>, k: &Kit) -> El {
     let d = draft(s);
     let busy = busy(s);
     let status = match (d.problem(), s.notes.get(&Section::Compaction)) {
-        _ if s.draft_orphaned => text("The account folder this change was for is gone. Choose one to save it to.").font(META).color(failed()).wrap(),
-        (Some(p), _) => text(p).font(META).color(failed()).wrap(),
-        (None, Some(f)) => parts::failure(s, f),
-        (None, None) if s.saved_notice => text("Saved.").font(META).color(muted()),
+        _ if s.draft_orphaned => text("The account folder this change was for is gone. Choose one to save it to.").font(k.text(META)).color(failed()).wrap(),
+        (Some(p), _) => text(p).font(k.text(META)).color(failed()).wrap(),
+        (None, Some(f)) => parts::failure(s, f, k),
+        (None, None) if s.saved_notice => text("Saved.").font(k.text(META)).color(muted()),
         _ => text(""),
     };
     let save_button = Button::new("Save").control_size(ControlSize::Small).disabled(busy || d.problem().is_some() || !d.changes() || d.root.is_empty()).on_press(save).build(k).key("settings-compact-save");
     let rows = vec![
-        line("Account folder", None, root),
-        line("Model", None, input(s, &s.model, "Model", "Blank for every model", |s| &mut s.model, k)),
-        line("Window", None, input(s, &s.window, "Window", "tokens, auto, or unset", |s| &mut s.window, k)),
-        line("Autocompact", None, tri("autocompact", s.draft.enabled, |d, v| d.enabled = v, k)),
-        line("Idle compaction", None, tri("idle-compaction", s.draft.idle, |d, v| d.idle = v, k)),
-        line("Agenthail idle compaction", None, tri("agenthail-idle", s.draft.agenthail_idle, |d, v| d.agenthail_idle = v, k)),
-        line("From context size", None, input(s, &s.min_tokens, "From context size", "tokens, 200000 by default", |s| &mut s.min_tokens, k)),
-        line("Before a usage limit, from", None, input(s, &s.pre_limit, "Before a usage limit", "percent, 90 by default, or off", |s| &mut s.pre_limit, k)),
+        line("Account folder", None, root, k),
+        line("Model", None, input(s, &s.model, "Model", "Blank for every model", |s| &mut s.model, k), k),
+        line("Window", None, input(s, &s.window, "Window", "tokens, auto, or unset", |s| &mut s.window, k), k),
+        line("Autocompact", None, tri("autocompact", s.draft.enabled, |d, v| d.enabled = v, k), k),
+        line("Idle compaction", None, tri("idle-compaction", s.draft.idle, |d, v| d.idle = v, k), k),
+        line("Agenthail idle compaction", None, tri("agenthail-idle", s.draft.agenthail_idle, |d, v| d.agenthail_idle = v, k), k),
+        line("From context size", None, input(s, &s.min_tokens, "From context size", "tokens, 200000 by default", |s| &mut s.min_tokens, k), k),
+        line("Before a usage limit, from", None, input(s, &s.pre_limit, "Before a usage limit", "percent, 90 by default, or off", |s| &mut s.pre_limit, k), k),
         row().w_full().gap(12.0).items_center().px(14.0).py(10.0).child(col().grow(1.0).min_w(0.0).child(status)).child(save_button),
     ];
-    section("Change", rows, None)
+    section("Change", rows, None, k)
 }
 
 pub fn page(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
     let mut out = parts::page();
     match &s.remote {
-        None => out = out.child(parts::reading("Remote Control")),
-        Some(Err(f)) => out = out.child(parts::failure(s, f)),
+        None => out = out.child(parts::reading("Remote Control", k)),
+        Some(Err(f)) => out = out.child(parts::failure(s, f, k)),
         Some(Ok(rc)) if rc.shown() => out = out.child(remote(s, rc, k)),
         Some(Ok(_)) => {}
     }
     if let Some(f) = s.notes.get(&Section::Remote) {
-        out = out.child(parts::failure(s, f));
+        out = out.child(parts::failure(s, f, k));
     }
     out = out.child(section(
         "Compaction",
-        vec![parts::words("When Claude compacts a conversation, for each Claude account folder. Claude's settings apply to sessions started after a change. Agenthail's idle compaction compacts a large idle conversation before its cache expires, and applies at once.")],
-        None,
-    ));
+        vec![parts::words("When Claude compacts a conversation, for each Claude account folder. Claude's settings apply to sessions started after a change. Agenthail's idle compaction compacts a large idle conversation before its cache expires, and applies at once.", k)],
+        None, k));
     match &s.compaction {
-        None => out.child(parts::reading("Claude settings")),
-        Some(Err(f)) => out.child(parts::failure(s, f)),
-        Some(Ok(c)) if c.roots.is_empty() => out.child(text("No Claude accounts.").font(META).color(muted()).px(4.0)),
+        None => out.child(parts::reading("Claude settings", k)),
+        Some(Err(f)) => out.child(parts::failure(s, f, k)),
+        Some(Ok(c)) if c.roots.is_empty() => out.child(text("No Claude accounts.").font(k.text(META)).color(muted()).px(4.0)),
         Some(Ok(c)) => out.children(titles(s, c).iter().zip(&c.roots).map(|(t, r)| root_card(s, t, r, c.holds(), k))).child(change(s, c, layer, k)),
     }
 }

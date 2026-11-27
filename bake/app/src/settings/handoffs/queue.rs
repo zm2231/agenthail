@@ -20,10 +20,10 @@ fn item(s: &Prefs, q: &Queued, now: OffsetDateTime, off: bool, k: &Kit) -> El {
         .gap(2.0)
         .grow(1.0)
         .min_w(0.0)
-        .child(text(if q.target.is_empty() { q.session_id.clone() } else { q.target.clone() }).font(BODY).color(theme::text()).truncate())
-        .child(text(q.headline()).font(META).color(muted()).wrap().max_lines(2))
-        .child(text(q.summary(now)).font(META).color(if q.last_error.as_deref().is_some_and(|e| !e.trim().is_empty()) { failed() } else { muted() }).wrap().max_lines(3).selectable(true));
-    words = words.child(text(q.status_label()).font(META).color(if q.stuck() { failed() } else { muted() }));
+        .child(text(if q.target.is_empty() { q.session_id.clone() } else { q.target.clone() }).font(k.text(BODY)).color(theme::text()).truncate())
+        .child(text(q.headline()).font(k.text(META)).color(muted()).wrap().max_lines(2))
+        .child(text(q.summary(now)).font(k.text(META)).color(if q.last_error.as_deref().is_some_and(|e| !e.trim().is_empty()) { failed() } else { muted() }).wrap().max_lines(3).selectable(true));
+    words = words.child(text(q.status_label()).font(k.text(META)).color(if q.stuck() { failed() } else { muted() }));
     let mut actions = row().gap(4.0).items_center();
     if q.can_take_back() {
         let it = q.clone();
@@ -73,22 +73,22 @@ pub fn waiting(s: &Prefs, h: &Handoffs, off: bool, k: &Kit) -> El {
     let now = OffsetDateTime::now_utc();
     let mut rows: Vec<El> = h.queue.iter().map(|q| item(s, q, now, off, k)).collect();
     if rows.is_empty() {
-        rows.push(parts::words("Nothing is waiting to be delivered."));
+        rows.push(parts::words("Nothing is waiting to be delivered.", k));
     }
-    rows.extend(status(s, Section::Queue));
-    parts::section(&format!("Waiting to go out · {}", h.queue.len()), rows, Some("Messages Agenthail is holding for every session, including ones that need a decision.".into()))
+    rows.extend(status(s, Section::Queue, k));
+    parts::section(&format!("Waiting to go out · {}", h.queue.len()), rows, Some("Messages Agenthail is holding for every session, including ones that need a decision.".into()), k)
 }
 
-pub fn recent(h: &Handoffs) -> El {
+pub fn recent(h: &Handoffs, k: &Kit) -> El {
     let now = OffsetDateTime::now_utc();
     let mut rows: Vec<El> = Vec::new();
     match &h.history {
-        None => rows.push(parts::words("Reading delivery history…")),
-        Some(Err(error)) => rows.push(text(error.clone()).font(META).color(attention()).wrap().px(14.0).py(10.0)),
+        None => rows.push(parts::words("Reading delivery history…", k)),
+        Some(Err(error)) => rows.push(text(error.clone()).font(k.text(META)).color(attention()).wrap().px(14.0).py(10.0)),
         Some(Ok(history)) => {
             let list = outcomes(history);
             if list.is_empty() {
-                rows.push(parts::words("No delivery outcomes have been recorded yet."));
+                rows.push(parts::words("No delivery outcomes have been recorded yet.", k));
             }
             for o in list {
                 rows.push(
@@ -102,13 +102,13 @@ pub fn recent(h: &Handoffs) -> El {
                                 .w_full()
                                 .gap(8.0)
                                 .items_center()
-                                .child(text(format!("{} · {}", o.label, o.target)).font(BODY).color(if o.tone == Tone::Problem { failed() } else { theme::text() }).truncate().grow(1.0).min_w(0.0))
-                                .child(text(feed::catalog::ago(&o.created_at, now)).font(META).color(muted())),
+                                .child(text(format!("{} · {}", o.label, o.target)).font(k.text(BODY)).color(if o.tone == Tone::Problem { failed() } else { theme::text() }).truncate().grow(1.0).min_w(0.0))
+                                .child(text(feed::catalog::ago(&o.created_at, now)).font(k.text(META)).color(muted())),
                         )
-                        .child(text(o.detail).font(META).color(if o.is_error { failed() } else { muted() }).wrap().max_lines(3).selectable(true)),
+                        .child(text(o.detail).font(k.text(META)).color(if o.is_error { failed() } else { muted() }).wrap().max_lines(3).selectable(true)),
                 );
             }
         }
     }
-    parts::section("Recent outcomes", rows, None)
+    parts::section("Recent outcomes", rows, None, k)
 }

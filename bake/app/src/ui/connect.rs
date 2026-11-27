@@ -249,7 +249,7 @@ pub fn screen(s: &App, cx: &mut Cx<App>, chrome: &KitTheme) -> Option<El> {
 fn actions(s: &App, problem: &Problem, size: ControlSize, k: &Kit) -> El {
     let mut r = row().gap(8.0).items_center();
     if s.link.starting {
-        return r.child(rune_kit::Loader::new().size(12.0).color(faint()).build(k)).child(text("Starting Agenthail…").font(META).color(muted()));
+        return r.child(rune_kit::Loader::new().size(k.text_size(12.0)).color(faint()).build(k)).child(text("Starting Agenthail…").font(k.text(META)).color(muted()));
     }
     if let Some(label) = problem.start() {
         r = r.child(Button::new(label).variant(ButtonVariant::Contrast).control_size(size).on_press(start_daemon).build(k).key("connect-start"));
@@ -262,10 +262,10 @@ fn actions(s: &App, problem: &Problem, size: ControlSize, k: &Kit) -> El {
 
 fn panel(s: &App, problem: &Problem, k: &Kit) -> El {
     let glyph = if *problem == Problem::Slow { &icons::CLOCK } else { &icons::BOLT };
-    let mut c = col().key("connect").w_full().h_full().items_center().justify_center().gap(12.0).child(icon(glyph, 28.0).color(faint())).child(text(problem.title()).font(HEADING).color(muted()));
-    c = c.child(text(problem.detail()).font(BODY).color(faint()).wrap().max_w(460.0));
+    let mut c = col().key("connect").w_full().h_full().items_center().justify_center().gap(12.0).child(icon(glyph, 28.0).color(faint())).child(text(problem.title()).font(k.text(HEADING)).color(muted()));
+    c = c.child(text(problem.detail()).font(k.text(BODY)).color(faint()).wrap().max_w(460.0));
     if *problem == Problem::Slow {
-        c = c.child(rune_kit::Loader::new().size(16.0).color(faint()).build(k));
+        c = c.child(rune_kit::Loader::new().size(k.text_size(16.0)).color(faint()).build(k));
     }
     c.child(actions(s, problem, ControlSize::Regular, k)).child(el().h(80.0))
 }
@@ -281,7 +281,7 @@ pub fn bar(s: &App, k: &Kit) -> Option<El> {
             .gap(6.0)
             .items_center()
             .child(el().size(6.0, 6.0).radius(3.0).fill(failed()))
-            .child(text(problem.bar(s.link.as_of.map(|at| at.elapsed()))).font(META).color(muted()))
+            .child(text(problem.bar(s.link.as_of.map(|at| at.elapsed()))).font(k.text(META)).color(muted()))
             .child(actions(s, problem, ControlSize::Small, k))
             .help(problem.detail()),
     )

@@ -6,7 +6,7 @@ use rune_kit::{Kit, Menu, MenuItem, Placement};
 use crate::theme::{META, accent};
 use crate::{App, icons};
 
-pub fn picker(s: &App, x: &Session) -> Option<El> {
+pub fn picker(s: &App, x: &Session, k: &Kit) -> Option<El> {
     let shared = x.shared_holders();
     if shared.is_empty() {
         return None;
@@ -29,8 +29,8 @@ pub fn picker(s: &App, x: &Session) -> Option<El> {
             .label(said)
             .help(holders::summary(shared))
             .on_press(move |s: &mut App| s.holder_menu = if open { None } else { Some(id.clone()) })
-            .child(icon(&icons::TERMINAL, 12.0).color(accent()))
-            .child(text(words).font(META).color(accent())),
+            .child(icon(&icons::TERMINAL, k.text_size(12.0)).color(accent()))
+            .child(text(words).font(k.text(META)).color(accent())),
     )
 }
 

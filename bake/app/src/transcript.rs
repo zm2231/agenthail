@@ -199,9 +199,9 @@ fn first_line(text: &str, max: usize) -> String {
     if line.chars().count() <= max { line.to_string() } else { format!("{}…", line.chars().take(max).collect::<String>()) }
 }
 
-fn markdown(body: &str) -> El {
+fn markdown(body: &str, k: &Kit) -> El {
     let p = crate::theme::paint();
-    Markdown::new(body.to_string()).selectable(true).render(&MarkdownStyle::neutral(p.dark).text(p.text).muted(p.muted)).selection_group(false)
+    Markdown::new(body.to_string()).selectable(true).render(&MarkdownStyle::from_kit(&Kit::neutral(p.dark).with_text_scale(k.text_scale)).text(p.text).muted(p.muted)).selection_group(false)
 }
 
 pub struct Cx<'a> {
@@ -214,26 +214,26 @@ pub struct Cx<'a> {
 
 const SHOWN_BODY: usize = 20_000;
 
-fn body_tools(cx: &Cx, item: &feed::Item, mut head: El) -> El {
+fn body_tools(cx: &Cx, item: &feed::Item, mut head: El, k: &Kit) -> El {
     if item.truncated && item.body_ref.is_some() {
         let (sid, iid) = (cx.session.to_string(), item.id.clone());
         head = match cx.pane.expanding.get(&item.id) {
-            Some(None) => head.child(text("Loading all of it…").font(META).color(faint())),
+            Some(None) => head.child(text("Loading all of it…").font(k.text(META)).color(faint())),
             Some(Some(note)) => head
-                .child(text(note.clone()).font(META).color(failed()).truncate().max_w(320.0))
-                .child(action(format!("full-{}", item.id), &icons::ROTATE, "Try again").on_press(move |s: &mut App| crate::history::load_body(s, &sid, &iid))),
-            None => head.child(action(format!("full-{}", item.id), &icons::CHEVRON_DOWN, "Show all").on_press(move |s: &mut App| crate::history::load_body(s, &sid, &iid))),
+                .child(text(note.clone()).font(k.text(META)).color(failed()).truncate().max_w(320.0))
+                .child(action(format!("full-{}", item.id), &icons::ROTATE, "Try again", k).on_press(move |s: &mut App| crate::history::load_body(s, &sid, &iid))),
+            None => head.child(action(format!("full-{}", item.id), &icons::CHEVRON_DOWN, "Show all", k).on_press(move |s: &mut App| crate::history::load_body(s, &sid, &iid))),
         };
     }
-    head.child(action(format!("copy-{}", item.id), &icons::COPY, "Copy").on_press_tx(crate::history::copy(item.text.clone())))
+    head.child(action(format!("copy-{}", item.id), &icons::COPY, "Copy", k).on_press_tx(crate::history::copy(item.text.clone())))
 }
 
-fn entry_body(cx: &Cx, label: &str, item: &feed::Item) -> El {
+fn entry_body(cx: &Cx, label: &str, item: &feed::Item, k: &Kit) -> El {
     let limit = cx.pane.shown.get(&item.id).copied().unwrap_or(SHOWN_BODY);
     let (shown, clipped) = feed::summary::clip(&item.text, limit);
-    let head = body_tools(cx, item, row().w_full().gap(6.0).items_center().child(text(label.to_string()).font(META_BOLD).color(muted())).child(el().grow(1.0)));
+    let head = body_tools(cx, item, row().w_full().gap(6.0).items_center().child(text(label.to_string()).font(k.text(META_BOLD)).color(muted())).child(el().grow(1.0)), k);
     let mut c = col().w_full().gap(4.0).child(head).child(
-        col().w_full().px(10.0).py(8.0).radius(8.0).fill(Color::BLACK.alpha(0.18)).child(text(shown.to_string()).font(META).color(theme::text()).wrap().selectable(true)),
+        col().w_full().px(10.0).py(8.0).radius(8.0).fill(Color::BLACK.alpha(0.18)).child(text(shown.to_string()).font(k.text(META)).color(theme::text()).wrap().selectable(true)),
     );
     if clipped {
         let (iid, more) = (item.id.clone(), limit + SHOWN_BODY * 5);
@@ -242,14 +242,14 @@ fn entry_body(cx: &Cx, label: &str, item: &feed::Item) -> El {
             row()
                 .gap(8.0)
                 .items_center()
-                .child(text(format!("Showing {} of {} KB", shown.len() / 1024, item.text.len() / 1024)).font(META).color(faint()))
-                .child(action(format!("more-{}", item.id), &icons::CHEVRON_DOWN, "Show more").on_press(move |s: &mut App| crate::history::show_more(s, &block, &iid, more))),
+                .child(text(format!("Showing {} of {} KB", shown.len() / 1024, item.text.len() / 1024)).font(k.text(META)).color(faint()))
+                .child(action(format!("more-{}", item.id), &icons::CHEVRON_DOWN, "Show more", k).on_press(move |s: &mut App| crate::history::show_more(s, &block, &iid, more))),
         );
     }
     c
 }
 
-fn entry_el(cx: &Cx, block: &str, entry: &Entry) -> El {
+fn entry_el(cx: &Cx, block: &str, entry: &Entry, k: &Kit) -> El {
     let (glyph, title, detail, failure) = match entry {
         Entry::Call { call, results } => (&icons::TERMINAL, call.title.clone(), first_line(&call.text, 140), results.iter().any(feed::summary::is_failure)),
         Entry::Output(item) => (&icons::CORNER, "Output".to_string(), first_line(&item.text, 140), false),
@@ -266,13 +266,13 @@ fn entry_el(cx: &Cx, block: &str, entry: &Entry) -> El {
         .py(5.0)
         .radius(7.0)
         .hover(wash())
-        .child(icon(glyph, 13.0).color(if failure { failed() } else { faint() }))
-        .child(text(title).font(META_BOLD).color(muted()))
-        .child(text(detail).font(META).color(faint()).truncate().grow(1.0).min_w(0.0));
+        .child(icon(glyph, k.text_size(13.0)).color(if failure { failed() } else { faint() }))
+        .child(text(title).font(k.text(META_BOLD)).color(muted()))
+        .child(text(detail).font(k.text(META)).color(faint()).truncate().grow(1.0).min_w(0.0));
     if failure {
-        line_el = line_el.child(row().px(6.0).py(1.0).radius(5.0).fill(failed().alpha(0.15)).child(text("failed").font(META_BOLD).color(failed())));
+        line_el = line_el.child(row().px(6.0).py(1.0).radius(5.0).fill(failed().alpha(0.15)).child(text("failed").font(k.text(META_BOLD)).color(failed())));
     }
-    let line_el = line_el.child(icon(if expanded { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, 11.0).color(faint())).on_press(toggle_in(key, block.to_string()));
+    let line_el = line_el.child(icon(if expanded { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, k.text_size(11.0)).color(faint())).on_press(toggle_in(key, block.to_string()));
     if !expanded {
         return line_el;
     }
@@ -282,8 +282,8 @@ fn entry_el(cx: &Cx, block: &str, entry: &Entry) -> El {
         Entry::Reasoning(_) => None,
     }
     .filter(|c| !c.is_empty());
-    let copy_id = call_id.map(|call| row().child(action(format!("copy-call-{}", entry.id()), &icons::TERMINAL, "Copy call ID").help(call.clone()).on_press_tx(crate::history::copy(call))));
-    col().w_full().gap(4.0).child(line_el).child(col().w_full().pl(10.0).pb(6.0).gap(8.0).children(copy_id).children(entry.bodies().into_iter().map(|(label, item)| entry_body(cx, label, item))))
+    let copy_id = call_id.map(|call| row().child(action(format!("copy-call-{}", entry.id()), &icons::TERMINAL, "Copy call ID", k).help(call.clone()).on_press_tx(crate::history::copy(call))));
+    col().w_full().gap(4.0).child(line_el).child(col().w_full().pl(10.0).pb(6.0).gap(8.0).children(copy_id).children(entry.bodies().into_iter().map(|(label, item)| entry_body(cx, label, item, k))))
 }
 
 fn toggle_in(id: String, block: String) -> impl Fn(&mut App) + 'static {
@@ -303,7 +303,7 @@ fn toggle(id: String) -> impl Fn(&mut App) + 'static {
     toggle_in(id.clone(), id)
 }
 
-fn work_el(cx: &Cx, id: &str, work: &Work, open: bool) -> El {
+fn work_el(cx: &Cx, id: &str, work: &Work, open: bool, k: &Kit) -> El {
     let shown = open || !work.folds;
     let label = if work.live {
         format!("Working · {}", work.label)
@@ -316,7 +316,7 @@ fn work_el(cx: &Cx, id: &str, work: &Work, open: bool) -> El {
     let lead = if work.live {
         el().size(7.0, 7.0).radius(4.0).fill(accent()).shadow(0.0, 8.0, accent().alpha(0.9))
     } else {
-        icon(&icons::TERMINAL, 13.0).color(faint())
+        icon(&icons::TERMINAL, k.text_size(13.0)).color(faint())
     };
     let head = row()
         .key(format!("work-{id}"))
@@ -330,8 +330,8 @@ fn work_el(cx: &Cx, id: &str, work: &Work, open: bool) -> El {
         .hover(crate::theme::ink(0.09))
         .press_scale(0.98)
         .child(lead)
-        .child(text(label).font(META).color(tint))
-        .child(icon(if shown && work.folds { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, 12.0).color(faint()))
+        .child(text(label).font(k.text(META)).color(tint))
+        .child(icon(if shown && work.folds { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, k.text_size(12.0)).color(faint()))
         .on_press(toggle(id.to_string()));
     let entries: Vec<&Entry> = if shown {
         work.entries.iter().collect()
@@ -349,7 +349,7 @@ fn work_el(cx: &Cx, id: &str, work: &Work, open: bool) -> El {
                 .pl(8.0)
                 .border_sides([0.0, 0.0, 0.0, 1.5], line())
                 .gap(1.0)
-                .children(entries.into_iter().map(|e| entry_el(cx, id, e))),
+                .children(entries.into_iter().map(|e| entry_el(cx, id, e, k))),
         );
     }
     c
@@ -367,7 +367,7 @@ pub fn avatar(name: &str, size: f32) -> El {
         .child(text(letter).font(rune::TextStyle::new(size * 0.45, 700.0)).color(Color::WHITE))
 }
 
-fn agent_el(entry: &AgentEntry) -> El {
+fn agent_el(entry: &AgentEntry, k: &Kit) -> El {
     let incoming = entry.agent.is_incoming();
     let chip = entry.agent.chip();
     row()
@@ -389,10 +389,10 @@ fn agent_el(entry: &AgentEntry) -> El {
                     row()
                         .gap(6.0)
                         .items_center()
-                        .child(icon(if incoming { &icons::CORNER } else { &icons::ARROW_RIGHT }, 11.0).color(faint()))
-                        .child(text(if incoming { format!("From {chip}") } else { format!("To {chip}") }).font(META_BOLD).color(muted())),
+                        .child(icon(if incoming { &icons::CORNER } else { &icons::ARROW_RIGHT }, k.text_size(11.0)).color(faint()))
+                        .child(text(if incoming { format!("From {chip}") } else { format!("To {chip}") }).font(k.text(META_BOLD)).color(muted())),
                 )
-                .child(text(first_line(&entry.agent.summary, 220)).font(META).color(faint()).wrap().max_lines(2)),
+                .child(text(first_line(&entry.agent.summary, 220)).font(k.text(META)).color(faint()).wrap().max_lines(2)),
         )
 }
 
@@ -408,8 +408,8 @@ fn block_el(cx: &Cx, block: &Block, open: bool, gap: f32, last: bool, k: &Kit) -
                 .py(8.0)
                 .radius(10.0)
                 .border(1.0, line())
-                .child(icon(&icons::BOLT, 12.0).color(faint()).mt(2.0))
-                .child(col().grow(1.0).min_w(0.0).gap(2.0).child(text("Hook").font(META_BOLD).color(muted())).child(text(first_line(&inner, 400)).font(META).color(faint()).wrap().max_lines(3)))
+                .child(icon(&icons::BOLT, k.text_size(12.0)).color(faint()).mt(2.0))
+                .child(col().grow(1.0).min_w(0.0).gap(2.0).child(text("Hook").font(k.text(META_BOLD)).color(muted())).child(text(first_line(&inner, 400)).font(k.text(META)).color(faint()).wrap().max_lines(3)))
         }
         Kind::User(body) => col().w_full().items_end().child(
             col()
@@ -419,17 +419,17 @@ fn block_el(cx: &Cx, block: &Block, open: bool, gap: f32, last: bool, k: &Kit) -
                 .border(1.0, crate::theme::ink(0.08))
                 .px(15.0)
                 .py(10.0)
-                .child(markdown(body)),
+                .child(markdown(body, k)),
         ),
         Kind::Assistant(body) => {
-            let mut c = col().w_full().gap(6.0).child(markdown(body));
+            let mut c = col().w_full().gap(6.0).child(markdown(body, k));
             if let Some(took) = &block.finished {
-                c = c.child(row().gap(5.0).items_center().child(icon(&icons::CLOCK, 11.0).color(faint())).child(text(format!("Took {took}")).font(META).color(faint())));
+                c = c.child(row().gap(5.0).items_center().child(icon(&icons::CLOCK, k.text_size(11.0)).color(faint())).child(text(format!("Took {took}")).font(k.text(META)).color(faint())));
             }
             c
         }
-        Kind::Work(work) => work_el(cx, &block.id, work, open),
-        Kind::Agent(entry) => agent_el(entry),
+        Kind::Work(work) => work_el(cx, &block.id, work, open, k),
+        Kind::Agent(entry) => agent_el(entry, k),
         Kind::AgentFold { label, members, .. } => {
             let head = row()
                 .key(format!("fold-{}", block.id))
@@ -440,35 +440,35 @@ fn block_el(cx: &Cx, block: &Block, open: bool, gap: f32, last: bool, k: &Kit) -
                 .radius(9.0)
                 .fill(wash())
                 .hover(crate::theme::ink(0.09))
-                .child(icon(&icons::MESSAGE, 13.0).color(faint()))
-                .child(text(label.clone()).font(META).color(muted()))
-                .child(icon(if open { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, 12.0).color(faint()))
+                .child(icon(&icons::MESSAGE, k.text_size(13.0)).color(faint()))
+                .child(text(label.clone()).font(k.text(META)).color(muted()))
+                .child(icon(if open { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, k.text_size(12.0)).color(faint()))
                 .on_press(toggle(block.id.clone()));
             let mut c = col().w_full().gap(6.0).items_start().child(head);
             if open {
-                c = c.children(members.iter().map(agent_el));
+                c = c.children(members.iter().map(|e| agent_el(e, k)));
             }
             c
         }
-        Kind::Annotation(note) | Kind::Notice(note) => row().gap(6.0).child(text(note.clone()).font(META).color(faint()).wrap()),
-        Kind::Instructions(_) => row().gap(6.0).items_center().child(icon(&icons::LAYERS, 12.0).color(faint())).child(text("Instructions").font(META).color(faint())),
+        Kind::Annotation(note) | Kind::Notice(note) => row().gap(6.0).child(text(note.clone()).font(k.text(META)).color(faint()).wrap()),
+        Kind::Instructions(_) => row().gap(6.0).items_center().child(icon(&icons::LAYERS, k.text_size(12.0)).color(faint())).child(text("Instructions").font(k.text(META)).color(faint())),
         Kind::Image(attachment) => crate::ui::attach::image_el(cx.app, cx.session, attachment, k),
         Kind::File(item) => crate::ui::attach::file_el(cx.app, cx.session, item, k),
-        Kind::Files(files) => crate::ui::attach::files_el(cx.app, &block.id, files),
+        Kind::Files(files) => crate::ui::attach::files_el(cx.app, &block.id, files, k),
         Kind::Unknown { title, kind, text: body } => {
-            let head = row().w_full().gap(8.0).items_center().child(text(title.clone()).font(META_BOLD).color(theme::text()).truncate().min_w(0.0)).child(row().px(5.0).py(1.0).radius(8.0).fill(wash()).child(text(kind.clone()).font(META.mono()).color(muted())));
-            let content = if body.trim().is_empty() { text("No recorded content.").font(META).color(faint()) } else { markdown(body) };
+            let head = row().w_full().gap(8.0).items_center().child(text(title.clone()).font(k.text(META_BOLD)).color(theme::text()).truncate().min_w(0.0)).child(row().px(5.0).py(1.0).radius(8.0).fill(wash()).child(text(kind.clone()).font(k.text(META.mono())).color(muted())));
+            let content = if body.trim().is_empty() { text("No recorded content.").font(k.text(META)).color(faint()) } else { markdown(body, k) };
             col().key(format!("unknown-{}", block.id)).w_full().gap(4.0).px(12.0).py(9.0).radius(12.0).fill(crate::theme::ink(0.04)).border(1.0, line()).child(head).child(content)
         }
     };
     let mut row_el = col().w_full().max_w(780.0).px(36.0).pt(gap).child(body);
-    if let Some(footer) = footer(cx, block) {
+    if let Some(footer) = footer(cx, block, k) {
         row_el = row_el.hover_group().child(footer);
     }
     if last { row_el.streaming(true) } else { row_el }
 }
 
-fn action(key: String, glyph: &'static rune::Icon, label: &str) -> El {
+fn action(key: String, glyph: &'static rune::Icon, label: &str, k: &Kit) -> El {
     row()
         .key(key)
         .gap(4.0)
@@ -478,11 +478,11 @@ fn action(key: String, glyph: &'static rune::Icon, label: &str) -> El {
         .radius(6.0)
         .hover(wash())
         .press_scale(0.96)
-        .child(icon(glyph, 12.0).color(faint()))
-        .child(text(label.to_string()).font(META).color(faint()))
+        .child(icon(glyph, k.text_size(12.0)).color(faint()))
+        .child(text(label.to_string()).font(k.text(META)).color(faint()))
 }
 
-fn footer(cx: &Cx, block: &Block) -> Option<El> {
+fn footer(cx: &Cx, block: &Block, k: &Kit) -> Option<El> {
     let item = block.id.strip_prefix("item:")?;
     let (body, user) = match &block.kind {
         Kind::User(body) if !body.trim_start().starts_with("<hook_prompt") => (body.clone(), true),
@@ -490,18 +490,18 @@ fn footer(cx: &Cx, block: &Block) -> Option<El> {
         _ => return None,
     };
     let mut tools = row().gap(2.0).items_center().group_opacity(0.0, 1.0);
-    tools = tools.child(action(format!("copy-{item}"), &icons::COPY, "Copy").on_press_tx(crate::history::copy(body.clone())));
-    tools = tools.child(action(format!("share-{item}"), &icons::SHARE, "Share").on_press_tx(crate::history::share(cx.session.to_string(), format!("share-{item}"), body.clone())));
+    tools = tools.child(action(format!("copy-{item}"), &icons::COPY, "Copy", k).on_press_tx(crate::history::copy(body.clone())));
+    tools = tools.child(action(format!("share-{item}"), &icons::SHARE, "Share", k).on_press_tx(crate::history::share(cx.session.to_string(), format!("share-{item}"), body.clone())));
     let images = cx.pane.transcript.images_with(item);
     if user && images > 0 {
-        tools = tools.child(action(format!("edit-{item}"), &icons::PENCIL, "Edit").opacity(0.45).help("Edit would resend this message without its images"));
+        tools = tools.child(action(format!("edit-{item}"), &icons::PENCIL, "Edit", k).opacity(0.45).help("Edit would resend this message without its images"));
     } else if user {
-        tools = tools.child(action(format!("edit-{item}"), &icons::PENCIL, "Edit").on_press(crate::history::edit(body.clone())));
+        tools = tools.child(action(format!("edit-{item}"), &icons::PENCIL, "Edit", k).on_press(crate::history::edit(body.clone())));
     }
     let mut line = row().gap(6.0).items_center().pt(2.0);
     if let Some(full) = cx.pane.transcript.item(item).filter(|i| i.truncated && i.body_ref.is_some()) {
-        line = body_tools(cx, full, line).child(
-            action(format!("share-{item}"), &icons::SHARE, "Share")
+        line = body_tools(cx, full, line, k).child(
+            action(format!("share-{item}"), &icons::SHARE, "Share", k)
                 .help("Shares what has loaded so far; Show all loads the rest first")
                 .on_press_tx(crate::history::share(cx.session.to_string(), format!("share-{item}"), full.text.clone())),
         );
@@ -518,7 +518,7 @@ pub fn empty(s: &App, id: &str, note: String, k: &Kit) -> El {
     if !settled {
         c = c.child(rune_kit::Loader::new().size(22.0).color(accent()).build(k));
     }
-    c = c.child(text(note).font(BODY_BOLD).color(faint()));
+    c = c.child(text(note).font(k.text(BODY_BOLD)).color(faint()));
     if let Some(earlier) = earlier_el(s, id, k) {
         c = c.child(earlier);
     }
@@ -529,15 +529,15 @@ fn earlier_el(s: &App, id: &str, k: &Kit) -> Option<El> {
     let pane = s.panes.get(id)?;
     let key = id.to_string();
     let body = if pane.earlier.loading {
-        row().gap(8.0).items_center().child(rune_kit::Loader::new().size(12.0).color(faint()).build(k)).child(text("Loading earlier messages…").font(META).color(faint()))
+        row().gap(8.0).items_center().child(rune_kit::Loader::new().size(k.text_size(12.0)).color(faint()).build(k)).child(text("Loading earlier messages…").font(k.text(META)).color(faint()))
     } else if let Some(note) = &pane.earlier.note {
-        let mut r = row().gap(8.0).items_center().child(text(note.clone()).font(META).color(faint()));
+        let mut r = row().gap(8.0).items_center().child(text(note.clone()).font(k.text(META)).color(faint()));
         if pane.earlier.next != Some(0) {
-            r = r.child(action("earlier-retry".into(), &icons::ROTATE, "Try again").on_press(move |s: &mut App| crate::history::retry_older(s, &key)));
+            r = r.child(action("earlier-retry".into(), &icons::ROTATE, "Try again", k).on_press(move |s: &mut App| crate::history::retry_older(s, &key)));
         }
         r
     } else if crate::history::can_load(s, id) {
-        row().child(action("earlier".into(), &icons::CHEVRON_DOWN, "Load earlier").on_press(move |s: &mut App| {
+        row().child(action("earlier".into(), &icons::CHEVRON_DOWN, "Load earlier", k).on_press(move |s: &mut App| {
             crate::history::load_older(s, &key);
         }))
     } else {
@@ -606,8 +606,8 @@ pub fn view(s: &App, id: &str, k: &Kit) -> El {
         .role("button")
         .label("Jump to latest")
         .on_press_tx(move |_: &mut App, tx: &mut rune::Tx| tx.scroll_to_bottom(target.clone()))
-        .child(icon(&icons::ARROW_DOWN, 12.0).color(muted()))
-        .child(text("Jump to latest").font(META).color(muted()));
+        .child(icon(&icons::ARROW_DOWN, k.text_size(12.0)).color(muted()))
+        .child(text("Jump to latest").font(k.text(META)).color(muted()));
     frame.child(col().absolute(0.0, 0.0).w_full().h_full().items_end().justify_end().px(28.0).pb(s.cover.reserve() + 12.0).child(jump))
 }
 
@@ -619,7 +619,7 @@ pub fn loading(note: String, k: &Kit) -> El {
         .justify_center()
         .gap(12.0)
         .child(rune_kit::Loader::new().size(22.0).color(accent()).build(k))
-        .child(text(note).font(BODY_BOLD).color(faint()))
+        .child(text(note).font(k.text(BODY_BOLD)).color(faint()))
         .child(el().h(80.0))
 }
 

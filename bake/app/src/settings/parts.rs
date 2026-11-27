@@ -15,7 +15,7 @@ pub fn page() -> El {
     col().gap(22.0).pt(6.0)
 }
 
-pub fn section(title: &str, rows: Vec<El>, footer: Option<String>) -> El {
+pub fn section(title: &str, rows: Vec<El>, footer: Option<String>, k: &Kit) -> El {
     let mut card = col().w_full().radius(10.0).fill(theme::card()).border(1.0, theme::line());
     for (i, r) in rows.into_iter().enumerate() {
         if i > 0 {
@@ -25,43 +25,43 @@ pub fn section(title: &str, rows: Vec<El>, footer: Option<String>) -> El {
     }
     let mut out = col().w_full().gap(7.0);
     if !title.is_empty() {
-        out = out.child(text(title.to_string()).font(BODY_BOLD).color(theme::text()).px(4.0));
+        out = out.child(text(title.to_string()).font(k.text(BODY_BOLD)).color(theme::text()).px(4.0));
     }
     out = out.child(card);
     if let Some(footer) = footer {
-        out = out.child(text(footer).font(META).color(muted()).wrap().px(4.0));
+        out = out.child(text(footer).font(k.text(META)).color(muted()).wrap().px(4.0));
     }
     out
 }
 
-pub fn line(label: &str, detail: Option<String>, control: El) -> El {
-    let mut words = col().gap(2.0).grow(1.0).min_w(0.0).child(text(label.to_string()).font(BODY).color(theme::text()).wrap());
+pub fn line(label: &str, detail: Option<String>, control: El, k: &Kit) -> El {
+    let mut words = col().gap(2.0).grow(1.0).min_w(0.0).child(text(label.to_string()).font(k.text(BODY)).color(theme::text()).wrap());
     if let Some(detail) = detail.filter(|d| !d.is_empty()) {
-        words = words.child(text(detail).font(META).color(muted()).wrap());
+        words = words.child(text(detail).font(k.text(META)).color(muted()).wrap());
     }
     row().w_full().gap(16.0).items_center().px(14.0).py(10.0).child(words).child(control)
 }
 
-pub fn fact(label: &str, value: String) -> El {
-    row().w_full().gap(16.0).items_center().px(14.0).py(8.0).child(text(label.to_string()).font(BODY).color(theme::text()).grow(1.0)).child(text(value).font(BODY).color(muted()))
+pub fn fact(label: &str, value: String, k: &Kit) -> El {
+    row().w_full().gap(16.0).items_center().px(14.0).py(8.0).child(text(label.to_string()).font(k.text(BODY)).color(theme::text()).grow(1.0)).child(text(value).font(k.text(BODY)).color(muted()))
 }
 
-pub fn words(value: impl Into<String>) -> El {
-    row().w_full().px(14.0).py(10.0).child(text(value.into()).font(META).color(muted()).wrap().grow(1.0))
+pub fn words(value: impl Into<String>, k: &Kit) -> El {
+    row().w_full().px(14.0).py(10.0).child(text(value.into()).font(k.text(META)).color(muted()).wrap().grow(1.0))
 }
 
-pub fn problem(value: impl Into<String>) -> El {
-    row().w_full().px(14.0).py(10.0).child(text(value.into()).font(META).color(failed()).wrap().grow(1.0))
+pub fn problem(value: impl Into<String>, k: &Kit) -> El {
+    row().w_full().px(14.0).py(10.0).child(text(value.into()).font(k.text(META)).color(failed()).wrap().grow(1.0))
 }
 
-pub fn failure(s: &Prefs, f: &Failure) -> El {
+pub fn failure(s: &Prefs, f: &Failure, k: &Kit) -> El {
     let f = &super::explain(s, f);
     let color = if f.denied || f.uncertain { attention() } else { failed() };
-    text(f.message.clone()).font(META).color(color).wrap().px(4.0)
+    text(f.message.clone()).font(k.text(META)).color(color).wrap().px(4.0)
 }
 
-pub fn reading(what: &str) -> El {
-    text(format!("Reading {what}…")).font(META).color(faint()).px(4.0)
+pub fn reading(what: &str, k: &Kit) -> El {
+    text(format!("Reading {what}…")).font(k.text(META)).color(faint()).px(4.0)
 }
 
 pub fn switch(key: &str, label: &str, on: bool, disabled: bool, flip: impl Fn(&mut Prefs) + 'static, k: &Kit) -> El {

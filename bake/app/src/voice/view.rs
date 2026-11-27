@@ -36,7 +36,7 @@ fn header(w: &Win, k: &Kit) -> El {
         .items_center()
         .justify_center()
         .fill(wash())
-        .child(icon(&theme_icons::WAVEFORM, 18.0).color(if live { accent() } else { muted() }));
+        .child(icon(&theme_icons::WAVEFORM, k.text_size(18.0)).color(if live { accent() } else { muted() }));
     let route = match w.call.state.as_ref().and_then(|s| s.target.as_ref()) {
         Some(target) => format!("Routed to {}", if target.name.is_empty() { &target.id } else { &target.name }),
         None if w.call.routed() => format!("Calls {}", shown_name(w)),
@@ -46,8 +46,8 @@ fn header(w: &Win, k: &Kit) -> El {
         .gap(2.0)
         .grow(1.0)
         .shrink()
-        .child(text(w.call.title()).font(BODY_BOLD).color(theme::text()).key("voice-status"))
-        .child(text(route).font(META).color(muted()).truncate());
+        .child(text(w.call.title()).font(k.text(BODY_BOLD)).color(theme::text()).key("voice-status"))
+        .child(text(route).font(k.text(META)).color(muted()).truncate());
     let new = small("New conversation", ButtonVariant::Ghost)
         .icon(&icons::PENCIL)
         .help("Start a new orchestrator conversation")
@@ -81,8 +81,8 @@ fn confirm(title: &str, detail: &str, yes: &str, act: fn(&mut Win), k: &Kit) -> 
         .radius(10.0)
         .fill(wash())
         .border(1.0, line())
-        .child(text(title.to_string()).font(BODY_BOLD).color(theme::text()))
-        .child(text(detail.to_string()).font(META).color(muted()).wrap().w_full())
+        .child(text(title.to_string()).font(k.text(BODY_BOLD)).color(theme::text()))
+        .child(text(detail.to_string()).font(k.text(META)).color(muted()).wrap().w_full())
         .child(
             row()
                 .w_full()
@@ -97,8 +97,8 @@ fn shown_name(w: &Win) -> String {
     if w.name.is_empty() { w.call.target.clone() } else { w.name.clone() }
 }
 
-fn note(value: impl Into<String>, color: rune::Color) -> El {
-    text(value.into()).font(BODY).color(color).wrap().w_full()
+fn note(value: impl Into<String>, color: rune::Color, k: &Kit) -> El {
+    text(value.into()).font(k.text(BODY)).color(color).wrap().w_full()
 }
 
 fn body(w: &Win, k: &Kit) -> El {
@@ -114,40 +114,40 @@ fn body(w: &Win, k: &Kit) -> El {
                 .radius(10.0)
                 .fill(failed().alpha(0.12))
                 .border(1.0, failed().alpha(0.35))
-                .child(row().gap(8.0).items_center().child(icon(&icons::MIC_OFF, 15.0).color(failed())).child(text("Microphone access is off for Agenthail").font(BODY_BOLD).color(failed())))
-                .child(note("Turn on Agenthail in System Settings, Privacy & Security, Microphone, then call again.", theme::text()))
+                .child(row().gap(8.0).items_center().child(icon(&icons::MIC_OFF, k.text_size(15.0)).color(failed())).child(text("Microphone access is off for Agenthail").font(k.text(BODY_BOLD)).color(failed())))
+                .child(note("Turn on Agenthail in System Settings, Privacy & Security, Microphone, then call again.", theme::text(), k))
                 .child(row().child(settings)),
         );
     }
     let (error, from_error) = w.call.error.as_deref().filter(|_| !w.call.mic_denied).map(without_tools_notice).unwrap_or_default();
     if let Some(error) = error {
-        b = b.child(note(error, failed()).key("voice-error"));
+        b = b.child(note(error, failed(), k).key("voice-error"));
     }
     if let Some(error) = &w.call.connection_error {
-        b = b.child(note(error.clone(), failed()));
+        b = b.child(note(error.clone(), failed(), k));
     }
     let raw = w.call.state.as_ref().and_then(|s| s.message.clone()).filter(|m| !m.is_empty() && w.call.error.as_ref() != Some(m));
     let (message, from_message) = raw.as_deref().map(without_tools_notice).unwrap_or_default();
     if let Some(message) = message {
-        b = b.child(note(message, failed()));
+        b = b.child(note(message, failed(), k));
     }
     if let Some(notice) = from_message.or(from_error) {
         b = b.child(tools_notice(w, notice, k));
     }
     if w.call.state.as_ref().is_some_and(|s| s.occupied) {
-        b = b.child(note(OCCUPIED, muted()).key("voice-occupied"));
+        b = b.child(note(OCCUPIED, muted(), k).key("voice-occupied"));
     } else if w.call.elsewhere() {
-        b = b.child(note(ELSEWHERE, muted()).key("voice-elsewhere"));
+        b = b.child(note(ELSEWHERE, muted(), k).key("voice-elsewhere"));
     }
-    b = b.child(transcript(w));
-    if let Some(brief) = briefing(w) {
+    b = b.child(transcript(w, k));
+    if let Some(brief) = briefing(w, k) {
         b = b.child(brief);
     }
     if let Some(session) = w.call.state.as_ref().and_then(|s| s.session.clone()) {
         b = b.child(operator(w, session.id, k));
     }
     if let Some(id) = w.call.attempt() {
-        b = b.child(text(format!("Call ID {id}")).font(META).color(faint()).selectable(true));
+        b = b.child(text(format!("Call ID {id}")).font(k.text(META)).color(faint()).selectable(true));
     }
     let toggle = small(if w.details { "Hide voice details" } else { "Voice details" }, ButtonVariant::GhostMuted)
         .on_press(|w: &mut Win| w.details = !w.details)
@@ -155,7 +155,7 @@ fn body(w: &Win, k: &Kit) -> El {
         .key("voice-details-toggle");
     b = b.child(row().child(toggle));
     if w.details {
-        b = b.child(details(w));
+        b = b.child(details(w, k));
     }
     b
 }
@@ -175,8 +175,8 @@ fn tools_notice(w: &Win, notice: String, k: &Kit) -> El {
         .radius(10.0)
         .fill(accent().alpha(0.08))
         .border(1.0, accent().alpha(0.3))
-        .child(row().gap(8.0).items_center().child(icon(&icons::SPARKLES, 15.0).color(accent())).child(text("Newer voice tools are available").font(BODY_BOLD).color(theme::text())))
-        .child(note(notice, muted()))
+        .child(row().gap(8.0).items_center().child(icon(&icons::SPARKLES, k.text_size(15.0)).color(accent())).child(text("Newer voice tools are available").font(k.text(BODY_BOLD)).color(theme::text())))
+        .child(note(notice, muted(), k))
         .child(row().child(new))
 }
 
@@ -189,8 +189,8 @@ fn operator(w: &Win, id: String, k: &Kit) -> El {
         .w_full()
         .items_center()
         .gap(8.0)
-        .child(icon(&icons::TERMINAL, 13.0).color(muted()))
-        .child(text(label).font(META).color(muted()).truncate().shrink().key("voice-operator-state"))
+        .child(icon(&icons::TERMINAL, k.text_size(13.0)).color(muted()))
+        .child(text(label).font(k.text(META)).color(muted()).truncate().shrink().key("voice-operator-state"))
         .child(el().grow(1.0));
     if w.activity.as_ref().is_some_and(|a| a.busy) {
         head = head.child(
@@ -206,7 +206,7 @@ fn operator(w: &Win, id: String, k: &Kit) -> El {
     head = head.child(small("Open timeline", ButtonVariant::GhostMuted).on_press(move |_: &mut Win| open_timeline(&id)).build(k).key("voice-timeline"));
     let mut block = col().key("voice-operator").w_full().gap(6.0).child(head);
     if let Some(latest) = w.activity.as_ref().and_then(|a| a.latest.clone()) {
-        block = block.child(text(latest).font(META).color(faint()).wrap().w_full().key("voice-operator-latest"));
+        block = block.child(text(latest).font(k.text(META)).color(faint()).wrap().w_full().key("voice-operator-latest"));
     }
     if w.ask == Some(Ask::Interrupt) {
         block = block.child(confirm(
@@ -224,7 +224,7 @@ fn operator(w: &Win, id: String, k: &Kit) -> El {
     block
 }
 
-fn briefing(w: &Win) -> Option<El> {
+fn briefing(w: &Win, k: &Kit) -> Option<El> {
     let (brief, target) = w.call.state.as_ref()?.shown_brief()?;
     let name = if target.name.is_empty() { &target.id } else { &target.name };
     let mut card = col()
@@ -235,24 +235,24 @@ fn briefing(w: &Win) -> Option<El> {
         .radius(10.0)
         .fill(wash())
         .border(1.0, line())
-        .child(text(brief.summary(name, time::OffsetDateTime::now_utc())).font(META).color(muted()).wrap().w_full());
+        .child(text(brief.summary(name, time::OffsetDateTime::now_utc())).font(k.text(META)).color(muted()).wrap().w_full());
     if let Some(left) = brief.left_out() {
-        card = card.child(text(left).font(META).color(faint()).wrap().w_full());
+        card = card.child(text(left).font(k.text(META)).color(faint()).wrap().w_full());
     }
     Some(card)
 }
 
-fn details(w: &Win) -> El {
+fn details(w: &Win, k: &Kit) -> El {
     let mut list = col().key("voice-details").w_full().gap(14.0).padding(12.0).radius(10.0).fill(wash()).border(1.0, line());
     for section in w.call.details() {
-        let mut group = col().w_full().gap(4.0).child(text(section.title).font(META_BOLD).color(muted()));
+        let mut group = col().w_full().gap(4.0).child(text(section.title).font(k.text(META_BOLD)).color(muted()));
         for (name, value) in section.rows {
             group = group.child(
                 row()
                     .w_full()
                     .gap(12.0)
-                    .child(text(name).font(META).color(faint()).w(130.0))
-                    .child(text(value).font(META).color(theme::text()).wrap().grow(1.0).shrink().min_w(0.0).selectable(true)),
+                    .child(text(name).font(k.text(META)).color(faint()).w(130.0))
+                    .child(text(value).font(k.text(META)).color(theme::text()).wrap().grow(1.0).shrink().min_w(0.0).selectable(true)),
             );
         }
         list = list.child(group);
@@ -260,8 +260,8 @@ fn details(w: &Win) -> El {
     list
 }
 
-fn route_field(w: &Win) -> El {
-    let input = text_input(&w.route_edit, BODY)
+fn route_field(w: &Win, k: &Kit) -> El {
+    let input = text_input(&w.route_edit, k.text(BODY))
         .single_line()
         .key("voice-route")
         .label("Session route")
@@ -287,12 +287,12 @@ fn route_field(w: &Win) -> El {
                 w.picking = None;
             }
         })
-        .child(text("Session route (optional)").font(META_BOLD).color(muted()))
+        .child(text("Session route (optional)").font(k.text(META_BOLD)).color(muted()))
         .child(row().w_full().px(10.0).py(7.0).radius(8.0).fill(wash()).border(1.0, line()).child(input));
-    if let Some(list) = pick_list(w) {
+    if let Some(list) = pick_list(w, k) {
         field = field.child(list);
     }
-    field.child(text(hint).font(META).color(faint()).wrap().w_full())
+    field.child(text(hint).font(k.text(META)).color(faint()).wrap().w_full())
 }
 
 fn shown_picks(w: &Win) -> Vec<&Pick> {
@@ -328,7 +328,7 @@ fn pick_key(w: &mut Win, ev: &KeyEvent) -> bool {
     true
 }
 
-fn pick_list(w: &Win) -> Option<El> {
+fn pick_list(w: &Win, k: &Kit) -> Option<El> {
     let picks = shown_picks(w);
     if picks.is_empty() {
         return None;
@@ -338,7 +338,7 @@ fn pick_list(w: &Win) -> Option<El> {
     let mut last = "";
     for (i, pick) in picks.into_iter().enumerate() {
         if pick.group != last {
-            list = list.child(text(pick.group.to_string()).font(META_BOLD).color(faint()).px(8.0).pt(if last.is_empty() { 2.0 } else { 8.0 }).pb(2.0));
+            list = list.child(text(pick.group.to_string()).font(k.text(META_BOLD)).color(faint()).px(8.0).pt(if last.is_empty() { 2.0 } else { 8.0 }).pb(2.0));
             last = pick.group;
         }
         let chosen = pick.clone();
@@ -351,23 +351,23 @@ fn pick_list(w: &Win) -> Option<El> {
             .radius(6.0)
             .focusable(true)
             .on_press(move |w: &mut Win| w.pick(&chosen))
-            .child(text(pick.label()).font(BODY).color(theme::text()).truncate())
-            .child(text(pick.status.clone()).font(META).color(muted()).truncate());
+            .child(text(pick.label()).font(k.text(BODY)).color(theme::text()).truncate())
+            .child(text(pick.status.clone()).font(k.text(META)).color(muted()).truncate());
         r = if i == at { r.fill(wash()) } else { r.hover(wash()) };
         list = list.child(r);
     }
     Some(list)
 }
 
-fn transcript(w: &Win) -> El {
+fn transcript(w: &Win, k: &Kit) -> El {
     let lines = w.call.state.as_ref().map(|s| s.lines()).unwrap_or_default();
     if lines.is_empty() {
         return col()
             .w_full()
             .gap(6.0)
             .py(8.0)
-            .child(text("What would you like to work on?").font(TITLE).color(theme::text()))
-            .child(note("Talk to the Agenthail orchestrator, or route this call to one exact existing Codex or Claude session.", muted()));
+            .child(text("What would you like to work on?").font(k.text(TITLE)).color(theme::text()))
+            .child(note("Talk to the Agenthail orchestrator, or route this call to one exact existing Codex or Claude session.", muted(), k));
     }
     let routed = w.call.state.as_ref().is_some_and(|s| s.target.is_some());
     let mut list = col().w_full().gap(12.0).key("voice-transcript");
@@ -383,8 +383,8 @@ fn transcript(w: &Win) -> El {
                 .key(format!("voice-line-{}", line.id))
                 .w_full()
                 .gap(4.0)
-                .child(text(who).font(META_BOLD).color(muted()))
-                .child(text(words).font(BODY).color(theme::text()).wrap().w_full().selectable(true)),
+                .child(text(who).font(k.text(META_BOLD)).color(muted()))
+                .child(text(words).font(k.text(BODY)).color(theme::text()).wrap().w_full().selectable(true)),
         );
     }
     list
@@ -395,10 +395,10 @@ fn controls(w: &Win, k: &Kit) -> El {
     let call = &w.call;
     let occupied = call.state.as_ref().is_some_and(|s| s.occupied);
     if call.hangup_pending {
-        return dock.child(note("Audio ended locally. Confirming hangup…", muted()));
+        return dock.child(note("Audio ended locally. Confirming hangup…", muted(), k));
     }
     if call.hangup_unconfirmed {
-        return dock.child(note("Audio is off locally. Agenthail didn't confirm the hangup.", muted())).child(
+        return dock.child(note("Audio is off locally. Agenthail didn't confirm the hangup.", muted(), k)).child(
             row().child(
                 small("Try hangup again", ButtonVariant::Danger)
                     .icon(&icons::PHONE_OFF)
@@ -412,7 +412,7 @@ fn controls(w: &Win, k: &Kit) -> El {
             ),
         );
     }
-    dock = dock.child(route_field(w));
+    dock = dock.child(route_field(w, k));
     if !call.has_local_call() {
         let label = if call.routed() { format!("Call {}", shown_name(w)) } else { "Talk to orchestrator".to_string() };
         dock = dock.child(
@@ -432,7 +432,7 @@ fn controls(w: &Win, k: &Kit) -> El {
         );
         if let Some(reason) = call.unavailable().filter(|r| r != OCCUPIED && r != ELSEWHERE && call.error.as_ref() != Some(r) && call.connection_error.as_ref() != Some(r)) {
             let tone = if call.setup_stuck() { failed() } else { faint() };
-            dock = dock.child(text(reason).font(META).color(tone).wrap().w_full().key("voice-unavailable"));
+            dock = dock.child(text(reason).font(k.text(META)).color(tone).wrap().w_full().key("voice-unavailable"));
         }
         if call.routed() {
             dock = dock.child(
@@ -507,7 +507,7 @@ fn controls(w: &Win, k: &Kit) -> El {
         );
     dock = dock.child(buttons);
     if connected {
-        let input = text_input(&w.typed, BODY)
+        let input = text_input(&w.typed, k.text(BODY))
             .single_line()
             .key("voice-type")
             .label("Type to the call")
@@ -522,7 +522,7 @@ fn controls(w: &Win, k: &Kit) -> El {
             .on_submit(|w: &mut Win, _: &mut Tx| send_typed(w));
         dock = dock.child(row().w_full().px(10.0).py(7.0).radius(8.0).fill(wash()).border(1.0, line()).child(input));
     }
-    dock.child(text("Audio ends. Your agents keep working.").font(META).color(faint()))
+    dock.child(text("Audio ends. Your agents keep working.").font(k.text(META)).color(faint()))
 }
 
 fn send_typed(w: &mut Win) {

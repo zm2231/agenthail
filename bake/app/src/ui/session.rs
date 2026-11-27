@@ -8,13 +8,13 @@ const COMPOSER_BELOW: f32 = 18.0;
 pub(crate) fn header(s: &App, x: &Session, k: &Kit) -> El {
     let state = x.state(s.now);
     let label_value = if state == State::NeedsYou || x.display.label.is_empty() { state.label().to_string() } else { x.display.label.clone() };
-    let mut chips = row().w_full().flex_wrap().gap(6.0).items_center().child(chip(&icons::FOLDER, x.project_name()));
+    let mut chips = row().w_full().flex_wrap().gap(6.0).items_center().child(chip(&icons::FOLDER, x.project_name(), k));
     if let Some(branch) = &x.checkout.branch {
-        chips = chips.child(chip(&icons::BRANCH, branch.clone()));
+        chips = chips.child(chip(&icons::BRANCH, branch.clone(), k));
     }
-    chips = chips.child(chip(&icons::SERVER, x.host.name.clone())).child(chip(&icons::SPARKLES, x.surface.clone()));
+    chips = chips.child(chip(&icons::SERVER, x.host.name.clone(), k)).child(chip(&icons::SPARKLES, x.surface.clone(), k));
     if x.checkout.dirty {
-        chips = chips.child(row().gap(5.0).items_center().px(8.0).py(3.0).radius(7.0).fill(attention().alpha(0.10)).child(el().size(6.0, 6.0).radius(3.0).fill(attention())).child(text("uncommitted").font(META).color(attention())));
+        chips = chips.child(row().gap(5.0).items_center().px(8.0).py(3.0).radius(7.0).fill(attention().alpha(0.10)).child(el().size(6.0, 6.0).radius(3.0).fill(attention())).child(text("uncommitted").font(k.text(META)).color(attention())));
     }
     row()
         .w_full()
@@ -33,14 +33,14 @@ pub(crate) fn header(s: &App, x: &Session, k: &Kit) -> El {
                 .flex_wrap()
                 .gap(12.0)
                 .items_center()
-                .child(col().grow(1.0).w(1.0).min_w(260.0).gap(7.0).child(text(x.title()).font(HEADING).color(theme::text()).truncate()).child(chips).child(crate::ui::chips::turn(s, x, k)))
-                .child(pill(state_icon(state), label_value.clone(), state_color(state)).help(label_value)),
+                .child(col().grow(1.0).w(1.0).min_w(260.0).gap(7.0).child(text(x.title()).font(k.text(HEADING)).color(theme::text()).truncate()).child(chips).child(crate::ui::chips::turn(s, x, k)))
+                .child(pill(state_icon(state), label_value.clone(), state_color(state), k).help(label_value)),
         )
-        .child(session_menu::button(x))
+        .child(session_menu::button(x, k))
 }
 
 pub(crate) fn composer(s: &App, x: &Session, k: &Kit) -> El {
-    let input = super::paste::field(text_input(&s.composer, BODY)
+    let input = super::paste::field(text_input(&s.composer, k.text(BODY))
         .key("composer")
         .w_full()
         .min_h(26.0)
@@ -65,23 +65,23 @@ pub(crate) fn composer(s: &App, x: &Session, k: &Kit) -> El {
                 super::complete::submit(s, &id, tx);
             }
         })
-        .child(icon(&icons::ARROW_UP, 15.0).color(if ready { theme::on_accent() } else { faint() }));
+        .child(icon(&icons::ARROW_UP, k.text_size(15.0)).color(if ready { theme::on_accent() } else { faint() }));
     let busy = crate::busy_delivery(s, &x.id);
     let unsent = s.unsent.has(&x.id);
     let status = match crate::composer_note(s, &x.id) {
         note if x.moving.is_some() => {
-            let moving = text(feed::moves::COMPOSER_NOTE).font(META).color(muted()).key("move-note");
+            let moving = text(feed::moves::COMPOSER_NOTE).font(k.text(META)).color(muted()).key("move-note");
             match note {
                 Some(note) => moving.help(note),
                 None => moving,
             }
         }
-        _ if super::turn_options::problem(s, &x.id).is_some() => text(super::turn_options::problem(s, &x.id).unwrap_or_default()).font(META).color(failed()),
-        Some(note) => text(note).font(META).color(if unsent { attention() } else { muted() }),
-        None if x.capabilities.reaches_as_note => text(feed::notice::SENDS_AS_NOTE).font(META).color(faint()),
-        None => text(crate::send_busy(s, &x.id).map(|b| b.hint()).unwrap_or("Return to send · Shift-Return for a new line")).font(META).color(faint()),
+        _ if super::turn_options::problem(s, &x.id).is_some() => text(super::turn_options::problem(s, &x.id).unwrap_or_default()).font(k.text(META)).color(failed()),
+        Some(note) => text(note).font(k.text(META)).color(if unsent { attention() } else { muted() }),
+        None if x.capabilities.reaches_as_note => text(feed::notice::SENDS_AS_NOTE).font(k.text(META)).color(faint()),
+        None => text(crate::send_busy(s, &x.id).map(|b| b.hint()).unwrap_or("Return to send · Shift-Return for a new line")).font(k.text(META)).color(faint()),
     };
-    let mut controls = row().w_full().px(10.0).pb(10.0).gap(8.0).items_center().children(super::attach::button(s, &x.id)).child(chip(&icons::SPARKLES, x.surface.clone())).children(super::turn_options::chip(s, x)).children(super::holders::picker(s, x));
+    let mut controls = row().w_full().px(10.0).pb(10.0).gap(8.0).items_center().children(super::attach::button(s, &x.id, k)).child(chip(&icons::SPARKLES, x.surface.clone(), k)).children(super::turn_options::chip(s, x, k)).children(super::holders::picker(s, x, k));
     if let Some(choice) = busy {
         let id = x.id.clone();
         controls = controls.child(
@@ -96,8 +96,8 @@ pub(crate) fn composer(s: &App, x: &Session, k: &Kit) -> El {
                 .hover(crate::theme::ink(0.08))
                 .motion(SPRING)
                 .on_press(move |s: &mut App| crate::pick_busy(s, &id, choice.other()))
-                .child(icon(if choice == Busy::Steer { &icons::BOLT } else { &icons::CLOCK }, 12.0).color(accent()))
-                .child(text(choice.label()).font(META_BOLD).color(theme::text())),
+                .child(icon(if choice == Busy::Steer { &icons::BOLT } else { &icons::CLOCK }, k.text_size(12.0)).color(accent()))
+                .child(text(choice.label()).font(k.text(META_BOLD)).color(theme::text())),
         );
     }
     controls = controls.child(status.truncate()).child(spacer());
@@ -127,7 +127,7 @@ pub(crate) fn composer(s: &App, x: &Session, k: &Kit) -> El {
                 .press_scale(0.92)
                 .motion(SPRING)
                 .on_press(move |s: &mut App| crate::stop(s, &id))
-                .child(icon(&icons::STOP, 13.0).color(Color::WHITE)),
+                .child(icon(&icons::STOP, k.text_size(13.0)).color(Color::WHITE)),
         );
     }
     let box_el = col()
@@ -150,8 +150,8 @@ pub(crate) fn composer(s: &App, x: &Session, k: &Kit) -> El {
                 .children(crate::ui::queue::dock(s, x, k))
                 .children(super::attach::chips(s, &x.id, k).map(|c| col().w_full().px(12.0).pt(10.0).child(c))),
         )
-        .children(super::complete::search(s, x))
-        .children(super::complete::menu(s, x))
+        .children(super::complete::search(s, x, k))
+        .children(super::complete::menu(s, x, k))
         .children(super::paste::editor(s, k))
         .child(col().w_full().px(16.0).pt(13.0).pb(4.0).child(input))
         .child(controls.child(send_button))
@@ -205,7 +205,7 @@ pub(crate) fn file_totals(s: &App, id: &str) -> Vec<FileTotal> {
     out
 }
 
-pub(crate) fn tabs(s: &App, id: &str) -> El {
+pub(crate) fn tabs(s: &App, id: &str, k: &Kit) -> El {
     let files = file_totals(s, id).len();
     let tab = |key: &'static str, glyph: &'static Icon, title: String, on: bool| {
         let mut t = row()
@@ -217,8 +217,8 @@ pub(crate) fn tabs(s: &App, id: &str) -> El {
             .radius(8.0)
             .motion(SPRING)
             .hover(crate::theme::ink(0.06))
-            .child(icon(glyph, 13.0).color(if on { theme::text() } else { faint() }))
-            .child(text(title).font(META_BOLD).color(if on { theme::text() } else { faint() }));
+            .child(icon(glyph, k.text_size(13.0)).color(if on { theme::text() } else { faint() }))
+            .child(text(title).font(k.text(META_BOLD)).color(if on { theme::text() } else { faint() }));
         if on {
             t = t.fill(crate::theme::ink(0.10)).border(1.0, crate::theme::ink(0.08));
         }
@@ -232,13 +232,13 @@ pub(crate) fn tabs(s: &App, id: &str) -> El {
         .child(tab("tab-conversation", &icons::MESSAGE, "Conversation".into(), s.tab == Tab::Conversation).on_press(|s: &mut App| s.tab = Tab::Conversation))
         .child(tab("tab-changes", &icons::BRANCH, if files == 0 { "Changes".into() } else { format!("Changes · {files} files") }, s.tab == Tab::Changes).on_press(show_changes))
         .child(spacer())
-        .children((s.tab == Tab::Conversation).then(focus_switch))
+        .children((s.tab == Tab::Conversation).then(|| focus_switch(k)))
 }
 
-fn focus_switch() -> El {
+fn focus_switch(k: &Kit) -> El {
     let on = transcript::focused();
     let side = |key: &'static str, label: &'static str, chosen: bool, to: bool| {
-        let mut t = row().key(key).px(9.0).py(4.0).radius(7.0).role("button").label(label).on_press(move |s: &mut App| transcript::set_focus(s, to)).child(text(label).font(META_BOLD).color(if chosen { theme::text() } else { faint() }));
+        let mut t = row().key(key).px(9.0).py(4.0).radius(7.0).role("button").label(label).on_press(move |s: &mut App| transcript::set_focus(s, to)).child(text(label).font(k.text(META_BOLD)).color(if chosen { theme::text() } else { faint() }));
         if chosen {
             t = t.fill(crate::theme::ink(0.10));
         } else {
@@ -265,9 +265,9 @@ pub(crate) fn changes_view(s: &App, id: &str, k: &Kit) -> El {
             .items_center()
             .justify_center()
             .gap(10.0)
-            .child(col().size(44.0, 44.0).radius(14.0).items_center().justify_center().fill(wash()).child(icon(&icons::BRANCH, 20.0).color(faint())))
-            .child(text("No file edits in this conversation yet").font(BODY_BOLD).color(muted()))
-            .child(text("Edits the agent makes show here as diffs, newest first.").font(META).color(faint()))
+            .child(col().size(44.0, 44.0).radius(14.0).items_center().justify_center().fill(wash()).child(icon(&icons::BRANCH, k.text_size(20.0)).color(faint())))
+            .child(text("No file edits in this conversation yet").font(k.text(BODY_BOLD)).color(muted()))
+            .child(text("Edits the agent makes show here as diffs, newest first.").font(k.text(META)).color(faint()))
             .child(el().h(80.0));
     }
     col()
@@ -300,7 +300,7 @@ pub(crate) fn session_screen(s: &App, k: &Kit) -> El {
             (_, Some(status)) if status.starts_with("Sent, not confirmed") => (&icons::CLOCK, "Answer sent, not confirmed yet", attention()),
             _ => (&icons::CHECK_CIRCLE, "Answer sent, waiting for the agent", done()),
         };
-        center = center.child(col().w_full().items_center().px(32.0).pb(12.0).child(pill(glyph, label, color)));
+        center = center.child(col().w_full().items_center().px(32.0).pb(12.0).child(pill(glyph, label, color, k)));
     }
     let bottom = match feed::notice::read_only(x) {
         Some(why) => read_only(s, x, why, k),
@@ -310,8 +310,8 @@ pub(crate) fn session_screen(s: &App, k: &Kit) -> El {
     if x.read_only || !x.capabilities.send { screen } else { super::attach::drop_target(screen) }
 }
 
-pub(crate) fn closed_note(why: String) -> El {
-    col().w_full().px(15.0).py(13.0).child(text(why).font(BODY).color(muted()).wrap())
+pub(crate) fn closed_note(why: String, k: &Kit) -> El {
+    col().w_full().px(15.0).py(13.0).child(text(why).font(k.text(BODY)).color(muted()).wrap())
 }
 
 pub(crate) fn read_only(s: &App, x: &Session, why: String, k: &Kit) -> El {
@@ -324,13 +324,13 @@ pub(crate) fn read_only(s: &App, x: &Session, why: String, k: &Kit) -> El {
         .fill(theme::glass_tint())
         .border(1.0, theme::line())
         .children(crate::ui::background::dock(s, x, k))
-        .child(closed_note(why))
+        .child(closed_note(why, k))
         .on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_composer(r));
     col().w_full().items_center().px(28.0).pb(COMPOSER_BELOW).mt(-120.0).child(notice)
 }
 
 pub(crate) fn conversation(s: &App, id: &str, center: El, k: &Kit) -> El {
-    let center = center.child(tabs(s, id)).child(el().w_full().h(1.0).fill(line()).on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_top(r[1] + r[3])));
+    let center = center.child(tabs(s, id, k)).child(el().w_full().h(1.0).fill(line()).on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_top(r[1] + r[3])));
     let empty = s.panes.get(id).is_none_or(|p| p.blocks.is_empty());
     if s.tab == Tab::Changes && !empty {
         center.child(changes_view(s, id, k))

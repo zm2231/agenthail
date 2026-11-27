@@ -311,7 +311,7 @@ fn keep_open_lineage(s: &mut App, parent: &str, rows: &[Session]) {
     }
 }
 
-fn child_row(s: &App, c: &Session) -> El {
+fn child_row(s: &App, c: &Session, k: &Kit) -> El {
     let state = c.state(s.now);
     let id = c.id.clone();
     row()
@@ -326,22 +326,22 @@ fn child_row(s: &App, c: &Session) -> El {
         .help(state.label())
         .on_press(move |s: &mut App| crate::select(s, &id))
         .child(el().size(7.0, 7.0).radius(3.5).fill(state_color(state)))
-        .child(text(crew::label(c)).font(META_BOLD).color(theme::text()).truncate().grow(1.0).min_w(0.0))
-        .child(text(catalog::ago(&c.last_active, s.now)).font(META).color(faint()))
+        .child(text(crew::label(c)).font(k.text(META_BOLD)).color(theme::text()).truncate().grow(1.0).min_w(0.0))
+        .child(text(catalog::ago(&c.last_active, s.now)).font(k.text(META)).color(faint()))
 }
 
-fn claude_row(s: &App, link: &ClaudeSubagent) -> El {
+fn claude_row(s: &App, link: &ClaudeSubagent, k: &Kit) -> El {
     let mut top = row()
         .w_full()
         .gap(8.0)
         .child(el().size(7.0, 7.0).radius(3.5).mt(5.0).fill(if link.working { accent() } else { faint() }))
-        .child(text(link.title()).font(META).color(theme::text()).wrap().max_lines(2).grow(1.0).min_w(0.0));
+        .child(text(link.title()).font(k.text(META)).color(theme::text()).wrap().max_lines(2).grow(1.0).min_w(0.0));
     if !link.last_active.is_empty() {
-        top = top.child(text(catalog::ago(&link.last_active, s.now)).font(META).color(faint()));
+        top = top.child(text(catalog::ago(&link.last_active, s.now)).font(k.text(META)).color(faint()));
     }
     let mut c = col().key(format!("claude-subagent-{}", link.key())).w_full().gap(1.0).px(6.0).py(4.0).help(if link.working { "Working" } else { "Idle" }).child(top);
     if let Some(kind) = link.kind_label() {
-        c = c.child(text(kind.to_string()).font(META).color(faint()).pl(15.0));
+        c = c.child(text(kind.to_string()).font(k.text(META)).color(faint()).pl(15.0));
     }
     c
 }
@@ -372,21 +372,21 @@ pub(crate) fn section(s: &App, x: &Session, k: &Kit) -> Option<El> {
                 .radius(7.0)
                 .hover(crate::theme::ink(0.06))
                 .on_press(move |s: &mut App| crate::select(s, &id))
-                .child(icon(&icons::CORNER, 12.0).color(accent()))
-                .child(text(format!("Spawned by {}", p.title())).font(META_BOLD).color(accent()).truncate().min_w(0.0)),
+                .child(icon(&icons::CORNER, k.text_size(12.0)).color(accent()))
+                .child(text(format!("Spawned by {}", p.title())).font(k.text(META_BOLD)).color(accent()).truncate().min_w(0.0)),
         );
     }
-    body = body.children(children.iter().map(|c| child_row(s, c)));
+    body = body.children(children.iter().map(|c| child_row(s, c, k)));
     if loading || error.is_some() {
         let note = error.map_or_else(|| "Loading subagents".to_string(), |e| format!("Couldn't load subagents: {e}"));
-        body = body.child(text(note).font(META).color(if error.is_some() { attention() } else { faint() }).wrap().px(6.0).py(4.0));
+        body = body.child(text(note).font(k.text(META)).color(if error.is_some() { attention() } else { faint() }).wrap().px(6.0).py(4.0));
     }
     if let Some(e) = claude_error {
-        body = body.child(text(format!("Couldn't read Claude's subagents: {e}")).font(META).color(attention()).wrap().px(6.0).py(4.0));
+        body = body.child(text(format!("Couldn't read Claude's subagents: {e}")).font(k.text(META)).color(attention()).wrap().px(6.0).py(4.0));
     }
     if let Some(o) = observed.filter(|o| o.total > 0) {
-        body = body.child(text(o.summary()).font(META).color(faint()).px(6.0).pt(if children.is_empty() && parent.is_none() { 0.0 } else { 8.0 }).pb(2.0));
-        body = body.children(o.shown.iter().map(|l| claude_row(s, l)));
+        body = body.child(text(o.summary()).font(k.text(META)).color(faint()).px(6.0).pt(if children.is_empty() && parent.is_none() { 0.0 } else { 8.0 }).pb(2.0));
+        body = body.children(o.shown.iter().map(|l| claude_row(s, l, k)));
         if o.earlier > 0 {
             let id = x.id.clone();
             body = body.child(
@@ -401,5 +401,5 @@ pub(crate) fn section(s: &App, x: &Session, k: &Kit) -> Option<El> {
             );
         }
     }
-    Some(rail_section("Subagents", &icons::USERS, body))
+    Some(rail_section("Subagents", &icons::USERS, body, k))
 }

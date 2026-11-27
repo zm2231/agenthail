@@ -313,16 +313,16 @@ fn goal_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
     let mut body = col().w_full().gap(8.0);
     if let Some(goal) = goal {
         let tint = if goal.needs_attention() { attention() } else { muted() };
-        let status = row().gap(5.0).items_center().px(7.0).py(2.0).radius(9.0).fill(wash()).child(icon(&icons::TARGET, 11.0).color(tint)).child(text(goal.display_status()).font(META).color(tint));
+        let status = row().gap(5.0).items_center().px(7.0).py(2.0).radius(9.0).fill(wash()).child(icon(&icons::TARGET, k.text_size(11.0)).color(tint)).child(text(goal.display_status()).font(k.text(META)).color(tint));
         let long = goal.objective.len() > 240 || goal.objective.lines().count() > 4;
         let expanded = s.inspect.expanded.as_deref() == Some(x.id.as_str());
-        let objective = text(goal.objective.clone()).font(BODY).color(theme::text()).wrap().w_full();
+        let objective = text(goal.objective.clone()).font(k.text(BODY)).color(theme::text()).wrap().w_full();
         body = body.child(row().w_full().child(el().grow(1.0)).child(status)).child(if expanded || !long { objective } else { objective.max_lines(4) });
         if long {
             let id = x.id.clone();
             body = body.child(
                 text(if expanded { "Less" } else { "More" })
-                    .font(META)
+                    .font(k.text(META))
                     .color(accent())
                     .key("goal-more")
                     .help(if expanded { "Show less of the goal" } else { "Show the whole goal" })
@@ -333,14 +333,14 @@ fn goal_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
         let clock = super::background::clock();
         let times = goal.times(now, clock, local_offset);
         for line in [goal.reason().map(str::to_string), Some(goal.usage()), Some(times)].into_iter().flatten().filter(|l| !l.is_empty()) {
-            body = body.child(text(line).font(META).color(muted()).wrap());
+            body = body.child(text(line).font(k.text(META)).color(muted()).wrap());
         }
     }
     body = body.child(buttons);
     if let Some((bad, note)) = s.inspect.goal_note.get(&x.id) {
-        body = body.child(text(note.clone()).font(META).color(if *bad { failed() } else { muted() }).wrap());
+        body = body.child(text(note.clone()).font(k.text(META)).color(if *bad { failed() } else { muted() }).wrap());
     }
-    Some(rail_section("Goal", &icons::TARGET, body))
+    Some(rail_section("Goal", &icons::TARGET, body, k))
 }
 
 fn show_logs(s: &mut App, id: &str) {
@@ -362,11 +362,11 @@ fn process_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
     let busy = p.and_then(|p| p.busy).is_some();
     let mut body = col().w_full().gap(8.0);
     match p.and_then(|p| p.status.as_ref()) {
-        Some(status) => body = body.child(text(status.line()).font(META).color(theme::text()).wrap()),
-        None => body = body.child(text(inspect::lifecycle_detail(x)).font(META).color(muted()).wrap()),
+        Some(status) => body = body.child(text(status.line()).font(k.text(META)).color(theme::text()).wrap()),
+        None => body = body.child(text(inspect::lifecycle_detail(x)).font(k.text(META)).color(muted()).wrap()),
     }
     if let Some(outcome) = p.and_then(|p| p.outcome.clone()) {
-        body = body.child(text(outcome).font(META).color(muted()));
+        body = body.child(text(outcome).font(k.text(META)).color(muted()));
     }
     if p.is_some_and(|p| p.logs.is_some()) {
         let id = x.id.clone();
@@ -376,14 +376,14 @@ fn process_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
         let id = x.id.clone();
         small(act.label(), format!("process-{}", act.name()), ButtonVariant::Neutral, busy, move |s: &mut App| run(s, &id, act, false), k)
     }));
-    body = body.child(if busy { buttons.child(text("Working…").font(META).color(faint())) } else { buttons });
+    body = body.child(if busy { buttons.child(text("Working…").font(k.text(META)).color(faint())) } else { buttons });
     if let Some(error) = p.and_then(|p| p.error.clone()) {
-        body = body.child(text(error).font(META).color(failed()).wrap());
+        body = body.child(text(error).font(k.text(META)).color(failed()).wrap());
     }
-    Some(rail_section(inspect::lifecycle_title(x), &icons::TERMINAL, body))
+    Some(rail_section(inspect::lifecycle_title(x), &icons::TERMINAL, body, k))
 }
 
-fn runs_section(s: &App, x: &Session) -> Vec<El> {
+fn runs_section(s: &App, x: &Session, k: &Kit) -> Vec<El> {
     let Some(data) = s.inspect.meta.get(&x.id) else { return Vec::new() };
     let mut out = Vec::new();
     if let Some(runs) = &data.runs {
@@ -391,20 +391,20 @@ fn runs_section(s: &App, x: &Session) -> Vec<El> {
         let clock = super::background::clock();
         let mut body = col().w_full().gap(8.0);
         if runs.is_empty() {
-            body = body.child(text(inspect::NO_RUNS).font(META).color(muted()));
+            body = body.child(text(inspect::NO_RUNS).font(k.text(META)).color(muted()));
         }
         for run in runs {
             let facts = run.lines(now, clock, local_offset);
-            let mut entry = col().w_full().gap(2.0).child(text(format!("Job: {}", run.job_id)).font(META_BOLD).color(theme::text()).wrap_anywhere());
+            let mut entry = col().w_full().gap(2.0).child(text(format!("Job: {}", run.job_id)).font(k.text(META_BOLD)).color(theme::text()).wrap_anywhere());
             if !facts.is_empty() {
-                entry = entry.child(text(facts.join(" · ")).font(META).color(muted()).wrap_anywhere());
+                entry = entry.child(text(facts.join(" · ")).font(k.text(META)).color(muted()).wrap_anywhere());
             }
             body = body.child(entry);
         }
-        out.push(rail_section("Claude runs", &icons::ACTIVITY, body));
+        out.push(rail_section("Claude runs", &icons::ACTIVITY, body, k));
     }
     if !data.warnings.is_empty() {
-        out.push(rail_section("Not available right now", &icons::CLOCK, col().w_full().gap(4.0).children(data.warnings.iter().map(|w| text(w.clone()).font(META).color(muted()).wrap_anywhere()))));
+        out.push(rail_section("Not available right now", &icons::CLOCK, col().w_full().gap(4.0).children(data.warnings.iter().map(|w| text(w.clone()).font(k.text(META)).color(muted()).wrap_anywhere())), k));
     }
     out
 }
@@ -413,19 +413,19 @@ pub(crate) fn above(s: &App, x: &Session, k: &Kit) -> Vec<El> {
     goal_section(s, x, k).into_iter().chain(process_section(s, x, k)).collect()
 }
 
-pub(crate) fn below(s: &App, x: &Session) -> Vec<El> {
-    runs_section(s, x)
+pub(crate) fn below(s: &App, x: &Session, k: &Kit) -> Vec<El> {
+    runs_section(s, x, k)
 }
 
 fn editor(s: &App, editing: &Editing, layer: &mut Vec<El>, k: &Kit) {
     let budget = editing.act == GoalAct::Budget;
     let ok = inspect::can_save(editing.act, &editing.text.text, budget_of(s, &editing.session));
-    let mut input = text_input(&editing.text, BODY).key("goal-editor-input").grow(1.0).min_w(0.0).color(theme::text()).on_edit(|s: &mut App| &mut s.inspect.editing.as_mut().expect("goal editor is open").text);
+    let mut input = text_input(&editing.text, k.text(BODY)).key("goal-editor-input").grow(1.0).min_w(0.0).color(theme::text()).on_edit(|s: &mut App| &mut s.inspect.editing.as_mut().expect("goal editor is open").text);
     input = if budget { input.single_line().label("Tokens").placeholder("Tokens", faint()).on_submit(|s: &mut App, _: &mut Tx| save_editor(s)) } else { input.label("Goal").min_h(100.0) };
     let field = row().w_full().px(10.0).py(7.0).radius(8.0).fill(wash()).border(1.0, theme::line()).child(input);
     let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0).child(field);
     if budget {
-        body = body.child(text("Leave empty to remove the budget.").font(META).color(muted()));
+        body = body.child(text("Leave empty to remove the budget.").font(k.text(META)).color(muted()));
     }
     let buttons = row()
         .w_full()
@@ -445,7 +445,7 @@ fn logs(s: &App, id: &str, output: &str, layer: &mut Vec<El>, k: &Kit) {
         .gap(10.0)
         .px(16.0)
         .pb(16.0)
-        .child(col().key("logs-scroll").w_full().h(300.0).px(10.0).py(8.0).radius(8.0).fill(wash()).border(1.0, theme::line()).scroll(ScrollSpec { stick_bottom: true }).child(text(shown).font(META.mono()).color(theme::text()).wrap_anywhere().w_full()))
+        .child(col().key("logs-scroll").w_full().h(300.0).px(10.0).py(8.0).radius(8.0).fill(wash()).border(1.0, theme::line()).scroll(ScrollSpec { stick_bottom: true }).child(text(shown).font(k.text(META.mono())).color(theme::text()).wrap_anywhere().w_full()))
         .child(
             row()
                 .w_full()

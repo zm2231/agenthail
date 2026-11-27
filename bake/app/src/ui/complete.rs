@@ -1,3 +1,4 @@
+use rune_kit::Kit;
 use std::collections::{HashMap, HashSet};
 
 use feed::catalog::{RespondError, Session};
@@ -119,7 +120,7 @@ fn shown(s: &App, x: &Session) -> (Vec<Item>, Option<String>) {
     (items, notice)
 }
 
-pub fn menu(s: &App, x: &Session) -> Option<El> {
+pub fn menu(s: &App, x: &Session, k: &Kit) -> Option<El> {
     let (items, notice) = shown(s, x);
     if items.is_empty() && notice.is_none() {
         return None;
@@ -142,18 +143,18 @@ pub fn menu(s: &App, x: &Session) -> Option<El> {
             .hover(crate::theme::ink(0.06))
             .label(format!("{} {}", item.title, item.detail))
             .on_press_tx(move |s: &mut App, _: &mut Tx| accept(s, &picked))
-            .child(text(item.title.clone()).font(META_BOLD).color(if on { theme::text() } else { muted() }).truncate().max_w(320.0))
-            .child(text(item.detail.clone()).font(META).color(faint()).truncate().grow(1.0).min_w(0.0));
+            .child(text(item.title.clone()).font(k.text(META_BOLD)).color(if on { theme::text() } else { muted() }).truncate().max_w(320.0))
+            .child(text(item.detail.clone()).font(k.text(META)).color(faint()).truncate().grow(1.0).min_w(0.0));
         if on {
             r = r.fill(accent().alpha(0.18));
         }
         list = list.child(r);
     }
     if items.len() > SHOWN {
-        list = list.child(text(format!("{} of {}", at + 1, items.len())).font(META).color(faint()).px(10.0));
+        list = list.child(text(format!("{} of {}", at + 1, items.len())).font(k.text(META)).color(faint()).px(10.0));
     }
     if let Some(note) = notice {
-        list = list.child(text(note).font(META).color(faint()).px(10.0).py(4.0).key("completion-notice"));
+        list = list.child(text(note).font(k.text(META)).color(faint()).px(10.0).py(4.0).key("completion-notice"));
     }
     Some(list)
 }
@@ -771,9 +772,9 @@ fn fork_at(s: &mut App, from: &str, item: &str, turn: Option<String>, text: Stri
     });
 }
 
-pub fn search(s: &App, x: &Session) -> Option<El> {
+pub fn search(s: &App, x: &Session, k: &Kit) -> Option<El> {
     let search = s.complete.search.as_ref().filter(|q| q.session == x.id)?;
-    let input = text_input(&search.query, BODY)
+    let input = text_input(&search.query, k.text(BODY))
         .single_line()
         .key("prompt-search")
         .label("Search what you sent")
@@ -798,14 +799,14 @@ pub fn search(s: &App, x: &Session) -> Option<El> {
                     q.query.focused = true;
                 }
             })
-            .child(text(label).font(META_BOLD).color(if on { theme::text() } else { faint() }))
+            .child(text(label).font(k.text(META_BOLD)).color(if on { theme::text() } else { faint() }))
     };
-    let head = row().w_full().gap(8.0).items_center().child(input).child(scope("This session", false)).child(scope("All sessions", true)).child(text("esc").font(META).color(faint()));
+    let head = row().w_full().gap(8.0).items_center().child(input).child(scope("This session", false)).child(scope("All sessions", true)).child(text("esc").font(k.text(META)).color(faint()));
     let mut list = col().key("prompt-results").w_full().gap(1.0);
     let forks = !search.all && complete::can_fork(x);
     match search.current() {
-        None => list = list.child(text("Searching…").font(META).color(faint()).px(10.0).py(4.0)),
-        Some(Err(error)) => list = list.child(text(format!("Couldn't search what you sent: {error}")).font(META).color(failed()).px(10.0).py(4.0)),
+        None => list = list.child(text("Searching…").font(k.text(META)).color(faint()).px(10.0).py(4.0)),
+        Some(Err(error)) => list = list.child(text(format!("Couldn't search what you sent: {error}")).font(k.text(META)).color(failed()).px(10.0).py(4.0)),
         Some(Ok(found)) if found.is_empty() => {
             let empty = match (search.more, search.query.text.trim().is_empty()) {
                 _ if !search.problems.is_empty() => "Nothing found where the search could look.",
@@ -813,16 +814,16 @@ pub fn search(s: &App, x: &Session) -> Option<El> {
                 (false, true) => "Nothing sent yet.",
                 (false, false) => "No sent prompt matches.",
             };
-            list = list.child(text(empty).font(META).color(faint()).px(10.0).py(4.0));
+            list = list.child(text(empty).font(k.text(META)).color(faint()).px(10.0).py(4.0));
         }
         Some(Ok(found)) => {
             let at = search.ix.min(found.len() - 1);
             for (i, p) in found.iter().enumerate().skip(at.saturating_sub(SHOWN - 1)).take(SHOWN) {
                 let chosen = p.text.clone();
-                let mut body = col().grow(1.0).min_w(0.0).gap(2.0).child(text(p.text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().to_string()).font(META).color(theme::text()).truncate());
+                let mut body = col().grow(1.0).min_w(0.0).gap(2.0).child(text(p.text.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().to_string()).font(k.text(META)).color(theme::text()).truncate());
                 if search.all {
                     let title = session(s, &p.session_id).map(|x| x.title()).unwrap_or_else(|| "Another session".into());
-                    body = body.child(text(title).font(META).color(faint()).truncate());
+                    body = body.child(text(title).font(k.text(META)).color(faint()).truncate());
                 }
                 let mut r = row()
                     .key(format!("prompt-{}-{}", p.session_id, p.item_id))
@@ -840,7 +841,7 @@ pub fn search(s: &App, x: &Session) -> Option<El> {
                     let label = if s.complete.forking { "Forking…" } else { "Fork from here" };
                     r = r.child(
                         text(label)
-                            .font(META_BOLD)
+                            .font(k.text(META_BOLD))
                             .color(accent())
                             .key(format!("fork-{}", p.item_id))
                             .label("Start a new conversation with everything before this prompt, and this prompt in its composer")
@@ -855,10 +856,10 @@ pub fn search(s: &App, x: &Session) -> Option<El> {
         }
     }
     if search.more && search.current().is_some_and(|r| r.as_ref().is_ok_and(|l| !l.is_empty())) {
-        list = list.child(text("Showing the newest matches. Type more to narrow the search.").font(META).color(faint()).px(10.0).py(2.0));
+        list = list.child(text("Showing the newest matches. Type more to narrow the search.").font(k.text(META)).color(faint()).px(10.0).py(2.0));
     }
     for problem in &search.problems {
-        list = list.child(text(problem.clone()).font(META).color(failed()).px(10.0).py(2.0));
+        list = list.child(text(problem.clone()).font(k.text(META)).color(failed()).px(10.0).py(2.0));
     }
     Some(col().key("prompt-search-panel").w_full().gap(6.0).px(12.0).pt(10.0).child(head).child(list))
 }

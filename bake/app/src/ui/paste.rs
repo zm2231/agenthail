@@ -135,7 +135,7 @@ fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 
 pub fn editor(s: &App, k: &Kit) -> Option<El> {
     let editing = s.paste.as_ref()?;
-    let input = text_input(&editing.edit, BODY.mono())
+    let input = text_input(&editing.edit, k.text(BODY.mono()))
         .key("paste-editor")
         .label("Pasted text")
         .w_full()
@@ -156,7 +156,7 @@ pub fn editor(s: &App, k: &Kit) -> Option<El> {
             .gap(8.0)
             .padding(10.0)
             .child(input)
-            .child(row().w_full().items_center().child(text(paste::label(&editing.edit.text)).font(META).color(faint())).child(super::spacer()).child(done)),
+            .child(row().w_full().items_center().child(text(paste::label(&editing.edit.text)).font(k.text(META)).color(faint())).child(super::spacer()).child(done)),
     )
 }
 

@@ -594,7 +594,7 @@ pub fn sidebar_rows(s: &App, hidden: Vec<String>, k: &Kit) -> Vec<El> {
         rows.push(
             rune_kit::SidebarRow::new("More projects")
                 .icon(&crate::icons::MORE)
-                .height(30.0)
+                .height(k.text_size(30.0))
                 .detail(count.to_string())
                 .on_select(move |s: &mut App, _| {
                     s.ov.projects.menu = None;
@@ -605,13 +605,13 @@ pub fn sidebar_rows(s: &App, hidden: Vec<String>, k: &Kit) -> Vec<El> {
                 .key("more-projects-menu-trigger"),
         );
     }
-    rows.extend([rune_kit::SidebarRow::new("Add project…").icon(&icons::PLUS).height(30.0).on_select(|s: &mut App, _| add(s)).build(k).key("add-project")]);
+    rows.extend([rune_kit::SidebarRow::new("Add project…").icon(&icons::PLUS).height(k.text_size(30.0)).on_select(|s: &mut App, _| add(s)).build(k).key("add-project")]);
     let count = archived(s).len();
     if count > 0 {
         rows.push(
             rune_kit::SidebarRow::new("Archived projects")
                 .icon(&crate::icons::INBOX)
-                .height(30.0)
+                .height(k.text_size(30.0))
                 .detail(count.to_string())
                 .on_select(|s: &mut App, _| open_archived(s))
                 .build(k)
@@ -622,7 +622,7 @@ pub fn sidebar_rows(s: &App, hidden: Vec<String>, k: &Kit) -> Vec<El> {
 }
 
 fn line_input(edit: &TextEdit, key: &'static str, label: &str, pick: fn(&mut Sheet) -> Option<&mut TextEdit>, k: &Kit) -> El {
-    text_input(edit, BODY)
+    text_input(edit, k.text(BODY))
         .single_line()
         .key(key)
         .label(label.to_string())
@@ -642,7 +642,7 @@ fn line_input(edit: &TextEdit, key: &'static str, label: &str, pick: fn(&mut She
 }
 
 fn field(name: &str, control: El, k: &Kit) -> El {
-    col().w_full().gap(5.0).child(text(name.to_string()).font(META).color(weak(k))).child(control)
+    col().w_full().gap(5.0).child(text(name.to_string()).font(k.text(META)).color(weak(k))).child(control)
 }
 
 fn select(key: &'static str, pick: Pick, choices: Vec<(String, String)>, current: &str, placeholder: &str, open: bool, on: fn(&mut App, String), popups: &mut Vec<El>, k: &Kit) -> El {
@@ -710,7 +710,7 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>, k: &Kit) {
         Sheet::Broadcast { project, text, sent, .. } => {
             let name = s.ov.d.record(project).map(|p| p.name().to_string()).unwrap_or_default();
             let body = match sent {
-                Some(summary) => col().w_full().child(rune::text(summary.clone()).font(META).color(base(k)).wrap().w_full()),
+                Some(summary) => col().w_full().child(rune::text(summary.clone()).font(k.text(META)).color(base(k)).wrap().w_full()),
                 None if s.ov.projects.saving => col()
                     .w_full()
                     .min_h(100.0)
@@ -719,9 +719,9 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>, k: &Kit) {
                     .radius(8.0)
                     .fill(crate::theme::wash())
                     .border(1.0, crate::theme::line())
-                    .child(rune::text(text.text.clone()).font(BODY).color(weak(k)).wrap().w_full()),
+                    .child(rune::text(text.text.clone()).font(k.text(BODY)).color(weak(k)).wrap().w_full()),
                 None => col().w_full().child(
-                    text_input(text, BODY)
+                    text_input(text, k.text(BODY))
                         .key("project-message-text")
                         .label("Message".to_string())
                         .w_full()
@@ -769,7 +769,7 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>, k: &Kit) {
             let current = record(s, project).map(|p| p.name().to_string()).unwrap_or_default();
             let mut body = col().w_full().gap(12.0).child(line_input(name, "project-name", "Name", |sh| if let Sheet::Rename { name, .. } = sh { Some(name) } else { None }, k));
             if let Some(problem) = projects::rename_problem(&name.text, &current).filter(|p| !p.is_empty()) {
-                body = body.child(text(problem.to_string()).font(META).color(crate::theme::failed()));
+                body = body.child(text(problem.to_string()).font(k.text(META)).color(crate::theme::failed()));
             }
             (format!("Rename {current}"), Some("The name applies on every computer where this project was added.".to_string()), body, "Save")
         }
@@ -778,7 +778,7 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>, k: &Kit) {
             let places = p.lead_places();
             let mut body = col().w_full().gap(12.0);
             if let [only] = places.as_slice() {
-                body = body.child(field("Starts on", text(format!("{}: {}", only.host.name, only.root_path)).font(META).color(base(k)).wrap().w_full(), k));
+                body = body.child(field("Starts on", text(format!("{}: {}", only.host.name, only.root_path)).font(k.text(META)).color(base(k)).wrap().w_full(), k));
             }
             if places.len() > 1 {
                 let labels = projects::host_labels(p.checkouts.iter().map(|c| (c.host.id.as_str(), c.host.name.as_str())));
@@ -797,13 +797,13 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>, k: &Kit) {
                 .build(k);
             body = body.child(field("Agent", agents, k)).child(field("Name (optional)", line_input(name, "lead-name", "Name", |sh| if let Sheet::Lead { name, .. } = sh { Some(name) } else { None }, k), k));
             if places.is_empty() {
-                body = body.child(text("No computer with this project is connected.".to_string()).font(META).color(crate::theme::failed()).wrap().w_full());
+                body = body.child(text("No computer with this project is connected.".to_string()).font(k.text(META)).color(crate::theme::failed()).wrap().w_full());
             }
             (format!("Lead of {}", p.name()), Some(p.lead_note()), body, "Start Lead")
         }
     };
     if let Some(error) = &s.ov.projects.error {
-        body = body.child(text(error.clone()).font(META).color(crate::theme::failed()).wrap().w_full());
+        body = body.child(text(error.clone()).font(k.text(META)).color(crate::theme::failed()).wrap().w_full());
     }
     let mut dialog = Dialog::new("project-sheet", title).open(true).fit().width(440.0).on_close(|s: &mut App| {
         if !locked(s) {
@@ -889,19 +889,19 @@ fn merged_row(s: &App, i: usize, x: &feed::catalog::Session, w: &Worktree, k: &K
         .radius(10.0)
         .fill(k.c.surface_base)
         .border(1.0, ui::edge())
-        .child(row().w_full().gap(8.0).items_center().child(text(ui::short_title(&s.ov.d.title(x), 30)).font(META_MED).color(strong(k)).truncate().shrink()).child(ui::spacer()).child(text(s.ov.d.ago(&x.last_active)).font(META).color(weak(k))))
-        .child(text(w.name().to_string()).font(META).color(base(k)).truncate());
+        .child(row().w_full().gap(8.0).items_center().child(text(ui::short_title(&s.ov.d.title(x), 30)).font(k.text(META_MED)).color(strong(k)).truncate().shrink()).child(ui::spacer()).child(text(s.ov.d.ago(&x.last_active)).font(k.text(META)).color(weak(k))))
+        .child(text(w.name().to_string()).font(k.text(META)).color(base(k)).truncate());
     let offer = w.offer();
     if offer == Offer::Remove {
-        c = c.child(text("Remove deletes its folder and branch if nothing in them would be lost.".to_string()).font(META).color(weak(k)).wrap());
+        c = c.child(text("Remove deletes its folder and branch if nothing in them would be lost.".to_string()).font(k.text(META)).color(weak(k)).wrap());
     } else if let Some(h) = &w.hint {
-        c = c.child(text(h.reason.clone()).font(META).color(weak(k)).wrap());
+        c = c.child(text(h.reason.clone()).font(k.text(META)).color(weak(k)).wrap());
         if !h.command.is_empty() {
-            c = c.child(text(h.command.clone()).font(META).color(base(k)).wrap());
+            c = c.child(text(h.command.clone()).font(k.text(META)).color(base(k)).wrap());
         }
     }
     if let Some(note) = s.ov.projects.kept.get(&id) {
-        c = c.child(text(note.clone()).font(META).color(ui::needs_color(k)).wrap());
+        c = c.child(text(note.clone()).font(k.text(META)).color(ui::needs_color(k)).wrap());
     }
     let button = |label: &str, key: String, job: Job, confirm: Confirm| {
         Button::new(if cleaning { "Removing…" } else { label })
@@ -929,7 +929,7 @@ pub fn merged(s: &App, key: &str, k: &Kit) -> Option<El> {
     if rows.is_empty() {
         return None;
     }
-    let mut c = col().w_full().gap(8.0).child(ui::section_head("Merged", Some(rows.len()), Some(text("worktrees left behind".to_string()).font(META).color(weak(k))), k));
+    let mut c = col().w_full().gap(8.0).child(ui::section_head("Merged", Some(rows.len()), Some(text("worktrees left behind".to_string()).font(k.text(META)).color(weak(k))), k));
     for (i, (x, w)) in rows.into_iter().enumerate() {
         c = c.child(merged_row(s, i, x, w, k));
     }

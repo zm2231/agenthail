@@ -540,7 +540,7 @@ fn kind_icon(kind: FileKind) -> &'static Icon {
     }
 }
 
-pub fn button(s: &App, id: &str) -> Option<El> {
+pub fn button(s: &App, id: &str, k: &Kit) -> Option<El> {
     can_attach(s, id).then(|| {
         col()
             .key("attach")
@@ -552,7 +552,7 @@ pub fn button(s: &App, id: &str) -> Option<El> {
             .label("Attach files or images")
             .help("Attach files or images")
             .on_press_tx(choose)
-            .child(icon(&icons::PAPERCLIP, 15.0).color(muted()))
+            .child(icon(&icons::PAPERCLIP, k.text_size(15.0)).color(muted()))
     })
 }
 
@@ -567,8 +567,8 @@ pub fn chips(s: &App, id: &str, k: &Kit) -> Option<El> {
         let local = chip.local;
         let failed_ = matches!(chip.state, State::Failed(_) | State::Gone(_));
         let thumb = match s.attach.thumbs.get(&local).filter(|_| chip.image) {
-            Some(image) => el().size(18.0, 18.0).radius(4.0).pixels_fit(image.pixels(), SurfaceFit::Fill),
-            None => col().size(18.0, 18.0).items_center().justify_center().child(icon(if chip.image { &icons::IMAGE } else { &icons::FILE }, 12.0).color(faint())),
+            Some(image) => el().size(k.text_size(18.0), k.text_size(18.0)).radius(4.0).pixels_fit(image.pixels(), SurfaceFit::Fill),
+            None => col().size(k.text_size(18.0), k.text_size(18.0)).items_center().justify_center().child(icon(if chip.image { &icons::IMAGE } else { &icons::FILE }, k.text_size(12.0)).color(faint())),
         };
         let mut c = row()
             .key(format!("chip-{local}"))
@@ -576,26 +576,26 @@ pub fn chips(s: &App, id: &str, k: &Kit) -> Option<El> {
             .items_center()
             .pl(3.0)
             .pr(5.0)
-            .h(24.0)
+            .h(k.text_size(24.0))
             .radius(6.0)
             .fill(wash())
             .border(1.0, if failed_ { failed().alpha(0.6) } else { line() })
             .help(chip.help())
             .child(thumb)
-            .child(text(chip.name.clone()).font(META).color(theme::text()).truncate().max_w(220.0));
+            .child(text(chip.name.clone()).font(k.text(META)).color(theme::text()).truncate().max_w(220.0));
         match chip.state {
-            State::Uploading => c = c.child(rune_kit::Loader::new().size(10.0).color(faint()).build(k)),
+            State::Uploading => c = c.child(rune_kit::Loader::new().size(k.text_size(10.0)).color(faint()).build(k)),
             State::Failed(_) if chip.data.is_some() => {
                 let session = id.to_string();
                 c = c.child(
                     col()
                         .key(format!("chip-retry-{local}"))
-                        .size(16.0, 16.0)
+                        .size(k.text_size(16.0), k.text_size(16.0))
                         .items_center()
                         .justify_center()
                         .label(format!("Upload {} again", chip.name))
                         .on_press(move |s: &mut App| retry_upload(s, &session, local))
-                        .child(icon(&icons::ROTATE, 11.0).color(failed())),
+                        .child(icon(&icons::ROTATE, k.text_size(11.0)).color(failed())),
                 )
             }
             State::Ready(_) | State::Failed(_) | State::Gone(_) => {}
@@ -603,22 +603,22 @@ pub fn chips(s: &App, id: &str, k: &Kit) -> Option<El> {
         c = c.child(
             col()
                 .key(format!("chip-remove-{local}"))
-                .size(16.0, 16.0)
+                .size(k.text_size(16.0), k.text_size(16.0))
                 .radius(4.0)
                 .items_center()
                 .justify_center()
                 .hover(crate::theme::ink(0.08))
                 .label(format!("Remove {}", chip.name))
                 .on_press(move |s: &mut App| remove(s, local))
-                .child(icon(&icons::CLOSE, 10.0).color(muted())),
+                .child(icon(&icons::CLOSE, k.text_size(10.0)).color(muted())),
         );
         r = r.child(c);
     }
     if let Some(warning) = &s.attach.unsaved {
-        r = r.child(text(warning.clone()).font(META).color(failed()).wrap().w_full());
+        r = r.child(text(warning.clone()).font(k.text(META)).color(failed()).wrap().w_full());
     }
     if preparing > 0 {
-        r = r.child(row().h(24.0).gap(6.0).items_center().child(rune_kit::Loader::new().size(10.0).color(faint()).build(k)).child(text("Adding…").font(META).color(faint())));
+        r = r.child(row().h(k.text_size(24.0)).gap(6.0).items_center().child(rune_kit::Loader::new().size(k.text_size(10.0)).color(faint()).build(k)).child(text("Adding…").font(k.text(META)).color(faint())));
     }
     Some(col().key("attachment-tray").w_full().max_h(CHIP_ROWS_SHOWN * 24.0 + (CHIP_ROWS_SHOWN - 1.0) * 6.0).scroll(rune::ScrollSpec { stick_bottom: false }).child(r))
 }
@@ -648,11 +648,11 @@ pub fn image_el(s: &App, session: &str, a: &Attachment, k: &Kit) -> El {
                 col()
                     .gap(2.0)
                     .items_center()
-                    .child(text("Couldn't load image").font(META).color(muted()))
-                    .child(row().key(format!("image-retry-{}", a.id)).px(6.0).py(2.0).radius(5.0).hover(wash()).on_press(move |s: &mut App| retry_picture(s, &id)).child(text("Retry").font(META_BOLD).color(theme::accent()))),
+                    .child(text("Couldn't load image").font(k.text(META)).color(muted()))
+                    .child(row().key(format!("image-retry-{}", a.id)).px(6.0).py(2.0).radius(5.0).hover(wash()).on_press(move |s: &mut App| retry_picture(s, &id)).child(text("Retry").font(k.text(META_BOLD)).color(theme::accent()))),
             )
         }
-        _ => frame.child(rune_kit::Loader::new().size(14.0).color(faint()).build(k)),
+        _ => frame.child(rune_kit::Loader::new().size(k.text_size(14.0)).color(faint()).build(k)),
     };
     row().w_full().child(body)
 }
@@ -680,10 +680,10 @@ pub fn file_el(s: &App, session: &str, item: &Item, k: &Kit) -> El {
         .fill(wash())
         .border(1.0, line())
         .label(if reason.is_none() { format!("Open {name}") } else { name.clone() })
-        .child(col().w(28.0).items_center().child(icon(kind_icon(attach::file_kind(&name, media)), 20.0).color(muted())))
-        .child(col().grow(1.0).min_w(0.0).gap(2.0).child(text(name.clone()).font(META_BOLD).color(theme::text()).truncate()).child(text(detail).font(META).color(faint()).wrap().max_lines(2)));
+        .child(col().w(28.0).items_center().child(icon(kind_icon(attach::file_kind(&name, media)), k.text_size(20.0)).color(muted())))
+        .child(col().grow(1.0).min_w(0.0).gap(2.0).child(text(name.clone()).font(k.text(META_BOLD)).color(theme::text()).truncate()).child(text(detail).font(k.text(META)).color(faint()).wrap().max_lines(2)));
     if sent.is_some_and(|x| x.loading) {
-        card = card.child(rune_kit::Loader::new().size(12.0).color(faint()).build(k));
+        card = card.child(rune_kit::Loader::new().size(k.text_size(12.0)).color(faint()).build(k));
     }
     let target = Target::File { session: session.to_string(), item: item.clone() };
     card = card.on_secondary_press(menu_at(target));
@@ -692,12 +692,12 @@ pub fn file_el(s: &App, session: &str, item: &Item, k: &Kit) -> El {
         card = card.hover(crate::theme::ink(0.08)).help(format!("Preview {name}")).on_press_tx(move |s: &mut App, tx: &mut Tx| fetch_sent(s, &session, &item, Then::Look, tx));
     } else if item.files.first().is_some_and(|f| !f.path.is_empty()) {
         let (key, path) = (item.id.clone(), item.files[0].path.clone());
-        card = card.help(reason.unwrap_or_default()).child(row().key(format!("copy-path-{}", item.id)).px(6.0).py(2.0).radius(5.0).hover(crate::theme::ink(0.08)).on_press_tx(move |s: &mut App, tx: &mut Tx| copy_path(s, &key, &path, tx)).child(text("Copy Path").font(META).color(theme::accent())));
+        card = card.help(reason.unwrap_or_default()).child(row().key(format!("copy-path-{}", item.id)).px(6.0).py(2.0).radius(5.0).hover(crate::theme::ink(0.08)).on_press_tx(move |s: &mut App, tx: &mut Tx| copy_path(s, &key, &path, tx)).child(text("Copy Path").font(k.text(META)).color(theme::accent())));
     }
     row().w_full().child(card)
 }
 
-pub fn files_el(s: &App, block: &str, files: &[AttachedFile]) -> El {
+pub fn files_el(s: &App, block: &str, files: &[AttachedFile], k: &Kit) -> El {
     let mut r = row().w_full().flex_wrap().justify_end().gap(6.0);
     for (i, file) in files.iter().enumerate() {
         let key = format!("{block}-{i}");
@@ -712,15 +712,15 @@ pub fn files_el(s: &App, block: &str, files: &[AttachedFile]) -> El {
             .gap(6.0)
             .items_center()
             .px(8.0)
-            .h(26.0)
+            .h(k.text_size(26.0))
             .radius(7.0)
             .fill(wash())
             .border(1.0, line())
             .help(file.path.clone())
-            .child(icon(kind_icon(attach::file_kind(&file.name, "")), 13.0).color(muted()))
-            .child(text(file.name.clone()).font(META).color(theme::text()).truncate().max_w(240.0));
+            .child(icon(kind_icon(attach::file_kind(&file.name, "")), k.text_size(13.0)).color(muted()))
+            .child(text(file.name.clone()).font(k.text(META)).color(theme::text()).truncate().max_w(240.0));
         if !label.is_empty() {
-            chip = chip.child(text(label).font(META).color(faint()));
+            chip = chip.child(text(label).font(k.text(META)).color(faint()));
         }
         if !file.path.is_empty() {
             chip = chip.on_secondary_press(menu_at(Target::Path { key, path: file.path.clone() }));

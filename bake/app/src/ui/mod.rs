@@ -67,11 +67,11 @@ pub(crate) fn spacer() -> El {
     el().grow(1.0)
 }
 
-pub(crate) fn label(value: &str) -> El {
-    text(value.to_uppercase()).font(LABEL).color(faint())
+pub(crate) fn label(value: &str, k: &Kit) -> El {
+    text(value.to_uppercase()).font(k.text(LABEL)).color(faint())
 }
 
-pub(crate) fn chip(glyph: &'static Icon, value: impl Into<String>) -> El {
+pub(crate) fn chip(glyph: &'static Icon, value: impl Into<String>, k: &Kit) -> El {
     row()
         .gap(5.0)
         .items_center()
@@ -80,11 +80,11 @@ pub(crate) fn chip(glyph: &'static Icon, value: impl Into<String>) -> El {
         .radius(7.0)
         .fill(wash())
         .border(1.0, line())
-        .child(icon(glyph, 12.0).color(faint()))
-        .child(text(value.into()).font(META).color(muted()).truncate().max_w(220.0))
+        .child(icon(glyph, k.text_size(12.0)).color(faint()))
+        .child(text(value.into()).font(k.text(META)).color(muted()).truncate().max_w(220.0))
 }
 
-pub(crate) fn pill(glyph: &'static Icon, value: impl Into<String>, color: Color) -> El {
+pub(crate) fn pill(glyph: &'static Icon, value: impl Into<String>, color: Color, k: &Kit) -> El {
     row()
         .gap(5.0)
         .items_center()
@@ -93,8 +93,8 @@ pub(crate) fn pill(glyph: &'static Icon, value: impl Into<String>, color: Color)
         .radius(20.0)
         .fill(color.alpha(0.14))
         .border(1.0, color.alpha(0.30))
-        .child(icon(glyph, 12.0).color(color))
-        .child(text(value.into()).font(META_BOLD).color(color).truncate().max_w(240.0))
+        .child(icon(glyph, k.text_size(12.0)).color(color))
+        .child(text(value.into()).font(k.text(META_BOLD)).color(color).truncate().max_w(240.0))
 }
 
 pub(crate) fn keys(keys: &[&str], k: &Kit) -> El {

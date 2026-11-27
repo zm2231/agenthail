@@ -8,6 +8,7 @@ mod overview;
 mod parts;
 mod signin;
 
+use rune_kit::Kit;
 use std::cell::{Cell, OnceCell};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -203,7 +204,7 @@ fn fixtures() -> bool {
     args.iter().any(|a| a == "--fixture" || a == "--fixtures") || std::env::var("AGENTHAIL_FIXTURES").is_ok()
 }
 
-fn init() -> Prefs {
+pub(crate) fn init() -> Prefs {
     let (tx, rx) = channel();
     let (client, no_client) = connect();
     Prefs {
@@ -648,7 +649,7 @@ pub fn toggle_select(s: &mut Prefs, key: &'static str) {
     s.open_select = if s.open_select == Some(key) { None } else { Some(key) };
 }
 
-fn unfollowed(s: &Prefs) -> Option<El> {
+fn unfollowed(s: &Prefs, k: &Kit) -> Option<El> {
     let note = match (&s.base, &s.stream_down) {
         (Some(Err(f)), _) => {
             let f = explain(s, f);
@@ -657,7 +658,7 @@ fn unfollowed(s: &Prefs) -> Option<El> {
         (_, Some(why)) => Failure { uncertain: true, ..Failure::new(format!("Can't follow changes made elsewhere right now ({why}), so what shows may be out of date. Settings keeps trying.")) },
         _ => return None,
     };
-    Some(col().w_full().items_center().pb(8.0).child(parts::failure(s, &note).w(parts::WIDTH)))
+    Some(col().w_full().items_center().pb(8.0).child(parts::failure(s, &note, k).w(parts::WIDTH)))
 }
 
 pub const TABS: [&str; 7] = ["General", "Claude", "Notifications", "Devices", "Handoffs", "Appearance", "Overview"];
@@ -691,8 +692,8 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         .w_full()
         .h_full()
         .child(el().absolute(0.0, 0.0).w_full().h_full().fill(theme::card_deep()))
-        .child(col().w_full().items_center().pt(14.0).pb(10.0).child(tabs.build(&k)))
-        .children(unfollowed(s))
+        .child(col().w_full().items_center().pt(14.0).pb(10.0).child(tabs.build(&k.with_text_scale(1.0))))
+        .children(unfollowed(s, &k))
         .child(parts::scroll(page));
     rune_kit::root(body, layer).on_window_focus(|s: &mut Prefs, focused, _| {
         if !focused {

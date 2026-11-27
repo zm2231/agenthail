@@ -10,6 +10,9 @@ use serde_json::json;
 use crate::transcript::Pane;
 use crate::{App, Bg, Fixtures, Screen};
 
+#[path = "text_scale_tests.rs"]
+mod text_scale;
+
 const DT: f64 = 1.0 / 60.0;
 const EPOCH: &str = "e1";
 

@@ -94,13 +94,13 @@ fn fix(s: &mut Prefs, card: &Card, fix: &Fix) {
     }
 }
 
-fn dot(label: String, color: Color) -> El {
-    row().gap(5.0).items_center().child(el().size(7.0, 7.0).radius(3.5).fill(color)).child(text(label).font(META).color(color))
+fn dot(label: String, color: Color, k: &Kit) -> El {
+    row().gap(5.0).items_center().child(el().size(7.0, 7.0).radius(3.5).fill(color)).child(text(label).font(k.text(META)).color(color))
 }
 
 fn grant_row(g: &Grant, k: &Kit) -> El {
     let color = if g.granted() { done() } else { failed() };
-    let mut line = row().w_full().gap(10.0).items_center().px(14.0).py(9.0).child(text(g.title()).font(BODY).color(theme::text())).child(dot(g.state_label(), color)).child(el().grow(1.0));
+    let mut line = row().w_full().gap(10.0).items_center().px(14.0).py(9.0).child(text(g.title()).font(k.text(BODY)).color(theme::text())).child(dot(g.state_label(), color, k)).child(el().grow(1.0));
     if !g.granted() && !g.url.is_empty() {
         let url = g.url.clone();
         line = line.child(
@@ -119,11 +119,11 @@ fn permissions(s: &Prefs, k: &Kit) -> Option<El> {
     let state = match s.overview.permissions.as_ref()? {
         Ok(p) if p.supported => p,
         Ok(_) => return None,
-        Err(f) => return Some(section("Privacy Permissions", vec![row().w_full().px(10.0).py(10.0).child(parts::failure(s, f).grow(1.0))], None)),
+        Err(f) => return Some(section("Privacy Permissions", vec![row().w_full().px(10.0).py(10.0).child(parts::failure(s, f, k).grow(1.0))], None, k)),
     };
     let mut rows = Vec::new();
     if let Some(problem) = state.problem.clone().filter(|p| !p.is_empty()) {
-        rows.push(parts::problem(problem));
+        rows.push(parts::problem(problem, k));
     }
     rows.extend(state.grants.iter().map(|g| grant_row(g, k)));
     if state.askable() {
@@ -136,21 +136,21 @@ fn permissions(s: &Prefs, k: &Kit) -> Option<El> {
                 .items_center()
                 .px(14.0)
                 .py(9.0)
-                .child(text(health::ASK_NOTE).font(META).color(muted()).wrap().grow(1.0).min_w(0.0))
-                .children(asking.then(|| Spinner::new().size(11.0).build(k)))
+                .child(text(health::ASK_NOTE).font(k.text(META)).color(muted()).wrap().grow(1.0).min_w(0.0))
+                .children(asking.then(|| Spinner::new().size(k.text_size(11.0)).build(k)))
                 .child(button),
         );
     }
     let footer = state.holder.clone().filter(|h| !h.is_empty()).map(|h| format!("Held by {h}"));
-    Some(section("Privacy Permissions", rows, footer))
+    Some(section("Privacy Permissions", rows, footer, k))
 }
 
-fn stat(title: &str, value: i64, note: Option<&str>) -> El {
+fn stat(title: &str, value: i64, note: Option<&str>, k: &Kit) -> El {
     col()
         .gap(1.0)
-        .child(text(title.to_string()).font(LABEL).color(muted()))
-        .child(text(value.to_string()).font(TITLE).color(theme::text()))
-        .children(note.map(|n| text(n.to_string()).font(LABEL).color(faint())))
+        .child(text(title.to_string()).font(k.text(LABEL)).color(muted()))
+        .child(text(value.to_string()).font(k.text(TITLE)).color(theme::text()))
+        .children(note.map(|n| text(n.to_string()).font(k.text(LABEL)).color(faint())))
 }
 
 fn details(s: &Prefs, card: &Card, lines: &[String], k: &Kit) -> Option<El> {
@@ -172,7 +172,7 @@ fn details(s: &Prefs, card: &Card, lines: &[String], k: &Kit) -> Option<El> {
     let mut out = col().w_full().gap(4.0).child(row().child(toggle));
     if open {
         for line in lines {
-            out = out.child(text(line.clone()).font(META).color(muted()).wrap());
+            out = out.child(text(line.clone()).font(k.text(META)).color(muted()).wrap());
         }
     }
     Some(out)
@@ -184,27 +184,27 @@ fn card_view(s: &Prefs, card: &Card, k: &Kit) -> El {
         Tone::Failed => failed(),
         Tone::Quiet => muted(),
     };
-    let mut head = row().w_full().gap(10.0).items_center().child(text(card.name.clone()).font(BODY_BOLD).color(theme::text())).child(dot(card.health.label().into(), color)).child(el().grow(1.0));
+    let mut head = row().w_full().gap(10.0).items_center().child(text(card.name.clone()).font(k.text(BODY_BOLD)).color(theme::text())).child(dot(card.health.label().into(), color, k)).child(el().grow(1.0));
     if let Some(f) = card.problem.as_ref().and_then(|p| p.fix.clone()) {
         let key = format!("repair-{}", card.surface);
         let repairing = saving(s, &key);
         if repairing {
-            head = head.child(Spinner::new().size(11.0).build(k));
+            head = head.child(Spinner::new().size(k.text_size(11.0)).build(k));
         }
         let (c, label) = (card.clone(), f.label().to_string());
         head = head.child(Button::new(label).control_size(ControlSize::Small).disabled(repairing || busy(s)).on_press(move |s: &mut Prefs| fix(s, &c, &f)).build(k).key(format!("settings-fix-{}", card.surface)));
     }
-    let stats = row().gap(22.0).items_start().child(stat("Working", card.working, None)).child(stat("Current", card.current, Some(&card.current_window))).child(stat("Queued", card.queued, None));
+    let stats = row().gap(22.0).items_start().child(stat("Working", card.working, None, k)).child(stat("Current", card.current, Some(&card.current_window), k)).child(stat("Queued", card.queued, None, k));
     let mut body = col().w_full().gap(8.0).px(14.0).py(12.0).child(head).child(stats);
     match &card.problem {
         Some(p) => {
-            body = body.child(text(p.sentence.clone()).font(META).color(if card.quiet() { muted() } else { failed() }).wrap());
+            body = body.child(text(p.sentence.clone()).font(k.text(META)).color(if card.quiet() { muted() } else { failed() }).wrap());
             body = body.children(details(s, card, &p.details, k));
         }
         None => {
-            body = body.child(text(card.detail.clone()).font(META).color(muted()).wrap());
+            body = body.child(text(card.detail.clone()).font(k.text(META)).color(muted()).wrap());
             if let Some(a) = &card.availability {
-                body = body.child(text(a.clone()).font(META).color(muted()).wrap());
+                body = body.child(text(a.clone()).font(k.text(META)).color(muted()).wrap());
             }
             body = body.children(details(s, card, &card.advice, k));
         }
@@ -215,18 +215,18 @@ fn card_view(s: &Prefs, card: &Card, k: &Kit) -> El {
 pub fn page(s: &Prefs, k: &Kit) -> El {
     let mut out = parts::page();
     let base = match &s.base {
-        None => return out.child(parts::reading("this computer's agent apps")),
-        Some(Err(f)) => return out.child(parts::failure(s, f)),
+        None => return out.child(parts::reading("this computer's agent apps", k)),
+        Some(Err(f)) => return out.child(parts::failure(s, f, k)),
         Some(Ok(b)) => b,
     };
     let (line, stale) = health::summary(&base.daemon, &base.surfaces, &s.overview.tally, s.overview.needs);
-    out = out.child(section("", vec![row().w_full().px(14.0).py(10.0).child(text(line).font(BODY).color(if stale { failed() } else { muted() }).wrap().grow(1.0))], None));
+    out = out.child(section("", vec![row().w_full().px(14.0).py(10.0).child(text(line).font(k.text(BODY)).color(if stale { failed() } else { muted() }).wrap().grow(1.0))], None, k));
     out = out.children(permissions(s, k));
     let cards = health::cards(&base.surfaces, &s.overview.tally, base.codex_recent_hours);
-    let rows = if cards.is_empty() { vec![parts::words(health::NO_APPS)] } else { cards.iter().map(|c| card_view(s, c, k)).collect() };
-    out = out.child(section("Agent apps", rows, None));
+    let rows = if cards.is_empty() { vec![parts::words(health::NO_APPS, k)] } else { cards.iter().map(|c| card_view(s, c, k)).collect() };
+    out = out.child(section("Agent apps", rows, None, k));
     if let Some(f) = s.notes.get(&Section::Overview) {
-        out = out.child(parts::failure(s, f));
+        out = out.child(parts::failure(s, f, k));
     }
     out
 }
