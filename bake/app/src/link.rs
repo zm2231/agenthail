@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use feed::link::{self, Link};
+use feed::link::{self, Link, Waiting};
 use feed::search::Command;
 use rune::Tx;
 
@@ -11,24 +11,18 @@ pub const SCHEME: &str = if RELEASE { "agenthail" } else { "agenthail-bake" };
 pub const INSTANCE: &str = if RELEASE { "com.agenthail.app" } else { "com.agenthail.bake" };
 pub const LOCK: &str = if RELEASE { "menu-app.lock" } else { "bake-app.lock" };
 
+type Place = (Screen, Option<String>);
+
 pub struct Found {
-    reference: String,
+    ask: u64,
     result: Result<feed::catalog::Session, String>,
 }
 
-#[derive(Default)]
-struct Waiting {
-    listed: bool,
-    reference: Option<String>,
-    asked: Option<String>,
-    at: Option<(Screen, Option<String>)>,
-}
-
 thread_local! {
-    static WAITING: RefCell<Waiting> = RefCell::new(Waiting::default());
+    static WAITING: RefCell<Waiting<Place>> = RefCell::new(Waiting::default());
 }
 
-fn place(s: &App) -> (Screen, Option<String>) {
+fn place(s: &App) -> Place {
     (s.screen.clone(), s.selected.clone())
 }
 
@@ -38,37 +32,28 @@ pub fn on_open_url(s: &mut App, url: &str, tx: &mut Tx) {
         return;
     };
     crate::menubar::front(s);
-    let listed = WAITING.with_borrow_mut(|w| {
-        *w = Waiting { listed: w.listed, ..Waiting::default() };
-        w.listed
-    });
+    WAITING.with_borrow_mut(Waiting::arrived);
     match link {
         Link::Open => {}
         Link::NewSession => crate::over::search::run(s, Command::NewSession, tx),
-        Link::Session(reference) if !listed && s.fixtures.is_none() => {
+        Link::Session(reference) if s.fixtures.is_some() => open(s, &reference),
+        Link::Session(reference) => {
             let at = place(s);
-            WAITING.with_borrow_mut(|w| (w.reference, w.at) = (Some(reference), Some(at)));
+            if let Some(reference) = WAITING.with_borrow_mut(|w| w.hold(reference, at)) {
+                open(s, &reference);
+            }
         }
-        Link::Session(reference) => open(s, &reference),
     }
 }
 
 pub fn watch(s: &App) {
-    WAITING.with_borrow_mut(|w| {
-        if w.at.as_ref().is_some_and(|at| *at != place(s)) {
-            (w.reference, w.asked, w.at) = (None, None, None);
-        }
-    });
+    let now = place(s);
+    WAITING.with_borrow_mut(|w| w.moved(&now));
 }
 
 pub fn listed(s: &mut App) {
-    watch(s);
-    let waiting = WAITING.with_borrow_mut(|w| {
-        w.listed = true;
-        w.at = None;
-        w.reference.take()
-    });
-    if let Some(reference) = waiting {
+    let now = place(s);
+    if let Some(reference) = WAITING.with_borrow_mut(|w| w.listed(&now)) {
         open(s, &reference);
     }
 }
@@ -85,24 +70,17 @@ fn open(s: &mut App, reference: &str) {
         return;
     };
     let at = place(s);
-    WAITING.with_borrow_mut(|w| (w.asked, w.at) = (Some(reference.clone()), Some(at)));
+    let ask = WAITING.with_borrow_mut(|w| w.ask(at));
     let tx = s.outbox.clone();
     std::thread::spawn(move || {
         let result = client.session_for_link(&reference);
-        let _ = tx.send(Bg::Link(Found { reference, result }));
+        let _ = tx.send(Bg::Link(Found { ask, result }));
     });
 }
 
 pub fn found(s: &mut App, found: Found) {
-    watch(s);
-    let asked = WAITING.with_borrow_mut(|w| {
-        let asked = w.asked.take_if(|r| *r == found.reference);
-        if asked.is_some() {
-            w.at = None;
-        }
-        asked
-    });
-    if asked.is_none() {
+    let now = place(s);
+    if !WAITING.with_borrow_mut(|w| w.answered(found.ask, &now)) {
         return;
     }
     match found.result {
