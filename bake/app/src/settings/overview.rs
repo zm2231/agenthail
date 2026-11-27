@@ -11,7 +11,7 @@ use super::parts::{self, section};
 use super::{Prefs, Read, Section, WINDOW, busy, fetch, saving, write};
 use crate::theme::{self, BODY, BODY_BOLD, LABEL, META, TITLE, done, failed, faint, muted};
 
-pub const TAB: usize = 6;
+pub const TAB: usize = 0;
 
 #[derive(Default)]
 pub struct Overview {
@@ -194,6 +194,15 @@ fn card_view(s: &Prefs, card: &Card, k: &Kit) -> El {
         let (c, label) = (card.clone(), f.label().to_string());
         head = head.child(Button::new(label).control_size(ControlSize::Small).disabled(repairing || busy(s)).on_press(move |s: &mut Prefs| fix(s, &c, &f)).build(k).key(format!("settings-fix-{}", card.surface)));
     }
+    let surface = card.surface.clone();
+    head = head.child(
+        Button::new("Show Sessions")
+            .control_size(ControlSize::Small)
+            .help(format!("Show every {} session in the main window", card.name))
+            .on_press(move |_: &mut Prefs| crate::ui::delivery::ask(crate::ui::delivery::Asked::ShowSurface(surface.clone())))
+            .build(k)
+            .key(format!("settings-sessions-{}", card.surface)),
+    );
     let stats = row().gap(22.0).items_start().child(stat("Working", card.working, None, k)).child(stat("Current", card.current, Some(&card.current_window), k)).child(stat("Queued", card.queued, None, k));
     let mut body = col().w_full().gap(8.0).px(14.0).py(12.0).child(head).child(stats);
     match &card.problem {
@@ -265,6 +274,7 @@ mod tests {
     #[test]
     fn opening_the_tab_reads_permissions_and_the_surfaces() {
         let mut s = prefs();
+        s.tab = 1;
         opened(&mut s);
         assert_eq!(s.in_flight, 0);
         s.tab = TAB;
@@ -285,7 +295,7 @@ mod tests {
         flush(&mut s);
         assert_eq!(s.in_flight, 1);
         assert!(!s.overview.stale);
-        s.tab = 0;
+        s.tab = 1;
         changed(&mut s);
         assert!(!s.overview.stale);
     }

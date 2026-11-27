@@ -16,6 +16,7 @@ use crate::{App, Screen};
 pub enum Asked {
     TakeBack(Queued),
     Answer { session: String, ask: String },
+    ShowSurface(String),
 }
 
 thread_local! {
@@ -108,6 +109,7 @@ fn take_asked(s: &mut App) -> bool {
                 let id = feed::composer::current(&s.rekeyed, session).to_string();
                 answer(s, &id, ask);
             }
+            Asked::ShowSurface(surface) => crate::over::sessions::show_surface(s, surface),
         }
     }
     !list.is_empty()

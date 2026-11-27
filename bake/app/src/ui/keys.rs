@@ -1,6 +1,7 @@
 use feed::search::Command;
-use rune::{Chord, KeyEvent, MenuItem, Shortcut, Tx};
+use rune::{Chord, KeyEvent, MenuItem, Tx};
 
+use super::bindings;
 use crate::over::{self, search};
 use crate::{App, Screen};
 
@@ -22,30 +23,38 @@ pub enum Act {
 
 pub struct Binding {
     pub act: Act,
-    pub chord: &'static str,
+    pub id: &'static str,
     pub menu: Option<(&'static str, &'static str)>,
 }
 
 pub const APP: [Binding; 11] = [
-    Binding { act: Act::NewSession, chord: "mod+n", menu: Some(("File", "New Session")) },
-    Binding { act: Act::GoToSession, chord: "mod+k", menu: Some(("Session", "Go to Session…")) },
-    Binding { act: Act::Stop, chord: "mod+period", menu: Some(("Session", "Stop")) },
-    Binding { act: Act::Refresh, chord: "mod+r", menu: Some(("View", "Refresh")) },
-    Binding { act: Act::PreviousSession, chord: "mod+up", menu: None },
-    Binding { act: Act::NextSession, chord: "mod+down", menu: None },
-    Binding { act: Act::JumpToLatest, chord: "mod+l", menu: None },
-    Binding { act: Act::Find, chord: "mod+f", menu: None },
-    Binding { act: Act::Talk, chord: "mod+alt+t", menu: Some(("Session", "Talk to Orchestrator…")) },
-    Binding { act: Act::TextBigger, chord: "mod+=", menu: Some(("View", "Make Text Bigger")) },
-    Binding { act: Act::TextSmaller, chord: "mod+-", menu: Some(("View", "Make Text Smaller")) },
+    Binding { act: Act::NewSession, id: "newSession", menu: Some(("File", "New Session")) },
+    Binding { act: Act::GoToSession, id: "goToSession", menu: Some(("Session", "Go to Session…")) },
+    Binding { act: Act::Stop, id: "stop", menu: Some(("Session", "Stop")) },
+    Binding { act: Act::Refresh, id: "refresh", menu: Some(("View", "Refresh")) },
+    Binding { act: Act::PreviousSession, id: "previousSession", menu: None },
+    Binding { act: Act::NextSession, id: "nextSession", menu: None },
+    Binding { act: Act::JumpToLatest, id: "jumpToLatest", menu: None },
+    Binding { act: Act::Find, id: "findSession", menu: None },
+    Binding { act: Act::Talk, id: "talk", menu: Some(("Session", "Talk to Orchestrator…")) },
+    Binding { act: Act::TextBigger, id: "textBigger", menu: Some(("View", "Make Text Bigger")) },
+    Binding { act: Act::TextSmaller, id: "textSmaller", menu: Some(("View", "Make Text Smaller")) },
 ];
 
-fn chord(spec: &str) -> Chord {
-    Chord::parse(spec).expect("a built-in shortcut parses")
+pub fn find(matches: impl Fn(&Chord) -> bool) -> Option<Act> {
+    APP.iter().find(|b| bindings::chord(b.id).is_some_and(|c| matches(&c))).map(|b| b.act)
 }
 
-pub fn find(matches: impl Fn(&Chord) -> bool) -> Option<Act> {
-    APP.iter().find(|b| matches(&chord(b.chord))).map(|b| b.act)
+fn chord_of(act: Act) -> Option<Chord> {
+    APP.iter().find(|b| b.act == act).and_then(|b| bindings::chord(b.id))
+}
+
+pub fn is(act: Act, ev: &KeyEvent, tx: &Tx) -> bool {
+    chord_of(act).is_some_and(|c| c.matches_tx(ev, tx))
+}
+
+pub fn pressed(act: Act, ev: &KeyEvent) -> bool {
+    chord_of(act).is_some_and(|c| c.matches(ev))
 }
 
 pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
@@ -129,10 +138,11 @@ fn step(s: &mut App, by: isize) -> bool {
 pub struct MenuState {
     stop: bool,
     focus: bool,
+    keys: u64,
 }
 
 pub fn menu_state(s: &App) -> MenuState {
-    MenuState { stop: search::selected(s).is_some_and(|id| search::can_stop(s, &id)), focus: crate::transcript::focused() }
+    MenuState { stop: search::selected(s).is_some_and(|id| search::can_stop(s, &id)), focus: crate::transcript::focused(), keys: bindings::generation() }
 }
 
 pub fn menu_items(state: MenuState) -> Vec<MenuItem<App>> {
@@ -140,9 +150,12 @@ pub fn menu_items(state: MenuState) -> Vec<MenuItem<App>> {
         .filter_map(|b| {
             let (menu, title) = b.menu?;
             let act = b.act;
-            let shortcut: Shortcut = b.chord.parse().expect("a built-in shortcut parses");
             let enabled = act != Act::Stop || state.stop;
-            Some(MenuItem::with_action(title, move |s: &mut App, tx| run(s, act, tx)).id(format!("key-{act:?}")).menu(menu).key_equivalent(shortcut).keys_first().enabled(enabled))
+            let item = MenuItem::with_action(title, move |s: &mut App, tx| run(s, act, tx)).id(format!("key-{act:?}")).menu(menu).keys_first().enabled(enabled);
+            Some(match bindings::shortcut(b.id) {
+                Some(shortcut) => item.key_equivalent(shortcut),
+                None => item,
+            })
         })
         .chain([
             MenuItem::with_action("Actual Text Size", |s: &mut App, tx| run(s, Act::TextActual, tx)).id("key-TextActual").menu("View"),
@@ -195,9 +208,11 @@ mod tests {
     #[test]
     fn every_binding_is_distinct_and_menu_keys_parse() {
         for (i, a) in APP.iter().enumerate() {
-            let _: Shortcut = a.chord.parse().unwrap();
+            assert!(bindings::shortcut(a.id).is_some(), "{}", a.id);
+            assert!(feed::shortcuts::command(a.id).is_some(), "{} is listed in Settings", a.id);
             for b in &APP[i + 1..] {
-                assert!(!chord(a.chord).same_keys(&chord(b.chord), KeyPlatform::Mac), "{} and {} clash", a.chord, b.chord);
+                let (x, y) = (bindings::chord(a.id).unwrap(), bindings::chord(b.id).unwrap());
+                assert!(!x.same_keys(&y, KeyPlatform::Mac), "{} and {} clash", a.id, b.id);
             }
         }
         let menus: Vec<_> = APP.iter().filter_map(|b| b.menu).collect();

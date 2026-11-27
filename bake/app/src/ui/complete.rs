@@ -212,11 +212,6 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         s.complete.keys.escape_handled();
         return true;
     }
-    let r = tx.key_base().map(|c| c.to_ascii_lowercase()) == Some('r') || matches!(&ev.key, Key::Command('r')) || matches!(&ev.key, Key::Text(t) if t.eq_ignore_ascii_case("r"));
-    if ev.mods.ctrl && r {
-        open_search(s, &x.id);
-        return true;
-    }
     if super::composer_keys::key(s, &x, ev, tx) {
         return true;
     }

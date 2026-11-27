@@ -164,7 +164,7 @@ pub fn key(s: &mut App, ev: &KeyEvent) -> Option<bool> {
         load(s, true);
         return Some(true);
     }
-    if ev.is_command('k') {
+    if crate::ui::keys::pressed(crate::ui::keys::Act::GoToSession, ev) {
         close(s);
         return None;
     }

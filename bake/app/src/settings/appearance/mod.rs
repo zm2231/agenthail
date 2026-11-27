@@ -15,7 +15,7 @@ use super::{Done, Prefs};
 
 pub use page::page;
 
-pub const TAB: usize = 5;
+pub const TAB: usize = 2;
 const THUMB_SIDE: u32 = 192;
 
 #[derive(Default)]

@@ -609,14 +609,14 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
             shown |= selected == Some(id.as_str());
             sec = sec.row(session_row(s, x, *depth, p.lead.as_deref() == Some(id.as_str()), selected, k));
         }
-        let pname = p.name.clone();
+        let pkey = p.key.clone();
         sec = sec.row(
             SidebarRow::new("All sessions")
                 .icon(&icons::ARROW_RIGHT)
                 .height(k.text_size(30.0))
                 .detail(format!("{}", p.sessions.len()))
                 .on_select(move |s: &mut App, _| {
-                    s.ov.sessions_project = Some(pname.clone());
+                    s.ov.sessions_project = Some(pkey.clone());
                     go(s, Screen::Sessions);
                 })
                 .build(k)
@@ -816,13 +816,13 @@ pub fn crumb(parts: &[(&str, bool)], k: &Kit) -> El {
 }
 
 pub fn sessions_block(s: &App, compact: bool, k: &Kit) -> El {
-    let by = feed::derive::sessions::busy_by_group(&s.ov.d.sessions);
+    let by = feed::derive::sessions::busy_by_project(&s.ov.d.sessions);
     let total = s.ov.d.working();
     let listed = s.ov.d.listed();
     let open = Button::new("All sessions").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).icon(&icons::ARROW_RIGHT).shortcut("⌘⇧S").on_press(|s: &mut App| go(s, Screen::Sessions)).build(k);
     let mut chips = row().gap(6.0).flex_wrap().items_center();
-    for (name, n) in &by {
-        let pname = name.clone();
+    for (key, name, n) in &by {
+        let pkey = Some(key.clone()).filter(|k| !k.is_empty());
         chips = chips.child(
             row()
                 .gap(6.0)
@@ -834,8 +834,8 @@ pub fn sessions_block(s: &App, compact: bool, k: &Kit) -> El {
                 .border(1.0, edge())
                 .hover(k.c.surface_raised_hover)
                 .on_press(move |s: &mut App| {
-                    s.ov.sessions_project = if pname == "No project" { None } else { Some(pname.clone()) };
-                    s.ov.sessions_filter = 1;
+                    s.ov.sessions_project = pkey.clone();
+                    s.ov.list.scope = 0;
                     go(s, Screen::Sessions);
                 })
                 .child(avatar(name, 14.0))

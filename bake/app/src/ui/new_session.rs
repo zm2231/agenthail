@@ -544,7 +544,7 @@ fn sheet_mut(s: &mut App) -> &mut Sheet {
 
 pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     if s.new_session.is_none() {
-        if ev.is_command('n') {
+        if super::keys::is(super::keys::Act::NewSession, ev, tx) {
             let prefill = prefill_for(s);
             open(s, prefill, tx);
             return true;

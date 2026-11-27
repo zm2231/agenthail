@@ -59,7 +59,7 @@ fn session_changes_apply_in_place_without_a_reread() {
     let mut c = Catalog::default();
     c.adopt(vec![row("a", "idle"), row("b", "idle")], "e", 10);
     let out = c.apply(vec![upsert(11, "a", "working")]);
-    assert_eq!(out, Applied { changed: true, touched: vec!["a".into()], ..Applied::default() });
+    assert_eq!(out, Applied { changed: true, placed: true, touched: vec!["a".into()], ..Applied::default() });
     assert_eq!(statuses(&c), vec![("a".into(), "working".into()), ("b".into(), "idle".into())]);
 
     let out = c.apply(vec![upsert(12, "c", "idle"), CatalogEvent { seq: 13, kind: "session.removed".into(), data: json!({"sessionId": "b"}) }]);
@@ -69,6 +69,19 @@ fn session_changes_apply_in_place_without_a_reread() {
     assert!(!out.changed && out.removed == vec![Removal { id: "older".into(), unlisted: false }]);
     assert_eq!(statuses(&c), vec![("a".into(), "working".into()), ("c".into(), "idle".into())]);
     assert_eq!(c.seq(), 14);
+}
+
+#[test]
+fn a_known_session_moves_in_the_list_only_when_its_placement_changes() {
+    let placed = |seq: u64, id: &str, status: &str, placement: &str| CatalogEvent { seq, kind: "session.upserted".into(), data: json!({"session": {"id": id, "status": status, "placement": placement}}) };
+    let mut c = Catalog::default();
+    c.adopt(vec![serde_json::from_value(json!({"id": "a", "status": "idle", "placement": "p1"})).unwrap()], "e", 10);
+    let same = c.apply(vec![placed(11, "a", "idle", "p1")]);
+    assert!(same.changed && !same.placed && !same.news);
+    let moved = c.apply(vec![placed(12, "a", "working", "p2")]);
+    assert!(moved.placed && !moved.news, "a moved session rereads the list, not the overview");
+    let queued = c.apply(vec![CatalogEvent { seq: 13, kind: "session.queue".into(), data: json!({"sessionId": "a", "queueCount": 1}) }]);
+    assert!(queued.placed);
 }
 
 #[test]
