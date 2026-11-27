@@ -40,6 +40,7 @@ pub struct Inspect {
     process: HashMap<String, Process>,
     goal_busy: HashMap<String, GoalAct>,
     goal_note: HashMap<String, (bool, String)>,
+    streamed: std::collections::HashSet<(String, &'static str)>,
     expanded: Option<String>,
     pub editing: Option<Editing>,
     pub logs: Option<(String, String)>,
@@ -51,7 +52,7 @@ pub struct Inspect {
 impl Inspect {
     pub fn new() -> Inspect {
         let (tx, rx) = channel();
-        Inspect { meta: HashMap::new(), reads: inspect::Reads::default(), process: HashMap::new(), goal_busy: HashMap::new(), goal_note: HashMap::new(), expanded: None, editing: None, logs: None, seq: 0, tx, rx }
+        Inspect { meta: HashMap::new(), reads: inspect::Reads::default(), process: HashMap::new(), goal_busy: HashMap::new(), goal_note: HashMap::new(), streamed: std::collections::HashSet::new(), expanded: None, editing: None, logs: None, seq: 0, tx, rx }
     }
 }
 
@@ -69,6 +70,7 @@ fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'sta
 }
 
 pub fn load(s: &mut App, id: &str) {
+    s.inspect.streamed.clear();
     s.inspect.meta.retain(|k, _| k == id);
     s.inspect.reads.keep_only(id);
     if s.inspect.expanded.as_deref() != Some(id) {
@@ -87,6 +89,7 @@ pub(crate) fn read(s: &mut App, id: &str, ticket: u64, result: Result<Metadata, 
             Ok(data) => data.after(old),
             Err(error) => Metadata::failed(old, error),
         };
+        let data = if is_streamed(s, id, "goal") { data.keep_goal(s.inspect.meta.get(id)) } else { data };
         s.inspect.meta.insert(id.to_string(), data);
     }
     if s.inspect.reads.landed(id, ticket) {
@@ -96,15 +99,21 @@ pub(crate) fn read(s: &mut App, id: &str, ticket: u64, result: Result<Metadata, 
 
 pub(crate) fn streamed(s: &mut App, id: &str, x: feed::wire::Streamed) {
     match x {
-        feed::wire::Streamed::Context(usage) => super::session_menu::streamed_context(s, id, usage),
+        feed::wire::Streamed::Context(usage) => {
+            s.inspect.streamed.insert((id.to_string(), "context"));
+            super::session_menu::streamed_context(s, id, usage);
+        }
         feed::wire::Streamed::Goal(goal) => {
-            let ticket = s.inspect.reads.ticket();
-            s.inspect.reads.accept(id, ticket);
+            s.inspect.streamed.insert((id.to_string(), "goal"));
             let meta = s.inspect.meta.entry(id.to_string()).or_default();
             meta.goal = goal;
             meta.goal_failed = false;
         }
     }
+}
+
+pub(crate) fn is_streamed(s: &App, id: &str, kind: &'static str) -> bool {
+    s.inspect.streamed.contains(&(id.to_string(), kind))
 }
 
 pub(crate) fn metadata_moved(s: &mut App, id: &str) {

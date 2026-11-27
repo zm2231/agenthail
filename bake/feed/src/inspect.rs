@@ -170,6 +170,12 @@ impl Metadata {
         self
     }
 
+    pub fn keep_goal(mut self, shown: Option<&Metadata>) -> Metadata {
+        self.goal = shown.and_then(|m| m.goal.clone());
+        self.goal_failed = false;
+        self
+    }
+
     pub fn failed(old: Option<&Metadata>, error: String) -> Metadata {
         Metadata { goal: old.and_then(|m| m.goal.clone()), goal_failed: true, runs: old.and_then(|m| m.runs.clone()), warnings: vec![error] }
     }
@@ -591,6 +597,15 @@ mod tests {
         reads.keep_only("b");
         reads.keep_only("a");
         assert!(!reads.accept("a", old));
+    }
+
+    #[test]
+    fn a_read_keeps_the_streamed_goal_and_takes_the_rest() {
+        let shown = Metadata { goal: Some(Goal { objective: "streamed".into(), ..Default::default() }), ..Default::default() };
+        let read = Metadata { goal: Some(Goal { objective: "older".into(), ..Default::default() }), goal_failed: true, runs: Some(Vec::new()), warnings: vec!["Claude runs: slow".into()] };
+        let kept = read.keep_goal(Some(&shown));
+        assert_eq!(kept.goal.map(|g| g.objective).as_deref(), Some("streamed"));
+        assert!(!kept.goal_failed && kept.runs.is_some() && kept.warnings.len() == 1);
     }
 
     #[test]

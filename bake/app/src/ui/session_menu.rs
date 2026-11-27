@@ -187,7 +187,6 @@ pub(crate) fn changed(s: &mut App, id: &str) {
 }
 
 pub(crate) fn streamed_context(s: &mut App, id: &str, usage: Option<ContextUsage>) {
-    s.menus.supersede(id, "context");
     s.menus.context_error.remove(id);
     match usage {
         Some(usage) => s.menus.context.insert(id.to_string(), usage),
@@ -477,7 +476,7 @@ fn settled(s: &mut App, done: Done) {
         }
         Done::Context(id, seq, result, ticket, metadata) => {
             super::inspect::read(s, &id, ticket, metadata);
-            if !s.menus.fresh(&id, "context", seq) {
+            if !s.menus.fresh(&id, "context", seq) || super::inspect::is_streamed(s, &id, "context") {
                 return;
             }
             match result {

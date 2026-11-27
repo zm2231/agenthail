@@ -1304,6 +1304,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     for id in caught {
         history::caught_up(s, &id);
     }
+    changed |= !streamed.is_empty();
     for (id, x) in streamed {
         ui::inspect::streamed(s, &id, x);
     }
