@@ -116,13 +116,13 @@ pub fn drain(s: &mut App) -> bool {
     while let Ok(reply) = s.ov.worksearch.rx.try_recv() {
         match reply {
             Reply::Search(seq, found) => {
-                if let Ok(search) = &found {
-                    for f in search.items.iter().filter(|f| !f.project_name.is_empty()) {
-                        s.ov.worksearch.names.insert(f.project_key.clone(), f.project_name.clone());
-                        s.ov.d.found_names.insert(f.project_key.clone(), f.project_name.clone());
-                    }
-                }
                 if s.ov.worksearch.asked.as_ref().is_some_and(|(_, asked, _)| *asked == seq) {
+                    if let Ok(search) = &found {
+                        for f in search.items.iter().filter(|f| !f.project_name.is_empty()) {
+                            s.ov.worksearch.names.insert(f.project_key.clone(), f.project_name.clone());
+                            s.ov.d.found_names.insert(f.project_key.clone(), f.project_name.clone());
+                        }
+                    }
                     super::jump::keep_highlight(s, |s| {
                         if let Some((_, _, slot)) = s.ov.worksearch.asked.as_mut() {
                             *slot = Some(found);

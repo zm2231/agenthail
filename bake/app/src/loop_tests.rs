@@ -625,5 +625,16 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     quiet(&mut rt);
     assert_eq!(rt.state.ov.d.work["z-W8"].state, "parked", "a failed refresh keeps what it last had");
     assert_eq!(crate::over::worksearch::note(&rt.state, "z-W8").as_deref(), Some("Couldn't refresh this work item, so it may be out of date: the ledger store is busy"));
+
+    send(&rt, overview(4, sessions(&["a", "exporter"])));
+    rt.frame(DT);
+    typed(&mut rt, "exporter");
+    assert_eq!(highlighted_session(&rt), Some("exporter".into()));
+    let mut grew = Fetched { recorded: recorded(5, sessions(&["a", "exporter"])), ledgers: HashMap::new(), held: Vec::new(), asked: Vec::new(), started: std::time::Instant::now(), usage: None, moved: Vec::new() };
+    grew.ledgers.insert("p1".into(), Ok(vec![serde_json::from_value(json!({"id": "p1-W1", "text": "Fix the exporter", "state": "in_progress"})).unwrap()]));
+    send(&rt, Bg::Overview(Box::new(grew)));
+    rt.frame(DT);
+    assert!(rt.state.ov.d.work.contains_key("p1-W1"));
+    assert_eq!(highlighted_session(&rt), Some("exporter".into()), "a rebuild that adds a matching row above keeps the highlight");
     assert_eq!(crate::over::worksearch::note(&rt.state, "z-W9"), None);
 }
