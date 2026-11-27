@@ -27,7 +27,7 @@ pub(crate) mod notice;
 pub mod paste;
 pub mod pr_link;
 pub(crate) mod rail;
-mod session;
+pub(crate) mod session;
 mod session_dialogs;
 pub(crate) mod session_ops;
 pub(crate) mod subagents;

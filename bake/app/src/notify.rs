@@ -177,12 +177,12 @@ fn clicked(s: &mut App, click: Click) {
         return;
     };
     let Some(client) = s.client.clone() else { return };
-    if let Some(why) = crate::session(s, &session).and_then(feed::notice::read_only) {
-        trouble(&session, &title(s, &session), format!("Not sent: {why}"));
-        return;
-    }
     let tx = s.notify.tx.clone();
     if action == REPLY {
+        if let Some(why) = crate::session(s, &session).and_then(feed::notice::read_only) {
+            trouble(&session, &title(s, &session), format!("Not sent: {why}"));
+            return;
+        }
         let Some(text) = click.input(REPLY).map(str::trim).filter(|t| !t.is_empty()).map(str::to_string) else { return };
         std::thread::spawn(move || {
             let result = client.send(&session, &text);

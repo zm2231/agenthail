@@ -377,6 +377,9 @@ fn lead_chat(s: &App, lead: &str) -> El {
 fn composer(s: &App, placeholder: &str, lead: &str) -> El {
     let lead = feed::composer::current(&s.rekeyed, lead);
     let k = kit();
+    if let Some(why) = crate::session(s, lead).and_then(feed::notice::read_only) {
+        return col().w_full().max_w(780.0).px(28.0).pb(16.0).child(col().w_full().radius(14.0).fill(k.c.surface_raised).border(1.0, ui::edge()).child(crate::ui::session::closed_note(why))).on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_composer(r));
+    }
     let (to, to2) = (lead.to_string(), lead.to_string());
     let input = crate::ui::paste::field(text_input(&s.composer, BODY.lh(21.0))
         .key("composer")

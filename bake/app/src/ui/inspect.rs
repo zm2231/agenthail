@@ -125,10 +125,17 @@ fn fetch(s: &mut App, id: &str, force: bool) {
     }
 }
 
+fn keep_goal(old: Option<&Metadata>, mut new: Metadata) -> Metadata {
+    if new.goal_failed && new.goal.is_none() {
+        new.goal = old.and_then(|m| m.goal.clone());
+    }
+    new
+}
+
 pub(crate) fn took(s: &mut App, id: &str, data: Metadata) {
     let stamp = session(s, id).map(|x| x.last_active.clone()).unwrap_or_default();
     let entry = s.inspect.meta.entry(id.to_string()).or_default();
-    entry.data = Some(data);
+    entry.data = Some(keep_goal(entry.data.as_ref(), data));
     entry.stamp = stamp;
     entry.at = Some(Instant::now());
 }
@@ -215,7 +222,7 @@ fn settled(s: &mut App, done: Done) {
             let Some(m) = s.inspect.meta.get_mut(&id).filter(|m| m.seq == seq) else { return };
             m.in_flight = false;
             match result {
-                Ok(data) => m.data = Some(data),
+                Ok(data) => m.data = Some(keep_goal(m.data.as_ref(), data)),
                 Err(error) => m.data = Some(Metadata { warnings: vec![error], ..m.data.take().unwrap_or_default() }),
             }
             if m.again && s.selected.as_deref() == Some(id.as_str()) {
@@ -300,8 +307,9 @@ fn small(label: &str, key: String, variant: ButtonVariant, disabled: bool, on: i
 
 fn goal_section(s: &App, x: &Session) -> Option<El> {
     let can = inspect::goal_controls(x);
-    let goal = s.inspect.meta.get(&x.id).and_then(|m| m.data.as_ref()).and_then(|d| d.goal.as_ref());
-    if goal.is_none() && !can.editable {
+    let data = s.inspect.meta.get(&x.id).and_then(|m| m.data.as_ref());
+    let goal = data.and_then(|d| d.goal.as_ref());
+    if goal.is_none() && (!can.editable || data.is_none_or(|d| d.goal_failed)) {
         return None;
     }
     let busy = s.inspect.goal_busy.contains_key(&x.id);

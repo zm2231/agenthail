@@ -157,6 +157,7 @@ impl ClaudeRun {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Metadata {
     pub goal: Option<Goal>,
+    pub goal_failed: bool,
     pub runs: Option<Vec<ClaudeRun>>,
     pub warnings: Vec<String>,
 }
@@ -187,7 +188,7 @@ pub fn metadata(value: &Value) -> Metadata {
             if reason.is_empty() { field_name(key).to_string() } else { format!("{}: {reason}", field_name(key)) }
         })
         .collect();
-    Metadata { goal, runs, warnings }
+    Metadata { goal, goal_failed: value["errors"].get("goal").is_some(), runs, warnings }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -457,7 +458,10 @@ mod tests {
         let empty = metadata(&json!({"goal": {"objective": "", "status": ""}, "claudeRuns": []}));
         assert_eq!((empty.goal, empty.runs, empty.warnings.len()), (None, Some(vec![]), 0));
         let codex = metadata(&json!({"goal": null}));
-        assert_eq!(codex.runs, None);
+        assert_eq!((codex.runs, codex.goal_failed), (None, false));
+        let failed = metadata(&json!({"errors": {"goal": "timed out"}}));
+        assert!(failed.goal.is_none() && failed.goal_failed);
+        assert_eq!(failed.warnings, ["Goal: timed out"]);
     }
 
     #[test]

@@ -38,6 +38,7 @@ pub struct Crew {
     claude: HashMap<String, ClaudeSubagents>,
     claude_errors: HashMap<String, String>,
     claude_asked: HashMap<String, ClaudeAsk>,
+    claude_again: HashSet<String>,
     rows: HashMap<String, Session>,
     seen: feed::subagents::Seen,
     row_asked: HashMap<String, RowAsk>,
@@ -194,9 +195,11 @@ fn page(s: &mut App, id: &str) {
 }
 
 pub(crate) fn reload_claude(s: &mut App, id: &str) {
-    if s.crew.claude_asked.get(id).is_some_and(|a| !a.in_flight) {
-        s.crew.claude_asked.remove(id);
+    if s.crew.claude_asked.get(id).is_some_and(|a| a.in_flight) {
+        s.crew.claude_again.insert(id.to_string());
+        return;
     }
+    s.crew.claude_asked.remove(id);
     claude(s, id);
 }
 
@@ -249,6 +252,10 @@ fn take(s: &mut App, done: Done) {
             asked.in_flight = false;
             if let Some(metadata) = read.metadata {
                 super::inspect::took(s, &id, metadata);
+            }
+            if s.crew.claude_again.remove(&id) {
+                reload_claude(s, &id);
+                return;
             }
             let Some(asked) = s.crew.claude_asked.get_mut(&id) else { return };
             let result = read.subagents;

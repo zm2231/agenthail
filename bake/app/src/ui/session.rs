@@ -285,6 +285,10 @@ pub(crate) fn session_screen(s: &App) -> El {
     if x.read_only || !x.capabilities.send { screen } else { super::attach::drop_target(screen) }
 }
 
+pub(crate) fn closed_note(why: String) -> El {
+    col().w_full().px(15.0).py(13.0).child(text(why).font(BODY).color(muted()).wrap())
+}
+
 pub(crate) fn read_only(s: &App, x: &Session, why: String) -> El {
     let notice = col()
         .key("read-only")
@@ -295,7 +299,7 @@ pub(crate) fn read_only(s: &App, x: &Session, why: String) -> El {
         .fill(theme::glass_tint())
         .border(1.0, theme::line())
         .children(crate::ui::background::dock(s, x))
-        .child(col().w_full().px(15.0).py(13.0).child(text(why).font(BODY).color(muted()).wrap()))
+        .child(closed_note(why))
         .on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_composer(r));
     col().w_full().items_center().px(28.0).pb(COMPOSER_BELOW).mt(-120.0).child(notice)
 }
