@@ -1147,7 +1147,7 @@ type StreamEvent struct {
 	MessageID        string           `json:"messageId,omitempty"`
 	PromptID         string           `json:"promptId,omitempty"`
 	TurnStart        bool             `json:"turnStart,omitempty"`
-	Timestamp        time.Time        `json:"timestamp,omitempty"`
+	Timestamp        time.Time        `json:"timestamp,omitzero"`
 	Kind             string           `json:"kind"`
 	Text             string           `json:"text"`
 	Context          *ContextUsage    `json:"context,omitempty"`
@@ -1221,14 +1221,14 @@ type ContextUsage struct {
 	ReasoningOutputTokens int64        `json:"reasoningOutputTokens,omitempty"`
 	Compacting            bool         `json:"compacting"`
 	CompactionCount       int          `json:"compactionCount"`
-	LastCompactedAt       time.Time    `json:"lastCompactedAt,omitempty"`
+	LastCompactedAt       time.Time    `json:"lastCompactedAt,omitzero"`
 	PreCompactTokens      int64        `json:"preCompactTokens,omitempty"`
 	PostCompactTokens     int64        `json:"postCompactTokens,omitempty"`
 	ReclaimedTokens       int64        `json:"reclaimedTokens,omitempty"`
 	WindowEstimated       bool         `json:"windowEstimated,omitempty"`
 	ContextWindowSource   string       `json:"contextWindowSource,omitempty"`
 	AutoCompact           *AutoCompact `json:"autoCompact,omitempty"`
-	UpdatedAt             time.Time    `json:"updatedAt,omitempty"`
+	UpdatedAt             time.Time    `json:"updatedAt,omitzero"`
 }
 
 // AutoCompact is when the running agent compacts its context, as it

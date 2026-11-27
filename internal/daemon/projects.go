@@ -183,7 +183,7 @@ type dashboardProject struct {
 	Repository   *project.Repository                `json:"repository,omitempty"`
 	Checkouts    []dashboardProjectCheckout         `json:"checkouts"`
 	Coordinators []dashboardProjectCoordinator      `json:"coordinators"`
-	LastActive   time.Time                          `json:"lastActive,omitempty"`
+	LastActive   time.Time                          `json:"lastActive,omitzero"`
 	SessionCount int                                `json:"sessionCount"`
 	Archived     bool                               `json:"archived"`
 	Linked       []projectresolve.CatalogProjectRef `json:"linked,omitempty"`

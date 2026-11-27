@@ -88,7 +88,7 @@ type projectActivityCheckout struct {
 
 type projectActivity struct {
 	ID           string                    `json:"id"`
-	LastActive   time.Time                 `json:"lastActive,omitempty"`
+	LastActive   time.Time                 `json:"lastActive,omitzero"`
 	SessionCount int                       `json:"sessionCount"`
 	Checkouts    []projectActivityCheckout `json:"checkouts"`
 }

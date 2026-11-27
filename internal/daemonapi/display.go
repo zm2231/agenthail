@@ -10,10 +10,10 @@ type SessionDisplay struct {
 	Label         string     `json:"label"`
 	Detail        string     `json:"detail"`
 	WaitingPlace  string     `json:"waitingPlace,omitempty"`
-	ResetsAt      *time.Time `json:"resetsAt,omitempty"`
-	ResumesAt     *time.Time `json:"resumesAt,omitempty"`
-	QuietSince    *time.Time `json:"quietSince,omitempty"`
-	ToolStartedAt *time.Time `json:"toolStartedAt,omitempty"`
+	ResetsAt      *time.Time `json:"resetsAt,omitzero"`
+	ResumesAt     *time.Time `json:"resumesAt,omitzero"`
+	QuietSince    *time.Time `json:"quietSince,omitzero"`
+	ToolStartedAt *time.Time `json:"toolStartedAt,omitzero"`
 }
 
 type SessionAttention struct {

@@ -22,7 +22,7 @@ type CompletionScanner interface {
 }
 
 type Completion struct {
-	CompletedAt time.Time `json:"completedAt,omitempty"`
+	CompletedAt time.Time `json:"completedAt,omitzero"`
 	ID          string    `json:"id"`
 	InputID     string    `json:"inputId,omitempty"`
 	Text        string    `json:"text"`

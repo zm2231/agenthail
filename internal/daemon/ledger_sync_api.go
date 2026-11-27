@@ -43,7 +43,7 @@ type ledgerSyncView struct {
 	OwnerHead  int64      `json:"ownerHead"`
 	Lag        int64      `json:"lag"`
 	Unreplayed int        `json:"unreplayed"`
-	SyncedAt   *time.Time `json:"syncedAt,omitempty"`
+	SyncedAt   *time.Time `json:"syncedAt,omitzero"`
 	LastError  string     `json:"lastError,omitempty"`
 	Log        string     `json:"log"`
 	LogThrough int64      `json:"logThrough,omitempty"`

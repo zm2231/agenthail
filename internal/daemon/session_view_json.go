@@ -12,7 +12,7 @@ type sessionViewFreshness struct {
 
 type sessionViewRow struct {
 	dashboardSession
-	ObservedAt *time.Time            `json:"observedAt,omitempty"`
+	ObservedAt *time.Time            `json:"observedAt,omitzero"`
 	Freshness  *sessionViewFreshness `json:"freshness,omitempty"`
 }
 

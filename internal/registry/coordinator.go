@@ -478,7 +478,7 @@ type CoordinatorHistoryEntry struct {
 	ChangedBy         string     `json:"changedBy,omitempty"`
 	Reason            string     `json:"reason,omitempty"`
 	At                time.Time  `json:"at"`
-	AcknowledgedAt    *time.Time `json:"acknowledgedAt,omitempty"`
+	AcknowledgedAt    *time.Time `json:"acknowledgedAt,omitzero"`
 	NotifySender      bool       `json:"-"`
 	PersonNotified    bool       `json:"-"`
 }
