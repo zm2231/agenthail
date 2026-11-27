@@ -263,12 +263,21 @@ fn compound_el(s: &App, request: &OpenRequest, route: &Route, busy: bool) -> El 
     }
     let response = if busy { None } else { compound_answer(s, request) };
     let submit = Button::new("Send answers").variant(if response.is_some() { ButtonVariant::Submit } else { ButtonVariant::Neutral }).icon(&icons::ARROW_UP).build(theme::kit()).key("pick-submit");
-    let (id, route) = (request.id.clone(), route.clone());
+    let (id, to) = (request.id.clone(), route.clone());
     let submit = match response {
-        Some(response) => submit.on_press(move |s: &mut App| route.answer(s, &id, response.clone())),
+        Some(response) => submit.on_press(move |s: &mut App| to.answer(s, &id, response.clone())),
         None => submit.opacity(0.5),
     };
-    list.child(row().gap(10.0).items_center().child(submit).child(spacer()).child(pager_hint()))
+    list.child(row().gap(10.0).items_center().child(submit).children(decline(request, route, busy)).child(spacer()).child(pager_hint()))
+}
+
+fn decline(request: &OpenRequest, route: &Route, busy: bool) -> Option<El> {
+    if request.kind == "ask" {
+        return None;
+    }
+    let b = Button::new("Decline").variant(ButtonVariant::Neutral).build(theme::kit()).key("question-decline");
+    let (id, route) = (request.id.clone(), route.clone());
+    Some(if busy { b.opacity(0.5) } else { b.on_press(move |s: &mut App| route.answer(s, &id, Response::choose("deny"))) })
 }
 
 pub(crate) fn put_down_composer(s: &mut App, tx: &mut Tx) {
@@ -453,9 +462,9 @@ pub(crate) fn request_body(s: &App, request: &OpenRequest, route: Route, busy: b
     let replying = s.asks.replying.contains(&request.id);
     c = c.child(col().w_full().gap(6.0).pt(4.0).children(request_choices(request).into_iter().enumerate().map(|(i, choice)| choice_el(i, choice, busy, &route))));
     if let Some(q) = question.filter(|_| !request.options_only) {
-        let (id, route, asked) = (request.id.clone(), route.clone(), q.question.clone());
-        let send = move |s: &mut App, words: String| route.answer(s, &id, Response::picks(Vec::new(), [(asked.clone(), words)].into_iter().collect()));
-        c = c.child(own_words(s, format!("{}|0", request.id), "Or answer in your own words, then press Return", if busy { None } else { Some(Box::new(send)) })).child(row().child(spacer()).child(pager_hint()));
+        let (id, to, asked) = (request.id.clone(), route.clone(), q.question.clone());
+        let send = move |s: &mut App, words: String| to.answer(s, &id, Response::picks(Vec::new(), [(asked.clone(), words)].into_iter().collect()));
+        c = c.child(own_words(s, format!("{}|0", request.id), "Or answer in your own words, then press Return", if busy { None } else { Some(Box::new(send)) })).child(row().gap(10.0).items_center().children(decline(request, &route, busy)).child(spacer()).child(pager_hint()));
     } else if replying {
         c = c.child(reply_box(s, request, &route, busy));
     }
@@ -545,7 +554,8 @@ fn pager_target(s: &App) -> Option<(Route, OpenRequest, bool)> {
             (Route::Session, open_request(s, x)?.clone(), s.answering.is_some())
         }
         Screen::Now => {
-            let d = crate::over::inbox::opened(s)?;
+            let shown = s.ov.now_brief || !crate::over::layout::collapsed(s)[1];
+            let d = crate::over::inbox::opened(s).filter(|_| shown)?;
             let open: Vec<&OpenRequest> = d.requests.iter().collect();
             let request = shown_of(s, &d.session_id, &open)?.clone();
             let busy = crate::over::inbox::held(s, &d, &request.id);
@@ -576,13 +586,14 @@ pub(crate) fn pager_key(s: &mut App, ev: &KeyEvent) -> bool {
     let questions = request.questions.clone().unwrap_or_default();
     let step = s.asks.step.get(&request.id).copied().unwrap_or(0);
     let mut picks = s.picks.get(&request.id).cloned().unwrap_or_default();
-    let paged = feed::request::page(&questions, step, key, &mut picks, !request.uses_pager());
     let at = step.min(questions.len().saturating_sub(1));
     if let PagerKey::Pick(n) = key
-        && questions.get(at).is_some_and(|q| n <= q.options.len())
+        && let Some(q) = questions.get(at).filter(|q| n <= q.options.len())
+        && s.typed.remove(&format!("{}|{at}", request.id)).is_some_and(|t| !t.text.trim().is_empty())
     {
-        s.typed.remove(&format!("{}|{at}", request.id));
+        picks.retain(|p| !q.options.iter().any(|o| &o.id == p));
     }
+    let paged = feed::request::page(&questions, step, key, &mut picks, !request.uses_pager());
     s.picks.insert(request.id.clone(), picks);
     s.asks.step.insert(request.id.clone(), paged.step);
     if paged.send

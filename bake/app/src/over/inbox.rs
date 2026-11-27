@@ -59,12 +59,13 @@ pub struct State {
     pub replies: HashMap<String, TextEdit>,
     pub replying: HashSet<String>,
     pub replied: HashMap<String, String>,
+    reply_keys: HashMap<String, (String, String)>,
 }
 
 impl Default for State {
     fn default() -> Self {
         let (tx, rx) = channel();
-        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, reads: 0, review_old: HashMap::new(), note: None, daemon: None, newest: None, rev: None, started: false, open: None, replies: HashMap::new(), replying: HashSet::new(), replied: HashMap::new() }
+        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, reads: 0, review_old: HashMap::new(), note: None, daemon: None, newest: None, rev: None, started: false, open: None, replies: HashMap::new(), replying: HashSet::new(), replied: HashMap::new(), reply_keys: HashMap::new() }
     }
 }
 
@@ -191,6 +192,7 @@ pub fn drain(s: &mut crate::App) -> bool {
                     Ok(()) => {
                         st.notes.remove(&id);
                         st.replies.remove(&id);
+                        st.reply_keys.remove(&id);
                         st.replied.insert(id, who);
                     }
                     Err(e) => {
@@ -252,7 +254,7 @@ pub fn accept(s: &mut crate::App, d: &Decision) {
 
 pub fn held(s: &crate::App, d: &Decision, request: &str) -> bool {
     let st = &s.ov.inbox;
-    st.acting.contains(&d.id()) || st.unconfirmed.contains(&d.hold_key()) || st.unconfirmed.contains(&request_hold(&d.session_id, request))
+    st.acting.contains(&d.id()) || st.unconfirmed.contains(&request_hold(&d.session_id, request))
 }
 
 pub fn answer(s: &mut crate::App, d: &Decision, request: &str, response: Response) {
@@ -288,9 +290,15 @@ pub fn reply(s: &mut crate::App, d: &Decision) {
     };
     s.ov.inbox.replying.insert(id.clone());
     s.ov.inbox.notes.remove(&id);
-    let (tx, session, message) = (s.ov.inbox.tx.clone(), d.session_id.clone(), d.parked_reply(&words));
+    let message = d.parked_reply(&words);
+    let key = match s.ov.inbox.reply_keys.get(&id) {
+        Some((sent, key)) if *sent == message => key.clone(),
+        _ => request_key(),
+    };
+    s.ov.inbox.reply_keys.insert(id.clone(), (message.clone(), key.clone()));
+    let (tx, session) = (s.ov.inbox.tx.clone(), d.session_id.clone());
     std::thread::spawn(move || {
-        let result = client.send(&session, &message);
+        let result = client.send_as(&session, &message, &[], None, None, &key).map(drop);
         let _ = tx.send(Done::Replied(id, who, result));
     });
 }
