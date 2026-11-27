@@ -401,7 +401,16 @@ pub fn drain(s: &mut App) -> bool {
         crate::over::go(s, crate::Screen::Now);
         changed = true;
     }
-    let started: Vec<(String, String)> = s.ov.projects.lead_drafts.keys().filter_map(|k| Some((k.clone(), s.ov.d.project(k)?.lead.clone()?))).collect();
+    let gone = match &s.ov.projects.sheet {
+        Some(Sheet::Rename { project, .. } | Sheet::Lead { project, .. }) => s.ov.d.record(project).is_none(),
+        _ => false,
+    };
+    if gone {
+        close_sheet(s);
+        s.ov.notice = Some("That project is no longer listed, so the sheet was closed.".into());
+        changed = true;
+    }
+    let started: Vec<(String, String)> = s.ov.projects.lead_drafts.keys().filter(|k| !s.ov.projects.sending_to.contains(*k)).filter_map(|k| Some((k.clone(), s.ov.d.project(k)?.lead.clone()?))).collect();
     for (key, lead) in started {
         if let Some(draft) = s.ov.projects.lead_drafts.remove(&key)
             && !draft.text.trim().is_empty()
