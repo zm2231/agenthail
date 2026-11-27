@@ -526,10 +526,10 @@ pub fn done(s: &mut App, done: Done) {
             }
             if result.as_ref().is_ok_and(|d| *d != feed::composer::Delivered::Unconfirmed) && !super::attach::has(s, &id) {
                 if s.composer_for.as_deref() == Some(id.as_str()) {
-                    if super::paste::draft(s).trim() == typed {
+                    if super::paste::expand(&super::paste::draft(s)).trim() == super::paste::expand(&typed).trim() {
                         replace_composer(s, "");
                     }
-                } else if s.drafts.get(&id).trim() == typed {
+                } else if super::paste::expand(s.drafts.get(&id)).trim() == super::paste::expand(&typed).trim() {
                     s.drafts.set(&id, "");
                 }
             }
@@ -550,6 +550,7 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         return false;
     }
     let Some(x) = session(s, id).cloned() else { return false };
+    super::paste::finish(s);
     let draft = super::paste::draft(s);
     let available = Slash::available(&x.capabilities, can(s, &x));
     let input = Input::parse(&super::paste::expand(&draft), &available);
