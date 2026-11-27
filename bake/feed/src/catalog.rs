@@ -629,11 +629,19 @@ pub fn numbered_options(body: &str) -> Vec<String> {
     if found.len() >= 2 && found.len() <= 6 { found } else { Vec::new() }
 }
 
-#[derive(Clone)]
 pub struct Client {
     pub(crate) base: String,
     pub(crate) token: String,
     pub(crate) agent: ureq::Agent,
+    picks: Option<std::collections::HashMap<String, crate::holders::Pin>>,
+}
+
+// A copy keeps the terminal picks of its moment, so work handed to a thread goes where the person pointed.
+impl Clone for Client {
+    fn clone(&self) -> Self {
+        let picks = self.picks.clone().unwrap_or_else(|| crate::holders::pins().all());
+        Client { base: self.base.clone(), token: self.token.clone(), agent: self.agent.clone(), picks: Some(picks) }
+    }
 }
 
 pub(crate) fn enc(value: &str) -> String {
@@ -656,7 +664,7 @@ impl Client {
 
     pub fn new(base: &str, token: &str) -> Self {
         let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(5)).timeout(Duration::from_secs(30)).build();
-        Self { base: base.trim_end_matches('/').into(), token: token.into(), agent }
+        Self { base: base.trim_end_matches('/').into(), token: token.into(), agent, picks: None }
     }
 
     pub(crate) fn base(&self) -> &str {
@@ -669,7 +677,7 @@ impl Client {
 
     pub(crate) fn timed(&self, timeout: Duration) -> Client {
         let agent = ureq::AgentBuilder::new().timeout_connect(timeout.min(Duration::from_secs(5))).timeout(timeout).build();
-        Client { base: self.base.clone(), token: self.token.clone(), agent }
+        Client { base: self.base.clone(), token: self.token.clone(), agent, picks: self.picks.clone() }
     }
 
     fn get(&self, path: &str) -> Result<Value> {
@@ -846,7 +854,10 @@ impl Client {
     pub fn action_keyed(&self, name: &str, payload: Value, key: &str) -> std::result::Result<Value, RespondError> {
         let mut body = action_body(name, payload)?;
         let key = match body.as_object_mut() {
-            Some(fields) => crate::holders::pins().pinned(name, fields, key),
+            Some(fields) => match &self.picks {
+                Some(picks) => crate::holders::pin_action(name, fields, key, |id| picks.get(id).copied()),
+                None => crate::holders::pins().pinned(name, fields, key),
+            },
             None => key.to_string(),
         };
         self.post_action(name, body, &key)

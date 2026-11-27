@@ -204,6 +204,20 @@ mod tests {
     }
 
     #[test]
+    fn a_copy_of_the_client_keeps_the_terminal_picked_when_it_was_made() {
+        let (client, seen) = daemon(vec![(200, r#"{"ok":true}"#), (200, r#"{"ok":true}"#)]);
+        let pins = crate::holders::pins();
+        pins.pick("s-frozen", Some(crate::holders::Pin { pid: 41, started_at: None }));
+        let copy = client.clone();
+        pins.pick("s-frozen", Some(crate::holders::Pin { pid: 42, started_at: None }));
+        copy.compact("s-frozen").unwrap();
+        assert_eq!(seen.recv().unwrap().body["pid"], 41);
+        client.compact("s-frozen").unwrap();
+        assert_eq!(seen.recv().unwrap().body["pid"], 42);
+        pins.pick("s-frozen", None);
+    }
+
+    #[test]
     fn each_action_sends_the_body_its_handler_reads() {
         type Call = Box<dyn Fn(&Client) -> Outcome<()>>;
         let calls: Vec<(Call, Value)> = vec![

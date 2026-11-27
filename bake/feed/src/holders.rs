@@ -108,15 +108,23 @@ impl Pins {
         x.shared_holders().iter().find(|h| h.pin() == pin)
     }
 
+    pub fn all(&self) -> HashMap<String, Pin> {
+        self.map().clone()
+    }
+
     pub fn pinned(&self, name: &str, fields: &mut serde_json::Map<String, Value>, key: &str) -> String {
-        let pin = fields.get("sessionId").and_then(Value::as_str).filter(|_| pinnable(name)).and_then(|id| self.get(id));
-        match pin {
-            Some(pin) => {
-                pin.apply(fields);
-                pin.key(key)
-            }
-            None => key.to_string(),
+        pin_action(name, fields, key, |id| self.get(id))
+    }
+}
+
+pub fn pin_action(name: &str, fields: &mut serde_json::Map<String, Value>, key: &str, pick: impl Fn(&str) -> Option<Pin>) -> String {
+    let pin = fields.get("sessionId").and_then(Value::as_str).filter(|_| pinnable(name)).and_then(pick);
+    match pin {
+        Some(pin) => {
+            pin.apply(fields);
+            pin.key(key)
         }
+        None => key.to_string(),
     }
 }
 
