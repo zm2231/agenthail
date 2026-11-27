@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-pub use edit::{Change, Entry, KEYS, Preset, Scope, describe, device_class, device_name, owner};
+pub use edit::{Change, Entry, KEYS, Preset, Scope, TEXT_SCALE, describe, device_class, device_name, owner, text_scale_step};
 pub use paint::{Decoded, Placement, blend, boundary, contrast, decode, extreme, gamma, linear, luminance, mesh, pane_alpha, place, reachable, readable_text, thumbnail, worst};
 
 pub type Rgb = [f32; 3];

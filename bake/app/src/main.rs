@@ -1340,6 +1340,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= ui::gone::watch(s);
     changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s) | ui::inspect::drain(s);
     changed |= ui::attach::pump(s);
+    changed |= ui::text_size::pump(s);
     changed |= over::extensions::drain(s);
     changed |= over::projects::drain(s);
     if s.ov.live.tail_retry_due() {

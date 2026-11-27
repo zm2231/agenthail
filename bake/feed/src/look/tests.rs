@@ -295,3 +295,14 @@ fn a_photo_turned_by_its_orientation_tag_is_drawn_upright() {
     assert_eq!(d.original, (20, 40));
     assert_eq!((d.shown.0, d.shown.1), (20, 40));
 }
+
+#[test]
+fn text_size_steps_by_a_tenth_within_its_range_and_writes_for_this_computer() {
+    assert_eq!(text_scale_step(1.0, Some(1)), 1.1);
+    assert_eq!(text_scale_step(1.0, Some(-1)), 0.9);
+    assert_eq!(text_scale_step(1.55, Some(1)), 1.6);
+    assert_eq!(text_scale_step(0.8, Some(-1)), 0.8);
+    assert_eq!(text_scale_step(1.4, None), 1.0);
+    assert_eq!(Change::text_scale(1.1, "Studio").0, json!({"action": "set", "set": ["text.scale@device:Studio = 1.1"], "message": "Text size 110%"}));
+    assert_eq!(Change::text_scale(1.0, "").0["set"], json!(["text.scale@mac = 1"]));
+}

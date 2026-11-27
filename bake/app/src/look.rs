@@ -62,6 +62,17 @@ pub fn view() -> Option<View> {
     STATE.with_borrow(|s| s.view.clone())
 }
 
+pub fn text_scale() -> Option<f32> {
+    STATE.with_borrow(|s| s.view.is_some().then_some(s.look.text_scale))
+}
+
+pub fn preview_text_scale(scale: f32) {
+    STATE.with_borrow_mut(|s| {
+        s.look.text_scale = scale;
+        s.generation += 1;
+    });
+}
+
 pub fn device() -> String {
     STATE.with_borrow(|s| s.device.clone())
 }

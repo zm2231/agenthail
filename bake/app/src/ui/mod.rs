@@ -32,6 +32,7 @@ pub(crate) mod session;
 mod session_dialogs;
 pub(crate) mod session_ops;
 pub(crate) mod subagents;
+pub mod text_size;
 pub mod session_menu;
 pub(crate) mod waiting;
 
