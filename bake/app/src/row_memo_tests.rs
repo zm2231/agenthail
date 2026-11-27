@@ -56,11 +56,13 @@ fn snapshot_rebuilt(rt: &mut Runtime<App>, seq: u64, prefix: &str, sessions: Vec
 }
 
 fn work<'a>(s: &'a mut App, id: &str) -> &'a mut feed::derive::Work {
-    s.ov.d.work.values_mut().find(|w| w.id == id).unwrap()
+    s.ov.world_changed();
+    feed::shared::own(s.ov.d.work.values_mut().find(|w| w.id == id).unwrap())
 }
 
 fn x<'a>(s: &'a mut App, id: &str) -> &'a mut Session {
-    s.ov.d.sessions.iter_mut().find(|x| x.id == id).unwrap()
+    s.ov.world_changed();
+    feed::shared::own(&mut s.ov.d.sessions).iter_mut().find(|x| x.id == id).unwrap()
 }
 
 fn shown(rt: &Runtime<App>, key: &str) {
@@ -118,7 +120,7 @@ fn a_session_change_rebuilds_only_its_row_in_the_sessions_list() {
             "families": [{"id": "a", "rootId": "a", "projectId": "p1", "members": [{"id": "a"}]}, {"id": "b", "rootId": "b", "projectId": "p1", "members": [{"id": "b"}]}, {"id": "c", "rootId": "c", "projectId": "p1", "members": [{"id": "c"}]}],
         }))
         .unwrap();
-        let page = feed::listing::Page { sessions: s.ov.d.sessions.clone(), view, next: None };
+        let page = feed::listing::Page { sessions: s.ov.d.sessions.to_vec(), view, next: None };
         crate::over::listing::show(s, feed::listing::Listing::first(page));
     });
     settle(&mut rt);
@@ -140,7 +142,7 @@ fn now_with(rt: &mut Runtime<App>) {
         s.ov.now_brief = false;
         crate::over::layout::set_collapsed(s, [false, false, false]);
         for id in ["c", "d"] {
-            if let Some(x) = s.ov.d.sessions.iter_mut().find(|x| x.id == id) {
+            if let Some(x) = feed::shared::own(&mut s.ov.d.sessions).iter_mut().find(|x| x.id == id) {
                 x.status = "busy".into();
             }
         }

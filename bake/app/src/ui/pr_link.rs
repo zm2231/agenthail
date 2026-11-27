@@ -122,7 +122,7 @@ fn settled(s: &mut App, done: Done) {
             if let Some(pr) = changed
                 && s.ov.live.patch(&id, Patch::Pr { pr, linked: op != PrOp::Unlink }, Instant::now())
             {
-                s.sessions = s.ov.live.sessions().to_vec();
+                s.sessions = s.ov.live.shared_sessions();
             }
             if dialog {
                 close(s);

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use serde::Deserialize;
 use time::OffsetDateTime;
@@ -215,13 +216,34 @@ impl Rows {
     }
 }
 
+pub struct Parts<'a> {
+    pub updated_at: &'a str,
+    pub sessions: Arc<Vec<Session>>,
+    pub work: Vec<Arc<Work>>,
+    pub steps: HashMap<String, super::phase::Steps>,
+    pub transcripts: HashMap<String, Arc<[Item]>>,
+    pub prompted_before: HashSet<String>,
+    pub actors: &'a HashMap<String, Actor>,
+    pub records: Vec<ProjectRecord>,
+    pub usage: Vec<Meter>,
+    pub hosts: Vec<Host>,
+    pub tile_order: Option<crate::projects::TileOrder>,
+}
+
+pub fn prepared(mut w: Work, project: &str, ledger_key: &str, steps: &super::phase::Steps) -> Work {
+    w.project = project.to_string();
+    w.ledger_key = ledger_key.to_string();
+    w.steps = steps.clone();
+    w
+}
+
 pub struct World {
     pub now: OffsetDateTime,
-    pub sessions: Vec<Session>,
+    pub sessions: Arc<Vec<Session>>,
     pub projects: Vec<Project>,
-    pub work: HashMap<WorkKey, Work>,
+    pub work: HashMap<WorkKey, Arc<Work>>,
     pub steps: HashMap<String, super::phase::Steps>,
-    pub transcripts: HashMap<String, Vec<Item>>,
+    pub transcripts: HashMap<String, Arc<[Item]>>,
     pub prompted_before: HashSet<String>,
     pub started_by: HashMap<String, String>,
     pub helpers: HashSet<String>,
@@ -240,22 +262,34 @@ impl World {
     }
 
     pub fn new(raw: Recorded) -> World {
-        let now = parse_time(&raw.updated_at).unwrap_or_else(OffsetDateTime::now_utc);
-        let helpers = raw.sessions.iter().filter(|s| s.subagent.is_some() || s.delegated == Some(true)).map(|s| s.id.clone()).collect();
-        let started_by = raw.sessions.iter().filter_map(|s| s.started_by.clone().filter(|b| !b.is_empty()).map(|b| (s.id.clone(), b))).collect();
-        let mut work = HashMap::new();
+        let mut work = Vec::new();
         for (key, rows) in raw.ledgers {
             let ledger_key = raw.projects.iter().find(|p| p.id == key).map(|p| p.ledger_key.clone()).unwrap_or_default();
             let steps = raw.steps.get(&key).cloned().unwrap_or_default();
-            for mut w in rows {
-                w.project = key.clone();
-                w.ledger_key = ledger_key.clone();
-                w.steps = steps.clone();
-                work.insert(w.key(), w);
-            }
+            work.extend(rows.into_iter().map(|w| Arc::new(prepared(w, &key, &ledger_key, &steps))));
         }
-        let names = crate::derive::names::build(&raw.sessions, &raw.actors, &work);
-        let projects = projects(&raw.projects, &raw.sessions);
+        World::shared(Parts {
+            updated_at: &raw.updated_at,
+            sessions: Arc::new(raw.sessions),
+            work,
+            steps: raw.steps,
+            transcripts: raw.transcripts.into_iter().map(|(id, items)| (id, items.into())).collect(),
+            prompted_before: raw.prompted_before,
+            actors: &raw.actors,
+            records: raw.projects,
+            usage: raw.usage,
+            hosts: raw.hosts,
+            tile_order: raw.tile_order,
+        })
+    }
+
+    pub fn shared(raw: Parts) -> World {
+        let now = parse_time(raw.updated_at).unwrap_or_else(OffsetDateTime::now_utc);
+        let helpers = raw.sessions.iter().filter(|s| s.subagent.is_some() || s.delegated == Some(true)).map(|s| s.id.clone()).collect();
+        let started_by = raw.sessions.iter().filter_map(|s| s.started_by.clone().filter(|b| !b.is_empty()).map(|b| (s.id.clone(), b))).collect();
+        let work: HashMap<WorkKey, Arc<Work>> = raw.work.into_iter().map(|w| (w.key(), w)).collect();
+        let names = crate::derive::names::build(&raw.sessions, raw.actors, &work);
+        let projects = projects(&raw.records, &raw.sessions);
         World {
             now,
             sessions: raw.sessions,
@@ -269,11 +303,19 @@ impl World {
             usage: raw.usage,
             hosts: raw.hosts,
             rows: HashMap::new(),
-            records: raw.projects,
+            records: raw.records,
             tile_order: raw.tile_order,
             found_names: HashMap::new(),
             names,
         }
+    }
+
+    pub fn works(&self) -> impl Iterator<Item = &Work> {
+        self.work.values().map(|w| &**w)
+    }
+
+    pub fn work_item(&self, key: &WorkKey) -> Option<&Work> {
+        self.work.get(key).map(|w| &**w)
     }
 
     pub fn session(&self, id: &str) -> Option<&Session> {

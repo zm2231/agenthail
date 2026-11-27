@@ -75,7 +75,7 @@ fn snapshot(seq: u64, sessions: Vec<Session>, touched: Option<&[&str]>) -> Bg {
 }
 
 fn overview(seq: u64, sessions: Vec<Session>) -> Bg {
-    Bg::Overview(Box::new(Fetched { recorded: recorded(seq, sessions), ledgers: HashMap::new(), held: Vec::new(), asked: Vec::new(), actors_at: std::time::Instant::now(), usage: None, moved: Vec::new() }))
+    Bg::Overview(Box::new(fetched(recorded(seq, sessions))))
 }
 
 struct Dir(PathBuf);
@@ -150,6 +150,10 @@ fn runtime(app: App, size: (f32, f32)) -> Runtime<App> {
 
 fn send(rt: &Runtime<App>, message: Bg) {
     rt.state.outbox.send(message).unwrap();
+}
+
+fn fetched(mut recorded: Recorded) -> Fetched {
+    Fetched { sessions: std::sync::Arc::new(std::mem::take(&mut recorded.sessions)), recorded, ledgers: HashMap::new(), held: Vec::new(), asked: Vec::new(), actors_at: std::time::Instant::now(), usage: None, moved: Vec::new() }
 }
 
 fn wake_in(rt: &Runtime<App>) -> f64 {
@@ -227,7 +231,7 @@ fn a_session_list_that_brings_a_quiet_project_back_reads_its_work_at_once() {
     let quiet = |last: &str| session("q", 0, json!({"lastActive": last, "project": {"id": "p2", "name": "Beta"}}));
     let mut raw = recorded(2, vec![session("a", 0, json!({})), quiet("2026-11-01T10:00:00Z")]);
     raw.projects.push(serde_json::from_value(json!({"id": "p2", "displayName": "Beta"})).unwrap());
-    send(&rt, Bg::Overview(Box::new(Fetched { recorded: raw, ledgers: HashMap::new(), held: Vec::new(), asked: Vec::new(), actors_at: std::time::Instant::now(), usage: None, moved: Vec::new() })));
+    send(&rt, Bg::Overview(Box::new(fetched(raw))));
     rt.frame(DT);
     assert!(!asked.try_iter().any(|a| a == crate::Ask::Read("p2".into())), "a project quiet for weeks isn't read");
 
@@ -901,7 +905,7 @@ fn a_moved_ledger_key_drops_the_ready_count_and_its_old_read_and_follows_the_new
     assert_eq!(crate::ui::ready::count(&rt.state, "p1"), 3);
     let before = crate::ui::ready::asking(&mut rt.state, "p1");
 
-    let mut moved = Fetched { recorded: recorded(2, sessions(&["a"])), ledgers: HashMap::new(), held: Vec::new(), asked: Vec::new(), actors_at: std::time::Instant::now(), usage: None, moved: vec!["p1".into()] };
+    let mut moved = Fetched { moved: vec!["p1".into()], ..fetched(recorded(2, sessions(&["a"]))) };
     moved.recorded.projects[0].ledger_key = "new".into();
     send(&rt, Bg::Overview(Box::new(moved)));
     rt.frame(DT);
@@ -1087,10 +1091,10 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     assert_eq!(asked(&paths), [item], "opening a found item again rereads it");
 
     crate::over::worksearch::open(&mut rt.state, &zk("shared:z", "z-W9"));
-    let mut loaded = Fetched { recorded: recorded(3, sessions(&["a"])), ledgers: HashMap::new(), held: Vec::new(), asked: Vec::new(), actors_at: std::time::Instant::now(), usage: None, moved: Vec::new() };
+    let mut loaded = fetched(recorded(3, sessions(&["a"])));
     let row: feed::derive::world::Work = serde_json::from_value(json!({"id": "z-W9", "text": "Parked export", "state": "in_progress"})).unwrap();
     loaded.recorded.projects[0].ledger_key = "shared:z".into();
-    loaded.ledgers.insert("p1".into(), (std::time::Instant::now(), Ok(vec![row])));
+    loaded.ledgers.insert("p1".into(), (std::time::Instant::now(), Ok(vec![row.into()])));
     send(&rt, Bg::Overview(Box::new(loaded)));
     rt.frame(DT);
     quiet(&mut rt);
@@ -1159,7 +1163,7 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     assert!(rt.state.ov.work.words.is_none());
     crate::over::work::start(&mut rt.state, &other, feed::ledger::Move::Park);
     rt.state.ov.work.words.as_mut().expect("a park opens its dialog").text = rune::TextEdit::new("Wait for the export fix");
-    rt.state.ov.d.work.get_mut(&other).expect("the found one").state = "parked".into();
+    feed::shared::own(rt.state.ov.d.work.get_mut(&other).expect("the found one")).state = "parked".into();
     crate::over::work::send_words(&mut rt.state);
     quiet(&mut rt);
     assert!(rt.state.ov.work.words.as_ref().is_some_and(|n| n.text.text == "Wait for the export fix"), "a park reason stays when the item was parked meanwhile");
@@ -1250,8 +1254,8 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     rt.frame(DT);
     typed(&mut rt, "exporter");
     assert_eq!(highlighted_session(&rt), Some("exporter".into()));
-    let mut grew = Fetched { recorded: recorded(5, sessions(&["a", "exporter"])), ledgers: HashMap::new(), held: Vec::new(), asked: Vec::new(), actors_at: std::time::Instant::now(), usage: None, moved: Vec::new() };
-    grew.ledgers.insert("p1".into(), (std::time::Instant::now(), Ok(vec![serde_json::from_value(json!({"id": "p1-W1", "text": "Fix the exporter", "state": "in_progress"})).unwrap()])));
+    let mut grew = fetched(recorded(5, sessions(&["a", "exporter"])));
+    grew.ledgers.insert("p1".into(), (std::time::Instant::now(), Ok(vec![std::sync::Arc::new(serde_json::from_value(json!({"id": "p1-W1", "text": "Fix the exporter", "state": "in_progress"})).unwrap())])));
     send(&rt, Bg::Overview(Box::new(grew)));
     rt.frame(DT);
     assert!(rt.state.ov.d.work.contains_key(&zk("p1", "p1-W1")));

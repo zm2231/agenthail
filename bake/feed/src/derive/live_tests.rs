@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Instant;
 
 use serde_json::{Value, json};
@@ -23,7 +24,7 @@ fn recorded(at: &str, sessions: Vec<Session>) -> Recorded {
 }
 
 fn fetched(at: &str, sessions: Vec<Session>, ledgers: Vec<(&str, Result<Vec<Work>, String>)>) -> Fetched {
-    Fetched { recorded: recorded(at, sessions), ledgers: ledgers.into_iter().map(|(k, r)| (k.to_string(), (Instant::now(), r))).collect(), held: Vec::new(), asked: Vec::new(), actors_at: Instant::now(), usage: None, moved: Vec::new() }
+    Fetched { recorded: recorded(at, Vec::new()), sessions: Arc::new(sessions), ledgers: ledgers.into_iter().map(|(k, r)| (k.to_string(), (Instant::now(), r.map(|rows| rows.into_iter().map(Arc::new).collect())))).collect(), held: Vec::new(), asked: Vec::new(), actors_at: Instant::now(), usage: None, moved: Vec::new() }
 }
 
 fn stamped(mut f: Fetched, at: Instant) -> Fetched {
@@ -94,7 +95,7 @@ fn a_listed_project_without_recent_sessions_gets_its_board_when_opened() {
     assert!(ov.wants("old"));
     assert!(!ov.wants("old"), "one fetch at a time");
     assert_eq!(ov.world(&[]).rows.get("old"), Some(&Rows::Loading));
-    ov.take_ledger("old", Instant::now(), Ok(Ledger { rows: vec![work("w9", "open")], actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps: Default::default() }));
+    ov.take_ledger("old", Instant::now(), Ok(Ledger { rows: vec![work("w9", "open").into()], actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps: Default::default() }));
     let w = ov.world(&[]);
     assert_eq!(board_ids(&w, "old"), ["w9"]);
     assert_eq!(w.rows.get("old"), None);
@@ -126,14 +127,14 @@ fn a_ledger_fetch_that_started_earlier_never_overwrites_a_later_one() {
     let sessions = || vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")];
     let (earlier, later) = (Instant::now(), Instant::now() + std::time::Duration::from_millis(1));
     let mut ov = Overview::default();
-    ov.take_ledger("p", later, Ok(Ledger { rows: vec![work("new", "open")], actors: HashMap::new(), asked: Vec::new(), actors_at: later, steps: Default::default() }));
+    ov.take_ledger("p", later, Ok(Ledger { rows: vec![work("new", "open").into()], actors: HashMap::new(), asked: Vec::new(), actors_at: later, steps: Default::default() }));
     ov.refresh(stamped(fetched("2026-11-24T12:00:00Z", sessions(), vec![("p", Ok(vec![work("old", "open")]))]), earlier));
     assert_eq!(board_ids(&ov.world(&[]), "p"), ["new"], "a refresh that started first and landed last");
     ov.take_ledger("p", earlier, Err("timed out".into()));
     assert_eq!(ov.world(&[]).rows.get("p"), None, "nor does its failure mark the newer rows stale");
     let latest = later + std::time::Duration::from_millis(1);
     ov.refresh(stamped(fetched("2026-11-24T12:00:20Z", sessions(), vec![("p", Ok(vec![work("newest", "open")]))]), latest));
-    ov.take_ledger("p", later, Ok(Ledger { rows: vec![work("new", "open")], actors: HashMap::new(), asked: Vec::new(), actors_at: later, steps: Default::default() }));
+    ov.take_ledger("p", later, Ok(Ledger { rows: vec![work("new", "open").into()], actors: HashMap::new(), asked: Vec::new(), actors_at: later, steps: Default::default() }));
     assert_eq!(board_ids(&ov.world(&[]), "p"), ["newest"], "an on-demand fetch that started first and landed last");
 }
 
@@ -171,7 +172,7 @@ fn a_burst_of_arrivals_leaves_one_rebuild_pending() {
     for id in ["t1", "t2", "t3"] {
         ov.take_tail(id, "2026-11-24T11:59:00Z".into(), Err("timed out".into()), None);
     }
-    ov.take_ledger("p", Instant::now(), Ok(Ledger { rows: vec![work("w1", "open")], actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps: Default::default() }));
+    ov.take_ledger("p", Instant::now(), Ok(Ledger { rows: vec![work("w1", "open").into()], actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps: Default::default() }));
     ov.refresh(fetched("2026-11-24T12:00:20Z", sessions(), vec![]));
     assert!(ov.stale());
     ov.world(&[]);
@@ -400,7 +401,7 @@ fn a_change_heard_after_the_read_landed_reads_that_ledger_alone() {
     assert_eq!(known.changed("shared:x", started - std::time::Duration::from_millis(1)), Change::Nothing, "a change older than the read is already in it");
     assert_eq!(known.changed("project:elsewhere", Instant::now()), Change::Nothing);
     let at = Instant::now();
-    let read = Ok(Ledger { rows: vec![work("p-W1", "open")], actors: HashMap::new(), asked: vec!["missing".into()], actors_at: at, steps: Default::default() });
+    let read = Ok(Ledger { rows: vec![work("p-W1", "open").into()], actors: HashMap::new(), asked: vec!["missing".into()], actors_at: at, steps: Default::default() });
     known.read("p", at, &read);
     assert!(known.skips_ledger("p", Some(at)) && known.skips_actor("missing"), "a single read also records its failed lookups");
 }
@@ -788,4 +789,90 @@ fn a_project_archived_after_its_work_was_read_reads_it_again_when_revived() {
     assert!(!ov.holds_ledger_of("s"), "an archived project's work is let go");
     assert!(ov.take_sessions("2026-11-24T12:02:00Z", "", 0, vec![row(false, "2026-11-24T12:01:59Z")]));
     assert_eq!(ov.missing_ledgers().into_iter().collect::<Vec<_>>(), ["old"], "revived, its work is read again");
+}
+
+#[test]
+fn a_reread_ledger_hands_back_the_same_rows_except_the_one_whose_value_changed() {
+    let steps = super::phase::Steps::default();
+    let rows = || vec![work("w1", "open"), work("w2", "open"), work("w3", "open")];
+    let first = super::live::shared_rows(None, "p", "shared:p", &steps, rows());
+    let again = super::live::shared_rows(Some(&first), "p", "shared:p", &steps, rows());
+    assert!(first.iter().zip(&again).all(|(a, b)| Arc::ptr_eq(a, b)), "an unchanged read is the same rows");
+    let mut changed = rows();
+    changed[1].timeline[0].actor = "someone".into();
+    let next = super::live::shared_rows(Some(&again), "p", "shared:p", &steps, changed.clone());
+    assert!(Arc::ptr_eq(&next[0], &again[0]) && Arc::ptr_eq(&next[2], &again[2]));
+    assert!(!Arc::ptr_eq(&next[1], &again[1]), "one field deep in one item makes only that item new");
+    assert_eq!(next[1].timeline[0].actor, "someone");
+    let moved = super::live::shared_rows(Some(&next), "p", "shared:q", &steps, changed);
+    assert!(moved.iter().zip(&next).all(|(a, b)| !Arc::ptr_eq(a, b)), "a new ledger key is a new value for every row");
+    assert!(moved.iter().all(|w| w.ledger_key == "shared:q" && w.project == "p"));
+}
+
+#[test]
+fn an_unchanged_session_list_is_the_same_list() {
+    let list = || vec![session("a", "p", "2026-11-24T11:00:00Z", "idle"), session("b", "p", "2026-11-24T11:00:00Z", "busy")];
+    let first = super::live::shared_sessions(&Arc::default(), list());
+    assert!(Arc::ptr_eq(&first, &super::live::shared_sessions(&first, list())));
+    let mut busy = list();
+    busy[0].status = "busy".into();
+    let next = super::live::shared_sessions(&first, busy);
+    assert!(!Arc::ptr_eq(&first, &next));
+    assert_eq!(status_of(&next, "a"), "busy");
+}
+
+fn status_of(sessions: &[Session], id: &str) -> String {
+    sessions.iter().find(|x| x.id == id).map(|x| x.status.clone()).unwrap_or_default()
+}
+
+#[test]
+fn the_overview_shows_the_same_world_as_the_recording_it_holds() {
+    let mut raw: Recorded = serde_json::from_value(json!({"updatedAt": "2026-11-24T12:00:00Z", "projects": [{"id": "p", "displayName": "P", "ledgerKey": "shared:p"}], "phaseLabels": {"p": {"build": "Craft"}}})).unwrap();
+    raw.sessions = vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")];
+    raw.ledgers.insert("p".into(), vec![work("p-W1", "open"), work("p-W2", "in_progress")]);
+    raw.transcripts.insert("a".into(), Vec::new());
+    let recorded = World::new(raw.clone());
+    let shown = Overview::recorded(raw).world(&[]);
+    assert_eq!(*recorded.sessions, *shown.sessions);
+    assert_eq!(recorded.work, shown.work);
+    assert!(shown.work.values().all(|w| w.ledger_key == "shared:p" && w.project == "p" && w.steps == recorded.steps_of("p")));
+    assert_eq!(recorded.names, shown.names);
+    assert_eq!(recorded.transcripts, shown.transcripts);
+    assert_eq!(recorded.projects.iter().map(|p| &p.key).collect::<Vec<_>>(), shown.projects.iter().map(|p| &p.key).collect::<Vec<_>>());
+}
+
+#[test]
+fn rows_read_before_their_project_had_a_ledger_key_take_it_when_it_arrives() {
+    let mut ov = Overview::default();
+    ov.refresh(fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(vec![work("p-W1", "open")]))]));
+    assert!(ov.world(&[]).work.contains_key(&WorkKey::new("p", "p-W1")));
+    let mut keyed = fetched("2026-11-24T12:01:00Z", Vec::new(), vec![]);
+    keyed.recorded.projects[0].ledger_key = "shared:p".into();
+    ov.refresh(keyed);
+    let w = ov.world(&[]);
+    assert!(w.work.contains_key(&WorkKey::new("shared:p", "p-W1")) && !w.work.contains_key(&WorkKey::new("p", "p-W1")));
+}
+
+#[test]
+fn the_watcher_keeps_rows_only_for_projects_it_still_reads() {
+    let mut known = super::live::Known::default();
+    let read = |held: &[&str], ledgers: Vec<(&str, Result<Vec<Work>, String>)>| {
+        let mut f = Fetched { held: held.iter().map(|x| x.to_string()).collect(), ..fetched("2026-11-24T12:00:00Z", Vec::new(), ledgers) };
+        f.recorded.projects.push(serde_json::from_value(json!({"id": "opened"})).unwrap());
+        f
+    };
+    known.learn(&read(&[], vec![("p", Ok(vec![work("p-W1", "open")])), ("old", Ok(vec![work("old-W1", "open")]))]));
+    assert_eq!(known.rows_held().into_iter().collect::<Vec<_>>(), ["old", "p"]);
+    known.read("opened", Instant::now(), &Ok(Ledger { rows: vec![work("o-W1", "open").into()], actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps: Default::default() }));
+    known.learn(&read(&["p"], vec![]));
+    assert_eq!(known.rows_held().into_iter().collect::<Vec<_>>(), ["opened", "p"], "a project no longer read lets its rows go; held and opened ones keep theirs");
+    let mut archived = read(&["p"], vec![]);
+    archived.recorded.projects.iter_mut().filter(|p| p.id == "opened").for_each(|p| p.archived = true);
+    known.learn(&archived);
+    assert_eq!(known.rows_held().into_iter().collect::<Vec<_>>(), ["p"], "an opened project archived since lets its rows go");
+    known.read("opened", Instant::now(), &Ok(Ledger { rows: vec![work("o-W1", "open").into()], actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps: Default::default() }));
+    let mut removed = read(&["p"], vec![]);
+    removed.recorded.projects.retain(|p| p.id != "opened");
+    known.learn(&removed);
+    assert_eq!(known.rows_held().into_iter().collect::<Vec<_>>(), ["p"], "so does one no longer listed at all");
 }

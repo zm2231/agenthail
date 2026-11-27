@@ -31,7 +31,7 @@ fn laid_out(scale: f32, screen: &str, dir: &Dir) -> Runtime<App> {
                 "families": [{"id": "a", "rootId": "a", "projectId": "p1", "members": [{"id": "a"}]}, {"id": "b", "rootId": "b", "projectId": "p1", "members": [{"id": "b"}]}, {"id": "q", "rootId": "q", "projectId": "p1", "members": [{"id": "q"}]}],
             }))
             .unwrap();
-            let page = feed::listing::Page { sessions: s.ov.d.sessions.clone(), view, next: None };
+            let page = feed::listing::Page { sessions: s.ov.d.sessions.to_vec(), view, next: None };
             crate::over::listing::show(s, feed::listing::Listing::first(page));
         }
         "queue" => crate::over::open_session(s, "q"),

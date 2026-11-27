@@ -170,7 +170,7 @@ impl World {
     }
 
     pub fn waiting_on_you(&self, project: &str) -> Vec<&Work> {
-        self.work.values().filter(|w| w.project == project && self.is_waiting_on_you(w)).collect()
+        self.works().filter(|w| w.project == project && self.is_waiting_on_you(w)).collect()
     }
 
     pub fn group(&self, kind: NeedKind, s: &Session) -> Group {
@@ -185,7 +185,7 @@ impl World {
 
     pub fn needs(&self) -> Vec<Need> {
         let mut out = Vec::new();
-        for s in &self.sessions {
+        for s in self.sessions.iter() {
             let Some((headline, at)) = headline(s) else { continue };
             let h = headline.to_lowercase();
             let flagged = flagged(s);
@@ -203,7 +203,7 @@ impl World {
             };
             out.push(Need { kind, group: self.group(kind, s), project: s.project_name(), project_key: s.project_key(), title: plain(&headline), who: self.title(s), at, target: Target::Session(s.id.clone()), label: None });
         }
-        for w in self.work.values().filter(|w| self.is_waiting_on_you(w)) {
+        for w in self.works().filter(|w| self.is_waiting_on_you(w)) {
             out.push(Need {
                 kind: if ci_failing(w) { NeedKind::CiFailing } else { NeedKind::Check },
                 group: Group::Waiting,

@@ -69,7 +69,7 @@ fn stepping_wraps_and_close_others_keeps_the_shown_one() {
 #[test]
 fn a_full_strip_closes_the_oldest_unheld_tab_and_offers_it_back_for_six_seconds() {
     let mut s = app();
-    s.sessions = vec![row("a", false), row("b", false), row("c", false)];
+    s.sessions = vec![row("a", false), row("b", false), row("c", false)].into();
     open(&mut s, &["a", "b", "c"]);
     s.drafts.set("a", "keep me");
     s.clock = 10.0;
@@ -90,9 +90,9 @@ fn a_full_strip_closes_the_oldest_unheld_tab_and_offers_it_back_for_six_seconds(
 #[test]
 fn an_archived_tab_closes_and_says_so() {
     let mut s = app();
-    s.sessions = vec![row("a", false), row("b", false)];
+    s.sessions = vec![row("a", false), row("b", false)].into();
     open(&mut s, &["a", "b"]);
-    s.sessions = vec![row("a", false), row("b", true)];
+    s.sessions = vec![row("a", false), row("b", true)].into();
     s.clock = 5.0;
     reconcile(&mut s);
     assert_eq!((ids(&s), s.selected.as_deref()), (vec!["a"], Some("a")));
@@ -105,10 +105,10 @@ fn an_archived_tab_closes_and_says_so() {
 #[test]
 fn several_archived_at_once_move_off_the_shown_one_and_gone_sessions_drop() {
     let mut s = app();
-    s.sessions = vec![row("a", false), row("b", false), row("c", false), row("d", false)];
+    s.sessions = vec![row("a", false), row("b", false), row("c", false), row("d", false)].into();
     open(&mut s, &["a", "b", "c", "d"]);
     activate(&mut s, "c");
-    s.sessions = vec![row("a", false), row("b", true), row("c", true)];
+    s.sessions = vec![row("a", false), row("b", true), row("c", true)].into();
     reconcile(&mut s);
     assert_eq!(ids(&s), ["a"]);
     assert_eq!(s.selected.as_deref(), Some("a"));
@@ -117,9 +117,9 @@ fn several_archived_at_once_move_off_the_shown_one_and_gone_sessions_drop() {
 #[test]
 fn unarchiving_keeps_the_notice_until_it_lands_and_offers_a_retry_when_it_does_not() {
     let mut s = app();
-    s.sessions = vec![row("a", false), row("b", false)];
+    s.sessions = vec![row("a", false), row("b", false)].into();
     open(&mut s, &["a", "b"]);
-    s.sessions = vec![row("a", false), row("b", true)];
+    s.sessions = vec![row("a", false), row("b", true)].into();
     reconcile(&mut s);
     unarchive(&mut s);
     let a = s.tabs.archived.clone().expect("the notice stays while it is unarchived");
@@ -127,7 +127,7 @@ fn unarchiving_keeps_the_notice_until_it_lands_and_offers_a_retry_when_it_does_n
     s.clock = 100.0;
     expire(&mut s);
     assert!(s.tabs.archived.is_some(), "a failed unarchive doesn't time out");
-    s.sessions = vec![row("a", false), row("b", false)];
+    s.sessions = vec![row("a", false), row("b", false)].into();
     expire(&mut s);
     assert!(s.tabs.archived.is_none());
     assert_eq!((s.selected.as_deref(), s.tabs.tabs.active()), (Some("b"), Some("b")));
@@ -136,7 +136,7 @@ fn unarchiving_keeps_the_notice_until_it_lands_and_offers_a_retry_when_it_does_n
 #[test]
 fn a_draft_typed_just_before_switching_keeps_its_tab() {
     let mut s = app();
-    s.sessions = vec![row("a", false), row("b", false), row("c", false)];
+    s.sessions = vec![row("a", false), row("b", false), row("c", false)].into();
     open(&mut s, &["a", "b"]);
     set_width(&mut s, 380.0);
     activate(&mut s, "a");
@@ -148,7 +148,7 @@ fn a_draft_typed_just_before_switching_keeps_its_tab() {
 #[test]
 fn restored_tabs_show_on_now() {
     let mut s = app();
-    s.sessions = vec![row("a", false)];
+    s.sessions = vec![row("a", false)].into();
     open(&mut s, &["a"]);
     crate::over::go(&mut s, Screen::Now);
     let spec = rune::AppSpec::<App> { ..rune::AppSpec::new("Agenthail", (1440.0, 900.0), crate::init, crate::ui::view) };
@@ -164,7 +164,7 @@ fn a_moved_session_keeps_its_tab() {
     let mut s = app();
     open(&mut s, &["old", "b"]);
     s.rekeyed.insert("old".into(), "new".into());
-    s.sessions = vec![row("new", false), row("b", false)];
+    s.sessions = vec![row("new", false), row("b", false)].into();
     reconcile(&mut s);
     assert_eq!(ids(&s), ["new", "b"]);
 }
@@ -204,7 +204,7 @@ fn tabs_save_and_load() {
 #[test]
 fn the_strip_shows_in_the_session_toolbar_and_a_right_click_offers_a_window() {
     let mut s = app();
-    s.sessions = vec![row("a", false), row("b", false)];
+    s.sessions = vec![row("a", false), row("b", false)].into();
     open(&mut s, &["a", "b"]);
     let spec = rune::AppSpec::<App> { ..rune::AppSpec::new("Agenthail", (1440.0, 900.0), crate::init, crate::ui::view) };
     let mut rt = rune::App::new(spec).init(move || s).headless_runtime((1440.0, 900.0), rune::Env { system_dark: true, scale: 1.0 });
@@ -220,9 +220,9 @@ fn the_strip_shows_in_the_session_toolbar_and_a_right_click_offers_a_window() {
 #[test]
 fn archiving_the_last_tab_still_shows_the_notice() {
     let mut s = app();
-    s.sessions = vec![row("a", false)];
+    s.sessions = vec![row("a", false)].into();
     open(&mut s, &["a"]);
-    s.sessions = vec![row("a", true)];
+    s.sessions = vec![row("a", true)].into();
     reconcile(&mut s);
     assert!(ids(&s).is_empty() && s.screen == Screen::Now);
     let spec = rune::AppSpec::<App> { ..rune::AppSpec::new("Agenthail", (1440.0, 900.0), crate::init, crate::ui::view) };

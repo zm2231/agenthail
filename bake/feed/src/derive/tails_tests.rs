@@ -47,13 +47,13 @@ fn long_conversation_steered_at(at: &str) -> Vec<Value> {
 }
 
 fn tail(items: Vec<Item>) -> Tail {
-    Tail { items, prompted_before: false }
+    Tail { items: items.into(), prompted_before: false }
 }
 
 fn overview_with(sessions: Vec<Session>) -> Overview {
     let recorded: Recorded = serde_json::from_value(json!({"updatedAt": "2026-11-24T12:00:00Z", "projects": [{"id": "p", "displayName": "P"}]})).unwrap();
     let mut ov = Overview::default();
-    ov.refresh(Fetched { recorded: Recorded { sessions, ..recorded }, ledgers: Default::default(), held: Vec::new(), asked: Vec::new(), actors_at: Instant::now(), usage: None, moved: Vec::new() });
+    ov.refresh(Fetched { recorded, sessions: std::sync::Arc::new(sessions), ledgers: Default::default(), held: Vec::new(), asked: Vec::new(), actors_at: Instant::now(), usage: None, moved: Vec::new() });
     ov
 }
 

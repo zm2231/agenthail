@@ -76,7 +76,7 @@ impl World {
 
     pub fn digest(&self, project: &Project, window_hours: f64) -> Vec<Line> {
         let mut lines = Vec::new();
-        for w in self.work.values().filter(|w| w.project == project.key) {
+        for w in self.works().filter(|w| w.project == project.key) {
             for t in w.timeline.iter().filter(|t| self.hours(&t.at) <= window_hours) {
                 let line = |kind, detail| Line { kind, text: plain(&w.text), detail, at: t.at.clone(), target: Target::Work(w.key()) };
                 match (t.kind.as_str(), t.state.as_deref()) {

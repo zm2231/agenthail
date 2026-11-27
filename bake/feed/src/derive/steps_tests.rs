@@ -5,7 +5,7 @@ use serde_json::json;
 
 use super::live::{Fetched, Known, Ledger, Overview, ledger};
 use super::phase::{Steps, step_word};
-use super::world::{Recorded, World};
+use super::world::{Recorded, Work, World};
 use crate::mock::{daemon, replies};
 use crate::worksearch::{Found, Search};
 
@@ -62,7 +62,7 @@ fn a_renamed_project_with_no_work_shown_still_names_its_steps_in_search() {
 
 #[test]
 fn a_reread_ledger_replaces_its_step_names_and_an_older_read_does_not() {
-    let row = |id: &str| serde_json::from_value(json!({"id": id, "text": "t", "state": "in_progress", "phase": "build"})).unwrap();
+    let row = |id: &str| -> std::sync::Arc<Work> { std::sync::Arc::new(serde_json::from_value(json!({"id": id, "text": "t", "state": "in_progress", "phase": "build"})).unwrap()) };
     let ledger = |steps: Steps| Ok(Ledger { rows: vec![row("p-1-W1")], actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps });
     let mut ov = Overview::recorded(recorded(json!({}), json!({})));
     let (older, newer) = (Instant::now(), Instant::now() + Duration::from_millis(5));
@@ -121,14 +121,14 @@ fn a_work_item_read_carries_its_projects_step_names() {
 
 #[test]
 fn an_overview_ledger_read_that_started_after_a_single_read_wins_whichever_lands_first() {
-    let row = |id: &str| serde_json::from_value(json!({"id": id, "text": "t", "state": "in_progress", "phase": "build"})).unwrap();
+    let row = |id: &str| -> std::sync::Arc<Work> { std::sync::Arc::new(serde_json::from_value(json!({"id": id, "text": "t", "state": "in_progress", "phase": "build"})).unwrap()) };
     let snapshot = Instant::now();
     let (single_at, overview_at) = (snapshot + Duration::from_millis(1), snapshot + Duration::from_millis(2));
     let single = || Ok(Ledger { rows: vec![row("p-1-W1")], actors: HashMap::new(), asked: Vec::new(), actors_at: single_at, steps: renamed() });
     let overview = || {
         let mut recorded = recorded(json!({}), json!({}));
         recorded.steps.insert("p-1".into(), Steps::default());
-        Fetched { recorded, ledgers: [("p-1".to_string(), (overview_at, Ok(vec![row("p-1-W2")])))].into(), held: Vec::new(), asked: Vec::new(), actors_at: overview_at, usage: None, moved: Vec::new() }
+        Fetched { recorded, sessions: Default::default(), ledgers: [("p-1".to_string(), (overview_at, Ok(vec![row("p-1-W2")])))].into(), held: Vec::new(), asked: Vec::new(), actors_at: overview_at, usage: None, moved: Vec::new() }
     };
     for single_lands_first in [true, false] {
         let mut ov = Overview::recorded(recorded(json!({}), json!({})));

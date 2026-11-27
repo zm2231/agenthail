@@ -65,11 +65,13 @@ fn rebuilt(rt: &mut Runtime<App>, prefix: &str, change: impl FnOnce(&mut App)) -
 }
 
 fn work<'a>(s: &'a mut App, id: &str) -> &'a mut feed::derive::Work {
-    s.ov.d.work.values_mut().find(|w| w.id == id).unwrap()
+    s.ov.world_changed();
+    feed::shared::own(s.ov.d.work.values_mut().find(|w| w.id == id).unwrap())
 }
 
 fn x<'a>(s: &'a mut App, id: &str) -> &'a mut Session {
-    s.ov.d.sessions.iter_mut().find(|x| x.id == id).unwrap()
+    s.ov.world_changed();
+    feed::shared::own(&mut s.ov.d.sessions).iter_mut().find(|x| x.id == id).unwrap()
 }
 
 fn shown(rt: &Runtime<App>, key: &str) {
@@ -186,4 +188,26 @@ fn a_worktree_change_rebuilds_only_its_merged_row() {
     assert_eq!(rebuilt(&mut rt, "merged-", |_| {}), Vec::<String>::new(), "nothing changed");
     assert_eq!(rebuilt(&mut rt, "merged-", |s| x(s, "m2").worktree.as_mut().unwrap().branch = "fix/renamed".into()), [m2.clone()], "its branch");
     assert_eq!(rebuilt(&mut rt, "merged-", |s| x(s, "m2").worktree.as_mut().unwrap().cleanup_reason = "kept".into()), [m2], "what its buttons act on");
+}
+
+#[test]
+fn digest_lines_follow_the_minute_and_the_last_look_without_a_poll() {
+    if !isolated("rows_memo_lines::digest_lines_follow_the_minute_and_the_last_look_without_a_poll") {
+        return;
+    }
+    let dir = Dir::new("rows-digest-minute");
+    let mut rt = world(&dir);
+    now(&mut rt, false);
+    let line = |id: &str| format!("d-p1-Shipped-w:p1|{id}");
+    assert_eq!(rt.state.ov.d.ago("2026-11-27T09:50:00Z"), "10m");
+    let ticked = rebuilt(&mut rt, "d-", |s| s.outbox.send(Bg::Snapshot("2026-11-27T10:01:00Z".into(), EPOCH.into(), 2, people(), None)).unwrap());
+    assert_eq!(rt.state.ov.d.ago("2026-11-27T09:50:00Z"), "11m", "a snapshot in the next minute moves the clock");
+    assert_eq!(ticked, [line("W1"), line("W2")], "every shown age moves on");
+    rt.update(|s, _| s.ov.looked_now = Some("2026-11-27T09:45:00Z".into()));
+    settle(&mut rt);
+    shown(&rt, &line("W1"));
+    assert!(rt.presented(&line("W2")).is_none(), "a line from before the last look leaves Since you left");
+    rt.update(|s, _| s.ov.looked_now = None);
+    settle(&mut rt);
+    shown(&rt, &line("W2"));
 }

@@ -29,7 +29,7 @@ impl World {
     pub fn board(&self, project: &str) -> Board<'_> {
         let mut lanes: [Vec<&Work>; 4] = Default::default();
         let mut stale_review = Vec::new();
-        for w in self.work.values().filter(|w| w.project == project) {
+        for w in self.works().filter(|w| w.project == project) {
             match w.state.as_str() {
                 "in_review" if self.is_waiting_on_you(w) => lanes[0].push(w),
                 "in_review" => stale_review.push(w),

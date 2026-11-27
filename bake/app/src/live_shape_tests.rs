@@ -12,10 +12,27 @@ fn raw(path: &str, later: i64, without: Option<&str>) -> Recorded {
     serde_json::from_value(v).unwrap()
 }
 
-fn poll(path: &str, later: i64, without: Option<&str>) -> Bg {
-    let recorded = raw(path, later, without);
-    let ledgers = recorded.ledgers.iter().map(|(k, rows)| (k.clone(), (std::time::Instant::now(), Ok(rows.clone())))).collect();
-    Bg::Overview(Box::new(Fetched { recorded, ledgers, held: Vec::new(), asked: Vec::new(), actors_at: std::time::Instant::now(), usage: None, moved: Vec::new() }))
+fn poll(path: &str, later: i64, without: Option<&str>, sent: &mut Sent) -> Bg {
+    let mut recorded = raw(path, later, without);
+    recorded.transcripts.clear();
+    let key_of = |id: &str| recorded.projects.iter().find(|p| p.id == id).map_or(String::new(), |p| p.ledger_key.clone());
+    let ledgers: HashMap<_, _> = std::mem::take(&mut recorded.ledgers)
+        .into_iter()
+        .map(|(k, rows)| {
+            let steps = recorded.steps.get(&k).cloned().unwrap_or_default();
+            let rows = feed::derive::live::shared_rows(sent.rows.get(&k), &k, &key_of(&k), &steps, rows);
+            sent.rows.insert(k.clone(), rows.clone());
+            (k, (std::time::Instant::now(), Ok(rows)))
+        })
+        .collect();
+    sent.sessions = feed::derive::live::shared_sessions(&sent.sessions, std::mem::take(&mut recorded.sessions));
+    Bg::Overview(Box::new(Fetched { recorded, sessions: sent.sessions.clone(), ledgers, held: Vec::new(), asked: Vec::new(), actors_at: std::time::Instant::now(), usage: None, moved: Vec::new() }))
+}
+
+#[derive(Default)]
+struct Sent {
+    rows: HashMap<String, Vec<std::sync::Arc<feed::derive::Work>>>,
+    sessions: std::sync::Arc<Vec<feed::catalog::Session>>,
 }
 
 fn tally(ids: Vec<String>) -> String {
@@ -60,13 +77,40 @@ fn probe() {
     built::take();
     rt.frame(DT);
     lines.push(format!("idle frame: {}", tally(built::take())));
+    let mut sent = Sent::default();
     let steps = [("same", 5, None), ("drop top", 10, top.as_deref()), ("back", 15, None)];
     for (name, later, without) in steps {
-        send(&rt, poll(&path, later, without));
+        send(&rt, poll(&path, later, without, &mut sent));
         rt.frame(DT);
         rt.frame(DT);
         lines.push(format!("{name}: rows built {}", tally(built::take())));
     }
+    let (mut outside, mut view, mut commit, mut after) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let copies = feed::shared::copies();
+    for round in 0..30 {
+        let next = poll(&path, 20 + round * 5, if round % 2 == 1 { top.as_deref() } else { None }, &mut sent);
+        phases();
+        let at = std::time::Instant::now();
+        send(&rt, next);
+        rt.frame(DT);
+        let wall = at.elapsed().as_secs_f64() * 1000.0;
+        let p = phase_ms();
+        outside.push(wall - p[1]);
+        view.push(p[0]);
+        commit.push(p[1]);
+        let at = std::time::Instant::now();
+        rt.frame(DT);
+        after.push(at.elapsed().as_secs_f64() * 1000.0 - phase_ms()[1]);
+    }
+    lines.push(format!(
+        "fresh poll, 30 frames: outside commit median {:.2} ms (max {:.2}), view median {:.2} ms, commit median {:.2} ms, next frame outside commit median {:.2} ms, shared copies {}",
+        median(outside.clone()),
+        outside.iter().copied().fold(0.0, f64::max),
+        median(view),
+        median(commit),
+        median(after),
+        feed::shared::copies() - copies
+    ));
     let mut extra = rt.state.ov.needs[rt.state.ov.needs.len() - 1].clone();
     extra.target = crate::over::Target::Session("probe-inserted".into());
     extra.title = "A need inserted by the probe".into();
