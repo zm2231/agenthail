@@ -4,7 +4,9 @@ const SIZE: (f32, f32) = (1440.0, 900.0);
 
 fn laid_out(scale: f32, screen: &str, dir: &Dir) -> Runtime<App> {
     crate::look::hold_text_scale(Some(scale));
-    let mut rt = runtime(app(sessions(&["a", "b"]), dir), SIZE);
+    let mut all = sessions(&["a", "b"]);
+    all.push(session("q", 3, json!({"surface": "codex", "name": "queue"})));
+    let mut rt = runtime(app(all, dir), SIZE);
     rt.update(|s, _| match screen {
         "session" => {
             crate::over::open_session(s, "a");
@@ -22,7 +24,17 @@ fn laid_out(scale: f32, screen: &str, dir: &Dir) -> Runtime<App> {
                 pane.rebuild(&mut counter);
             }
         }
-        "sessions" => crate::over::go(s, Screen::Sessions),
+        "sessions" => {
+            crate::over::go(s, Screen::Sessions);
+            let view = serde_json::from_value(json!({
+                "projects": [{"id": "p1", "name": "Alpha", "counts": {"families": 3, "sessions": 3}, "collapsedFamilyIds": ["a", "b", "q"]}],
+                "families": [{"id": "a", "rootId": "a", "projectId": "p1", "members": [{"id": "a"}]}, {"id": "b", "rootId": "b", "projectId": "p1", "members": [{"id": "b"}]}, {"id": "q", "rootId": "q", "projectId": "p1", "members": [{"id": "q"}]}],
+            }))
+            .unwrap();
+            let page = feed::listing::Page { sessions: s.ov.d.sessions.clone(), view, next: None };
+            crate::over::listing::show(s, feed::listing::Listing::first(page));
+        }
+        "queue" => crate::over::open_session(s, "q"),
         _ => {}
     });
     rt.settle_all();
@@ -132,17 +144,46 @@ fn shot() {
     let out = std::path::PathBuf::from(dir_out);
     let scale: f32 = std::env::var("AGENTHAIL_SHOT_SCALE").ok().and_then(|s| s.parse().ok()).unwrap_or(1.0);
     let dir = Dir::new("shot");
-    for screen in ["now", "session", "sessions"] {
+    for screen in ["now", "session", "sessions", "queue"] {
         let mut rt = laid_out(scale, screen, &dir);
         render(&mut rt, SIZE, &out.join(format!("{screen}-{scale}.png")));
     }
-    let size = (720.0, 620.0);
+    let agents = crate::settings::TABS.iter().position(|t| *t == "Agents").expect("an Agents tab");
+    for (name, tab, page) in [("settings", 0, 0), ("keyboard", 1, 2), ("agents", agents, 0)] {
+        let mut rt = settings_on(tab, page);
+        render(&mut rt, SETTINGS, &out.join(format!("{name}-{scale}.png")));
+    }
+}
+
+const SETTINGS: (f32, f32) = (720.0, 620.0);
+
+fn settings_on(tab: usize, page: usize) -> Runtime<crate::settings::Prefs> {
     let spec = AppSpec::<crate::settings::Prefs> {
+        poll: Some(crate::settings::poll),
         fonts: rune_theme_opencode::FONTS,
         families: rune_theme_opencode::FAMILIES,
-        ..AppSpec::new("Settings", size, crate::settings::init, crate::settings::view)
+        ..AppSpec::new("Settings", SETTINGS, crate::settings::init, crate::settings::view)
     };
-    let mut rt = rune::App::new(spec).headless_runtime(size, Env { system_dark: true, scale: 1.0 });
+    let mut rt = rune::App::new(spec).headless_runtime(SETTINGS, Env { system_dark: true, scale: 1.0 });
+    rt.update(|s, _| {
+        s.tab = tab;
+        s.general_page = page;
+    });
     rt.frame(DT);
-    render(&mut rt, size, &out.join(format!("settings-{scale}.png")));
+    rt.settle_all();
+    rt.frame(DT);
+    rt
+}
+
+#[test]
+fn the_open_settings_tab_stays_in_view_when_larger_text_makes_the_tabs_scroll() {
+    if !isolated("text_scale::the_open_settings_tab_stays_in_view_when_larger_text_makes_the_tabs_scroll") {
+        return;
+    }
+    crate::look::hold_text_scale(Some(1.6));
+    let agents = crate::settings::TABS.iter().position(|t| *t == "Agents").expect("an Agents tab");
+    let rt = settings_on(agents, 0);
+    let [x, _, w, _] = rt.presented("settings-tabs").expect("the tab strip is on screen").0;
+    let [sx, _, sw, _] = rt.presented(&format!("settings-tabs/segment{agents}")).expect("the Agents tab is laid out").0;
+    assert!(sx >= x - 0.5 && sx + sw <= x + w + 0.5, "the Agents tab {:?} shows inside the strip {:?}", (sx, sw), (x, w));
 }
