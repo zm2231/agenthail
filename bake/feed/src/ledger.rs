@@ -102,7 +102,7 @@ pub fn unreached(e: &RespondError) -> String {
 
 pub fn unconfirmed(e: &RespondError, again: bool) -> String {
     if again {
-        format!("Still not confirmed: {}. If the timeline doesn't show it, pressing again sends it as new.", e.message)
+        format!("Still not confirmed: {}. If the timeline doesn't show it, Send as new starts a fresh one.", e.message)
     } else {
         format!("Sent, not confirmed: {}. Check the timeline; pressing again asks about the same send.", e.message)
     }
@@ -190,7 +190,7 @@ mod tests {
         assert!(settles(&RespondError::from_status("claim", 409, r#"{"error":{"code":"refused","message":"no"}}"#)));
         assert!(unreached(&unsent).starts_with("Agenthail didn't settle it: "));
         assert!(unreached(&unsent).ends_with("The earlier send is still unconfirmed; pressing again asks about it."));
-        assert_eq!(unconfirmed(&lost, true), "Still not confirmed: Host mac did not answer. If the timeline doesn't show it, pressing again sends it as new.");
+        assert_eq!(unconfirmed(&lost, true), "Still not confirmed: Host mac did not answer. If the timeline doesn't show it, Send as new starts a fresh one.");
     }
 
     #[test]

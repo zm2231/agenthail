@@ -371,6 +371,11 @@ fn send(s: &mut App, id: &str, m: Move, words: &str) {
     });
 }
 
+fn send_new(s: &mut App, id: &str, m: Move) {
+    let Some(p) = s.ov.work.keys.remove(&(id.to_string(), m)) else { return };
+    send(s, id, m, &p.words);
+}
+
 pub fn drain(s: &mut App) -> bool {
     let mut changed = false;
     while let Ok((id, m, _words, result)) = s.ov.work.rx.try_recv() {
@@ -386,9 +391,7 @@ pub fn drain(s: &mut App) -> bool {
             Err(e) if e.maybe_delivered => {
                 let slot = (id.clone(), m);
                 let again = st.keys.get(&slot).is_some_and(|p| p.unconfirmed);
-                if again {
-                    st.keys.remove(&slot);
-                } else if let Some(p) = st.keys.get_mut(&slot) {
+                if let Some(p) = st.keys.get_mut(&slot) {
                     p.unconfirmed = true;
                 }
                 st.notes.insert(id, (true, ledger::unconfirmed(&e, again)));
@@ -419,6 +422,11 @@ fn moves(s: &App, w: &crate::over::Work) -> Option<El> {
         let id = w.id.clone();
         let variant = if matches!(m, Move::Claim | Move::Submit | Move::Reopen) { ButtonVariant::Outline } else { ButtonVariant::Ghost };
         r = r.child(Button::new(m.label()).variant(variant).control_size(ControlSize::Small).disabled(busy).on_press(move |s: &mut App| start(s, &id, m)).build(k).key(format!("work-move-{m:?}")));
+    }
+    let held = s.ov.work.keys.iter().find(|((item, _), p)| item == &w.id && p.unconfirmed).map(|((_, m), _)| *m);
+    if let Some(m) = held.filter(|_| !busy) {
+        let id = w.id.clone();
+        r = r.child(Button::new("Send as new").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).help("Check the timeline first: this sends it again with a fresh request").on_press(move |s: &mut App| send_new(s, &id, m)).build(k).key("work-send-new"));
     }
     if busy {
         r = r.child(text("Sending…".to_string()).font(META).color(weak()));
