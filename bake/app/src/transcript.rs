@@ -201,7 +201,7 @@ fn first_line(text: &str, max: usize) -> String {
 
 fn markdown(body: &str, k: &Kit) -> El {
     let p = crate::theme::paint();
-    Markdown::new(body.to_string()).selectable(true).render(&MarkdownStyle::from_kit(&Kit::neutral(p.dark).with_text_scale(k.text_scale)).text(p.text).muted(p.muted)).selection_group(false)
+    Markdown::new(body.to_string()).selectable(true).render(&MarkdownStyle::from_kit(&Kit { roles: k.roles, ..Kit::neutral(p.dark).with_text_scale(k.text_scale) }).text(p.text).muted(p.muted)).selection_group(false)
 }
 
 pub struct Cx<'a> {
