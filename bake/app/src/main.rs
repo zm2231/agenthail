@@ -159,6 +159,7 @@ pub struct App {
     pub turn: ui::turn_options::Turns,
     redeliver: HashMap<String, feed::composer::Backoff>,
     pub inspect: ui::inspect::Inspect,
+    pub native_queue: ui::native_queue::NativeQueue,
     pub roles: ui::role::Roles,
     pub delivery: ui::delivery::Delivery,
     pub readies: ui::ready::Readies,
@@ -357,6 +358,7 @@ fn empty(live: Overview, persist: bool) -> App {
         turn: ui::turn_options::Turns::default(),
         redeliver: HashMap::new(),
         inspect: ui::inspect::Inspect::new(),
+        native_queue: ui::native_queue::NativeQueue::new(),
         roles: ui::role::Roles::new(),
         delivery: ui::delivery::Delivery::default(),
         readies: ui::ready::Readies::default(),
@@ -466,6 +468,7 @@ pub fn select(s: &mut App, id: &str) {
     ui::queue::fetch(s, id);
     ui::subagents::load(s, id);
     ui::inspect::load(s, id);
+    ui::native_queue::load(s, id);
     ui::role::load(s, id);
 }
 
@@ -533,6 +536,7 @@ fn selected_changed(s: &mut App, id: &str) {
         ui::queue::fetch(s, id);
     }
     ui::subagents::refresh(s, id);
+    ui::native_queue::changed(s, id);
     if let Some(work) = session(s, id).and_then(|x| x.primary_work(s.work_pick.get(id).map(String::as_str)).cloned()) {
         fetch_item(s, &work.project_key, &work.item_id);
     }
@@ -1543,6 +1547,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= ui::gone::watch(s);
     changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s) | ui::inspect::drain(s);
     changed |= ui::role::drain(s);
+    changed |= ui::native_queue::drain(s);
     changed |= ui::attach::pump(s);
     changed |= ui::text_size::pump(s);
     redeliver(s, tx);

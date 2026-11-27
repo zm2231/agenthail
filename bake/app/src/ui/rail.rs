@@ -2,11 +2,17 @@ use rune_kit::Kit;
 use super::*;
 
 pub(crate) fn rail_section(title: &str, glyph: &'static Icon, body: El) -> El {
+    rail_section_with(title, glyph, Vec::new(), body)
+}
+
+pub(crate) fn rail_section_with(title: &str, glyph: &'static Icon, trailing: Vec<El>, body: El) -> El {
+    let caption = row().gap(6.0).items_center().px(4.0).child(icon(glyph, 12.0).color(faint())).child(label(title));
+    let caption = if trailing.is_empty() { caption } else { caption.w_full().h(16.0).child(el().grow(1.0)).children(trailing) };
     col()
         .w_full()
         .gap(8.0)
         .pt(14.0)
-        .child(row().gap(6.0).items_center().px(4.0).child(icon(glyph, 12.0).color(faint())).child(label(title)))
+        .child(caption)
         .child(col().w_full().px(12.0).py(12.0).radius(14.0).fill(if crate::theme::paint().dark { Color::BLACK.alpha(0.20) } else { Color::BLACK.alpha(0.035) }).border(1.0, crate::theme::ink(0.07)).child(body))
 }
 
@@ -176,6 +182,7 @@ pub(crate) fn rail(s: &App, x: &Session, k: &Kit) -> El {
         ));
     }
     parts.extend(super::inspect::above(s, x, k));
+    parts.extend(super::native_queue::section(s, x, k));
     parts.extend(super::subagents::section(s, x, k));
     parts.extend(super::inspect::below(s, x));
     parts.extend(super::delivery::section(s, x, k));
