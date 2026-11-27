@@ -396,6 +396,9 @@ fn settled(s: &mut App, job: Job, from_sheet: Option<u64>, result: Result<Settle
     }
     match result {
         Ok(Settled { note: message, held: kept }) => {
+            if let Some(poke) = &s.overview_poke {
+                let _ = poke.send(());
+            }
             if let Job::Clean { session, .. } = &job
                 && kept
             {
@@ -410,9 +413,6 @@ fn settled(s: &mut App, job: Job, from_sheet: Option<u64>, result: Result<Settle
                 close_sheet(s);
             }
             s.ov.notice = Some(message);
-            if let Some(poke) = &s.overview_poke {
-                let _ = poke.send(());
-            }
         }
         Err(error) if projects::needs_replace(&error) && job.replacing().is_some() && (from_sheet.is_none() || sheet_open) => {
             let again = job.replacing().unwrap_or(job);
