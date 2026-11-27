@@ -111,6 +111,10 @@ fn probe() {
         median(after),
         feed::shared::copies() - copies
     ));
+    if let Ok(dump) = std::env::var("AGENTHAIL_LIVE_PATHS") {
+        let paths: Vec<String> = rt.elements().into_iter().filter(|e| !e.exiting).map(|e| e.path).collect();
+        std::fs::write(dump, paths.join("\n")).unwrap();
+    }
     let mut extra = rt.state.ov.needs[rt.state.ov.needs.len() - 1].clone();
     extra.target = crate::over::Target::Session("probe-inserted".into());
     extra.title = "A need inserted by the probe".into();
