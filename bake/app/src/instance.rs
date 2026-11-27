@@ -76,9 +76,9 @@ mod tests {
     fn a_second_copy_finds_the_first_and_its_pid() {
         let dir = std::env::temp_dir().join(format!("agenthail-instance-{}", std::process::id()));
         let path = dir.join("nested").join("app.lock");
-        let first = claim(&path).unwrap();
-        assert!(matches!(first, Claim::First(_)));
+        let Claim::First(first) = claim(&path).unwrap() else { panic!("the first claim holds the lock") };
         assert!(matches!(claim(&path).unwrap(), Claim::Running(Some(pid)) if pid == std::process::id() as i32));
+        first.unlock().unwrap();
         drop(first);
         assert!(matches!(claim(&path).unwrap(), Claim::First(_)));
         std::fs::remove_dir_all(&dir).unwrap();
