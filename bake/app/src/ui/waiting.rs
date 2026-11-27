@@ -146,7 +146,7 @@ pub(crate) fn question_context(q: &feed::catalog::RequestQuestion) -> Option<El>
     )
 }
 
-fn pick_el(request: &str, qi: usize, siblings: Vec<String>, option: &feed::catalog::RequestOption, multi: bool, picked: bool, recommended: bool, busy: bool) -> El {
+fn pick_el(request: &str, (qi, count): (usize, usize), siblings: Vec<String>, option: &feed::catalog::RequestOption, multi: bool, picked: bool, recommended: bool, busy: bool) -> El {
     let label = option.label.replace(" (Recommended)", "").replace(" (recommended)", "");
     let mut el = row()
         .key(format!("pick-{}", option.id))
@@ -168,7 +168,7 @@ fn pick_el(request: &str, qi: usize, siblings: Vec<String>, option: &feed::catal
     let (request, id) = (request.to_string(), option.id.clone());
     el = el.on_press_tx(move |s: &mut App, tx: &mut Tx| {
         put_down_composer(s, tx);
-        s.asks.step.insert(request.clone(), qi);
+        s.asks.step.insert(request.clone(), if multi || count < 2 { qi } else { qi + 1 });
         let was_typed = s.typed.remove(&format!("{request}|{qi}")).is_some_and(|t| !t.text.trim().is_empty());
         if was_typed {
             s.picks.entry(request.clone()).or_default().retain(|p| !siblings.contains(p));
@@ -253,7 +253,7 @@ fn compound_el(s: &App, request: &OpenRequest, route: &Route, busy: bool) -> El 
                 .children(question_context(q))
                 .children(q.options.iter().enumerate().map(|(i, o)| {
                     let recommended = feed::catalog::suggests(q.suggested, i, &o.label);
-                    pick_el(&request.id, qi, siblings.clone(), o, q.multi_select, picks.contains(&o.id) && typed_for(qi).is_empty(), recommended, busy)
+                    pick_el(&request.id, (qi, questions.len()), siblings.clone(), o, q.multi_select, picks.contains(&o.id) && typed_for(qi).is_empty(), recommended, busy)
                 }))
                 .children((!request.options_only).then(|| own_words(s, key.clone(), "Or answer in your own words", None))),
         );
@@ -281,9 +281,8 @@ fn decline(request: &OpenRequest, route: &Route, busy: bool) -> Option<El> {
     Some(if busy { b.opacity(0.5) } else { b.on_press(move |s: &mut App| route.answer(s, &id, Response::choose("deny"))) })
 }
 
-pub(crate) fn put_down_composer(s: &mut App, tx: &mut Tx) {
+pub(crate) fn put_down_composer(s: &mut App, _: &mut Tx) {
     s.composer.focused = false;
-    tx.blur();
 }
 
 fn pager_hint() -> El {
@@ -548,27 +547,25 @@ pub(crate) fn choice_el(i: usize, c: Choice, busy: bool, route: &Route) -> El {
     }
 }
 
-fn pager_target(s: &App) -> Option<(Route, OpenRequest, bool)> {
-    let (route, request, busy) = match &s.screen {
-        Screen::Session => {
+fn pager_target(s: &App, route: &Route) -> Option<(Route, OpenRequest, bool)> {
+    let (route, request, busy) = match route {
+        Route::Session => {
             let x = session(s, s.selected.as_deref()?).filter(|x| !x.archived)?;
             (Route::Session, open_request(s, x)?.clone(), s.answering.is_some())
         }
-        Screen::Now => {
-            let shown = s.ov.now_brief || !crate::over::layout::collapsed(s)[1];
-            let d = crate::over::inbox::opened(s).filter(|_| shown)?;
+        Route::Decision(d) => {
+            let d = s.ov.inbox.inbox.as_ref()?.decisions.iter().find(|x| x.id() == d.id())?.clone();
             let open: Vec<&OpenRequest> = d.requests.iter().collect();
             let request = shown_of(s, &d.session_id, &open)?.clone();
             let busy = crate::over::inbox::held(s, &d, &request.id);
             (Route::Decision(d), request, busy)
         }
-        _ => return None,
     };
     let asks = request.questions.as_ref().is_some_and(|q| q.iter().any(|q| !q.options.is_empty()));
     (asks && !request.is_input()).then_some((route, request, busy))
 }
 
-pub(crate) fn pager_key(s: &mut App, ev: &KeyEvent) -> bool {
+pub(crate) fn pager_key(s: &mut App, ev: &KeyEvent, route: &Route) -> bool {
     if ev.mods.cmd || ev.mods.ctrl || ev.mods.alt || ev.mods.shift || ev.mods.logo {
         return false;
     }
@@ -580,7 +577,7 @@ pub(crate) fn pager_key(s: &mut App, ev: &KeyEvent) -> bool {
         _ => None,
     };
     let Some(key) = key else { return false };
-    let Some((route, request, busy)) = pager_target(s) else { return false };
+    let Some((route, request, busy)) = pager_target(s, route) else { return false };
     if busy {
         return true;
     }
@@ -650,6 +647,9 @@ pub(crate) fn waiting_card(s: &App, x: &Session) -> El {
         .shadow(8.0, 28.0, attention().alpha(0.10))
         .transition(Transition::scale(0.97))
         .on_press_tx(put_down_composer)
+        .key("waiting-card")
+        .focusable(true)
+        .on_key(|s: &mut App, ev: &KeyEvent, _: &mut Tx| pager_key(s, ev, &Route::Session))
         .child(col().size(34.0, 34.0).radius(10.0).items_center().justify_center().fill(attention().alpha(0.18)).child(icon(&icons::HAND, 17.0).color(attention())))
         .child(body);
     col().w_full().items_center().px(32.0).pb(12.0).child(card_el)

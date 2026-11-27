@@ -361,9 +361,6 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     if s.composer.focused {
         return false;
     }
-    if crate::ui::waiting::pager_key(s, ev) {
-        return true;
-    }
     match &ev.key {
         Key::Escape => {
             if s.screen == Screen::Now && !s.ov.now_brief && layout::restore(s) {

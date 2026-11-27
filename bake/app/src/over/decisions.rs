@@ -127,7 +127,16 @@ fn answer_panel(s: &App, d: &Decision) -> El {
     let busy = inbox::held(s, d, &request.id);
     let who = s.ov.d.session(&d.session_id).map(|x| s.ov.d.title(x)).unwrap_or_else(|| "The agent".into());
     let head = row().w_full().gap(8.0).items_center().child(text(crate::over::plain(&waiting::request_heading(request, &who))).font(BODY_MED).color(strong()).wrap().grow(1.0).min_w(0.0)).children(waiting::switcher(&d.session_id, &open, &request.id));
-    col().key(format!("decision-answer-{}", d.id())).w_full().gap(8.0).pl(4.0).child(head).child(waiting::request_body(s, request, Route::Decision(d.clone()), busy))
+    let route = Route::Decision(d.clone());
+    col()
+        .key(format!("decision-answer-{}", d.id()))
+        .focusable(true)
+        .on_key(move |s: &mut App, ev: &rune::KeyEvent, _: &mut Tx| waiting::pager_key(s, ev, &route))
+        .w_full()
+        .gap(8.0)
+        .pl(4.0)
+        .child(head)
+        .child(waiting::request_body(s, request, Route::Decision(d.clone()), busy))
 }
 
 fn reply_panel(s: &App, i: usize, d: &Decision, who: &str) -> El {

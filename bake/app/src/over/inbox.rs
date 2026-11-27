@@ -280,15 +280,15 @@ pub fn answer(s: &mut crate::App, d: &Decision, request: &str, response: Respons
     act(s, d, outcome, move |client, d| client.answer(&d.session_id, &request, &response).map_err(|e| (e, request_hold(&d.session_id, &request))));
 }
 
-pub fn opened(s: &crate::App) -> Option<Decision> {
-    let open = s.ov.inbox.open.as_ref()?;
-    s.ov.inbox.inbox.as_ref()?.decisions.iter().find(|d| &d.id() == open && d.answerable && !d.requests.is_empty() && !d.is_review()).cloned()
-}
-
 pub fn toggle_open(s: &mut crate::App, d: &Decision, tx: &mut rune::Tx) {
     let id = d.id();
-    s.ov.inbox.open = if s.ov.inbox.open.as_ref() == Some(&id) { None } else { Some(id) };
     crate::ui::waiting::put_down_composer(s, tx);
+    if s.ov.inbox.open.as_ref() == Some(&id) {
+        s.ov.inbox.open = None;
+        return;
+    }
+    tx.focus_when_shown(format!("decision-answer-{id}"), false);
+    s.ov.inbox.open = Some(id);
 }
 
 pub fn reply(s: &mut crate::App, d: &Decision) {
