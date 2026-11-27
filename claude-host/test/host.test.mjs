@@ -7,7 +7,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline';
-import { after, test } from 'node:test';
+import { after, afterEach, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -25,14 +25,32 @@ after(() => {
   for (const host of hosts) host.kill('SIGKILL');
 });
 
+// Fixtures live in the scratch home, which test-home.mjs removes however this
+// process ends; each is also removed, with the hosts it started, when its test
+// ends.
+const fixtures = [];
+
+afterEach(async () => {
+  for (const f of fixtures.splice(0)) {
+    for (const host of f.hosts) {
+      if (host.exitCode !== null || host.signalCode !== null) continue;
+      host.kill('SIGKILL');
+      await host.exited;
+    }
+    fs.rmSync(f.root, { recursive: true, force: true, maxRetries: 5 });
+  }
+});
+
 function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ch-'));
+  const root = fs.mkdtempSync(path.join(os.homedir(), 'ch-'));
   const state = path.join(root, 'state');
   const claudeDir = path.join(root, 'claude');
   const cwd = path.join(root, 'work');
   for (const dir of [state, claudeDir, cwd]) fs.mkdirSync(dir);
   fs.writeFileSync(path.join(state, 'lock'), '');
-  return { root, state, claudeDir, cwd, socket: path.join(root, 'h.sock') };
+  const f = { root, state, claudeDir, cwd, socket: path.join(root, 'h.sock'), hosts: [] };
+  fixtures.push(f);
+  return f;
 }
 
 async function startHost(f, { lock = true, version = 'test', env = {}, claude = fakeClaude, agenthail = '' } = {}) {
@@ -43,6 +61,7 @@ async function startHost(f, { lock = true, version = 'test', env = {}, claude = 
   });
   if (lock) fs.closeSync(fd);
   hosts.push(host);
+  f.hosts.push(host);
   host.stderrText = '';
   host.stderr.on('data', (chunk) => (host.stderrText += chunk));
   host.exited = new Promise((resolve) => host.on('exit', (code) => resolve(code)));
