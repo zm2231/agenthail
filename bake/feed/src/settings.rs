@@ -36,6 +36,8 @@ pub struct SessionSettings {
     pub collaboration_mode: Option<Setting>,
     #[serde(default)]
     pub unavailable: BTreeMap<String, String>,
+    #[serde(skip)]
+    pub agent_modes: Vec<String>,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -76,6 +78,10 @@ impl ContextUsage {
     }
 }
 
+fn host_of(session: &Session) -> &str {
+    if session.host.state == "local" || session.host.state.is_empty() { "" } else { &session.host.id }
+}
+
 pub fn tokens(n: i64) -> String {
     match n {
         n if n >= 1_000_000 => {
@@ -90,6 +96,31 @@ pub fn tokens(n: i64) -> String {
 impl Client {
     pub fn session_settings(&self, session: &str) -> Result<SessionSettings> {
         Ok(serde_json::from_value(self.get_json(&format!("/api/v1/session-settings?id={}", enc(session)))?)?)
+    }
+
+    pub fn settings_for(&self, session: &Session) -> Result<SessionSettings> {
+        let mut settings = self.session_settings(&session.id)?;
+        if crate::create::is_acp(&session.surface) {
+            self.agent_mode(session, &mut settings);
+        }
+        Ok(settings)
+    }
+
+    fn agent_mode(&self, session: &Session, settings: &mut SessionSettings) {
+        let mut missing = Vec::new();
+        match self.get_json(&format!("/api/v1/requests?sessionId={}", enc(&session.id))) {
+            Ok(state) => settings.permission = state["permissionMode"].as_str().filter(|m| !m.is_empty()).map(|m| Permission { mode: m.into() }),
+            Err(error) => missing.push(format!("the current mode isn't readable: {error}")),
+        }
+        match self.session_options(host_of(session)) {
+            Ok(options) => settings.agent_modes = options.surface(&session.surface).map(|x| x.modes.clone()).unwrap_or_default(),
+            Err(error) => missing.push(format!("the agent's modes aren't readable: {error}")),
+        }
+        if missing.is_empty() {
+            settings.unavailable.remove("mode");
+        } else {
+            settings.unavailable.insert("mode".into(), missing.join("; "));
+        }
     }
 
     pub fn session_models(&self, surface: &str, session: &str) -> Result<Vec<ModelOption>> {
@@ -139,6 +170,7 @@ pub struct Chip {
     pub choices: Vec<Choice>,
     pub changeable: bool,
     pub next_turn: bool,
+    pub steps: bool,
     pub note: Option<String>,
 }
 
@@ -174,7 +206,7 @@ impl Chip {
 
     /// Choices that let the agent act without asking are only ever picked from the menu.
     pub fn cycled(&self) -> Option<&Choice> {
-        if !self.changeable {
+        if !self.changeable || !self.steps {
             return None;
         }
         let quiet: Vec<&Choice> = self.choices.iter().filter(|c| !c.confirm).collect();
@@ -233,7 +265,7 @@ fn offered(settings: &SessionSettings, models: &[ModelOption], caps: &crate::cat
     }
     if !model_choices.is_empty() {
         let changeable = caps.model && !models.is_empty();
-        out.push(Chip { key: "model", name: "Model", value: model.clone(), choices: model_choices, changeable, next_turn: codex, note: note("model") });
+        out.push(Chip { key: "model", name: "Model", value: model.clone(), choices: model_choices, changeable, next_turn: codex, steps: false, note: note("model") });
     }
 
     let running = models.iter().find(|m| m.id == model);
@@ -256,18 +288,28 @@ fn offered(settings: &SessionSettings, models: &[ModelOption], caps: &crate::cat
         if !effort.is_empty() && !choices.iter().any(|c| c.id == effort) {
             choices.push(Choice::new(&effort, &effort_label(&effort)));
         }
-        out.push(Chip { key: "effort", name: "Effort", value: effort, choices, changeable, next_turn: codex, note: note("effort") });
+        out.push(Chip { key: "effort", name: "Effort", value: effort, choices, changeable, next_turn: codex, steps: false, note: note("effort") });
     }
 
     if codex {
         let value = settings.collaboration_mode.as_ref().map(|m| m.value.clone()).filter(|v| !v.is_empty()).unwrap_or_else(|| "default".into());
         let choices = CODEX_MODES.iter().map(|(id, label)| Choice::new(id, label)).collect();
-        out.push(Chip { key: "mode", name: "Mode", value, choices, changeable: true, next_turn: true, note: None });
+        out.push(Chip { key: "mode", name: "Mode", value, choices, changeable: true, next_turn: true, steps: true, note: None });
     } else if claude {
         let value = settings.permission.as_ref().map(|p| p.mode.clone()).unwrap_or_default();
         if hosted || !value.is_empty() {
             let note = (!hosted).then(|| "Only sessions Agenthail runs can change this".to_string()).or_else(|| note("permission"));
-            out.push(Chip { key: "mode", name: "Permission mode", value, choices: claude_modes(), changeable: hosted, next_turn: false, note });
+            out.push(Chip { key: "mode", name: "Permission mode", value, choices: claude_modes(), changeable: hosted, next_turn: false, steps: true, note });
+        }
+    } else if crate::create::is_acp(&settings.surface) {
+        let value = settings.permission.as_ref().map(|p| p.mode.clone()).unwrap_or_default();
+        let mut choices: Vec<Choice> = settings.agent_modes.iter().map(|m| Choice::new(m, m)).collect();
+        if !value.is_empty() && !choices.iter().any(|c| c.id == value) {
+            choices.push(Choice::new(&value, &value));
+        }
+        if !choices.is_empty() {
+            let changeable = caps.permission_mode && !settings.agent_modes.is_empty();
+            out.push(Chip { key: "mode", name: "Mode", value, choices, changeable, next_turn: false, steps: false, note: note("mode") });
         }
     }
     out
@@ -524,6 +566,77 @@ mod tests {
         assert_eq!(next(&codex).as_deref(), Some("plan"));
         codex.collaboration_mode = Some(Setting { value: "plan".into() });
         assert_eq!(next(&codex).as_deref(), Some("default"));
+    }
+
+    fn devin() -> SessionSettings {
+        let mut s: SessionSettings = serde_json::from_value(json!({
+            "surface": "devin", "runtimeKind": "acp",
+            "model": {"value": "swe-2", "source": "started"},
+            "unavailable": {"effort": "this surface does not report its settings", "permission": "this surface does not report its settings"}
+        }))
+        .unwrap();
+        s.permission = Some(Permission { mode: "ask".into() });
+        s.agent_modes = vec!["ask".into(), "default".into(), "bypass".into()];
+        s
+    }
+
+    #[test]
+    fn an_acp_session_offers_its_agents_own_modes_from_the_menu_only() {
+        let caps = Capabilities { model: true, permission_mode: true, ..Capabilities::default() };
+        let models = opts(json!([{"id": "swe-2", "displayName": "SWE 2"}, {"id": "adaptive", "displayName": "Adaptive"}]));
+        let chips = chips(&devin(), &models, &with(caps.clone()));
+        assert_eq!(chips.iter().map(|c| c.key).collect::<Vec<_>>(), vec!["model", "mode"]);
+        let mode = &chips[1];
+        assert_eq!((mode.name, mode.label(), ids(mode)), ("Mode", "ask".to_string(), vec!["ask", "default", "bypass"]));
+        assert!(mode.changeable && !mode.next_turn);
+        assert_eq!(mode.pick("bypass"), Pick::Apply);
+        assert_eq!(mode.cycled(), None, "which of an agent's modes skip asking is unknown, so Shift-Tab leaves them alone");
+        let fixed = super::chips(&devin(), &models, &with(Capabilities { permission_mode: false, ..caps.clone() }));
+        assert!(!fixed[1].changeable);
+        let mut unknown = devin();
+        unknown.agent_modes.clear();
+        let shown = super::chips(&unknown, &models, &with(caps.clone()));
+        assert_eq!((ids(&shown[1]), shown[1].changeable), (vec!["ask"], false), "a mode with no list to choose from is shown, not offered");
+        unknown.permission = None;
+        assert!(super::chips(&unknown, &models, &with(caps.clone())).iter().all(|c| c.key != "mode"));
+        let mut s = devin();
+        apply(&mut s, "mode", "bypass");
+        assert_eq!(s.permission.unwrap().mode, "bypass");
+    }
+
+    #[test]
+    fn an_acp_sessions_settings_add_its_mode_and_its_hosts_modes() {
+        let (client, seen) = crate::mock::daemon(crate::mock::replies(&[
+            (200, r#"{"surface":"devin","model":{"value":"swe-2"}}"#),
+            (200, r#"{"permissionMode":"ask","requests":[]}"#),
+            (200, r#"{"surfaces":[{"id":"claude","workspace":true},{"id":"devin","workspace":true,"modes":["ask","bypass"]}],"projects":[]}"#),
+            (200, r#"{"surface":"devin"}"#),
+            (500, r#"{"error":{"code":"x","message":"down"}}"#),
+            (200, r#"{"surfaces":[]}"#),
+            (200, r#"{"surface":"claude"}"#),
+        ]));
+        let mut remote: Session = serde_json::from_value(json!({"id": "d1", "surface": "devin", "host": {"id": "h3a", "state": "connected"}})).unwrap();
+        let read = client.settings_for(&remote).unwrap();
+        assert_eq!((read.permission.unwrap().mode, read.agent_modes, read.unavailable.get("mode")), ("ask".into(), vec!["ask".to_string(), "bypass".into()], None));
+        remote.host.state = "local".into();
+        let half = client.settings_for(&remote).unwrap();
+        assert!(half.permission.is_none() && half.agent_modes.is_empty());
+        assert!(half.unavailable["mode"].starts_with("the current mode isn't readable"), "{:?}", half.unavailable);
+        let claude: Session = serde_json::from_value(json!({"id": "c1", "surface": "claude"})).unwrap();
+        assert!(client.settings_for(&claude).unwrap().agent_modes.is_empty());
+        let paths: Vec<String> = seen.try_iter().map(|(path, _)| path).collect();
+        assert_eq!(
+            paths,
+            vec![
+                "/api/v1/session-settings?id=d1",
+                "/api/v1/requests?sessionId=d1",
+                "/api/v1/session-options?host=h3a",
+                "/api/v1/session-settings?id=d1",
+                "/api/v1/requests?sessionId=d1",
+                "/api/v1/session-options",
+                "/api/v1/session-settings?id=c1"
+            ]
+        );
     }
 
     #[test]

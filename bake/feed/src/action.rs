@@ -104,6 +104,15 @@ impl Client {
         self.action("turn-setting", json!({"sessionId": session, "setting": setting, "value": value})).map(drop)
     }
 
+    pub fn session_setting(&self, session: &str, surface: &str, setting: &str, value: &str) -> Outcome<()> {
+        match setting {
+            _ if !crate::create::is_acp(surface) => self.turn_setting(session, setting, value),
+            "mode" => self.action("permission-mode", json!({"sessionId": session, "permissionMode": value})).map(drop),
+            "model" => self.action("model", json!({"sessionId": session, "model": value})).map(drop),
+            _ => self.turn_setting(session, setting, value),
+        }
+    }
+
     pub fn compact(&self, session: &str) -> Outcome<()> {
         self.action("compact", json!({"sessionId": session})).map(drop)
     }
@@ -243,6 +252,9 @@ mod tests {
             (Box::new(|c| c.session_read("s1", "r9", true).map(drop)), json!({"action": "session-read", "sessionId": "s1", "revision": "r9"})),
             (Box::new(|c| c.session_read("s1", "r9", false).map(drop)), json!({"action": "session-unread", "sessionId": "s1", "revision": "r9"})),
             (Box::new(|c| c.turn_setting("s1", "effort", "high")), json!({"action": "turn-setting", "sessionId": "s1", "setting": "effort", "value": "high"})),
+            (Box::new(|c| c.session_setting("s1", "codex", "mode", "plan")), json!({"action": "turn-setting", "sessionId": "s1", "setting": "mode", "value": "plan"})),
+            (Box::new(|c| c.session_setting("s1", "devin", "mode", "ask")), json!({"action": "permission-mode", "sessionId": "s1", "permissionMode": "ask"})),
+            (Box::new(|c| c.session_setting("s1", "devin", "model", "swe-2")), json!({"action": "model", "sessionId": "s1", "model": "swe-2"})),
             (Box::new(|c| c.compact("s1")), json!({"action": "compact", "sessionId": "s1"})),
             (Box::new(|c| c.session_focus("s1")), json!({"action": "session-focus", "sessionId": "s1"})),
             (Box::new(|c| c.dismiss_decision(Dismiss::Stopped { session: "s1" })), json!({"action": "dismiss-decision", "sessionId": "s1"})),

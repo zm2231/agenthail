@@ -134,7 +134,8 @@ fn spawn(s: &App, after: Duration, job: impl FnOnce(&Client) -> Option<Done> + S
 
 fn fetch_settings(s: &mut App, id: &str, after: Duration) {
     let (id, seq) = (id.to_string(), s.menus.next());
-    spawn(s, after, move |c| Some(Done::Settings(id.clone(), seq, c.session_settings(&id).map_err(|e| e.to_string()))));
+    let row = session(s, &id).cloned().unwrap_or_else(|| feed::catalog::Session { id: id.clone(), ..Default::default() });
+    spawn(s, after, move |c| Some(Done::Settings(id.clone(), seq, c.settings_for(&row).map_err(|e| e.to_string()))));
 }
 
 fn fetch_context(s: &mut App, id: &str, after: Duration) -> u64 {
@@ -408,9 +409,10 @@ pub fn set(s: &mut App, id: &str, key: &'static str, value: &str) {
         return;
     }
     s.menus.busy.insert((id.to_string(), key));
+    let surface = session(s, id).map(|x| x.surface.clone()).unwrap_or_default();
     let (id, value) = (id.to_string(), value.to_string());
     spawn(s, Duration::ZERO, move |c| {
-        let result = c.turn_setting(&id, key, &value);
+        let result = c.session_setting(&id, &surface, key, &value);
         Some(Done::Set(id, key, value, result))
     });
 }
