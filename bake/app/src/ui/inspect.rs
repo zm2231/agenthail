@@ -120,8 +120,15 @@ pub(crate) fn is_streamed(s: &App, id: &str, kind: &'static str) -> bool {
     s.inspect.overlay.holds(id, kind)
 }
 
+#[cfg(test)]
+pub fn follows(s: &App, id: &str) -> bool {
+    s.inspect.overlay.follows(id)
+}
+
 pub(crate) fn returned(s: &mut App, id: &str) {
-    s.inspect.overlay.select(id);
+    if s.inspect.overlay.follows(id) {
+        s.inspect.overlay.select(id);
+    }
 }
 
 pub(crate) fn metadata_moved(s: &mut App, id: &str) {

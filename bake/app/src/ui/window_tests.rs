@@ -566,3 +566,17 @@ fn failed_session_settings_are_retried_for_every_window() {
     crate::ui::session_menu::drain(&mut s);
     assert!(["a", "b"].iter().all(|id| crate::ui::session_menu::asked(&s, id)), "each shown session's settings are read again");
 }
+
+#[test]
+fn a_window_s_session_coming_back_leaves_the_inspector_on_the_session_it_follows() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::inspect::load(&mut s, "a");
+    s.snapshots = 1;
+    let rows = s.sessions.clone();
+    s.sessions.retain(|x| x.id != "b");
+    crate::ui::gone::watch(&mut s);
+    s.sessions = rows;
+    crate::ui::gone::watch(&mut s);
+    assert!(crate::ui::inspect::follows(&s, "a"), "b returning in its window doesn't take main's inspector");
+}
