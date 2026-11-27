@@ -64,12 +64,32 @@ func (w *actionRecorder) reply() actionReply {
 
 type actionKeyContextKey struct{}
 
+type actionAttemptKey struct{}
+
+// actionAttempt carries what a forward sent, so a resend after an unanswered
+// forward sends the same bytes under the same key: the host matches its hash
+// and replays its outcome, whatever names or times changed since.
+type actionAttempt struct {
+	prior     *actionForward
+	forwarded *actionForward
+}
+
+type actionForward struct {
+	Host string `json:"host"`
+	Body []byte `json:"body"`
+}
+
+func attemptFrom(ctx context.Context) *actionAttempt {
+	attempt, _ := ctx.Value(actionAttemptKey{}).(*actionAttempt)
+	return attempt
+}
+
 // performAction runs one action for any front end: idempotency, routing to the
 // host that owns its target, decoding and dispatch.
 func (d *Daemon) performAction(ctx context.Context, p principal, format actionFormat, body []byte, idempotencyKey string) actionReply {
 	ctx = p.context(ctx)
-	return d.idempotentReply(p.ID, idempotencyKey, body, mcpRequestHash(ctx), func(body []byte) actionReply {
-		reply := d.routeHostAction(ctx, p, body, idempotencyKey)
+	return d.idempotentReply(p.ID, idempotencyKey, body, mcpRequestHash(ctx), func(attempt *actionAttempt, body []byte) actionReply {
+		reply := d.routeHostAction(context.WithValue(ctx, actionAttemptKey{}, attempt), p, body, idempotencyKey)
 		if format == actionFormatAPIv1 {
 			reply = apiV1Reply(reply)
 		}

@@ -44,11 +44,13 @@ struct OutboxTest {
 
         let restoredWire = try! api.instructionWire(sessionID: "R", message: "restored", author: "person", attachments: [], idempotencyKey: "k-restored")
         let overdueWire = try! api.instructionWire(sessionID: "T", message: "overdue", author: "person", attachments: [], idempotencyKey: "k-overdue")
+        let expiredWire = try! api.instructionWire(sessionID: "E", message: "a month old", author: "person", attachments: [], idempotencyKey: "k-expired")
         var previous = ComposerStore.Saved(drafts: ["R": "kept draft"], stashes: ["R": "kept stash"])
         previous.attachmentNames = ["R": ["notes.txt"]]
         previous.sends = [
             .init(id: UUID(), sessionID: "R", message: "restored", idempotencyKey: "k-restored", uploaded: [], wire: restoredWire, hadAttachments: false, sentAt: Date()),
             .init(id: UUID(), sessionID: "T", message: "overdue", idempotencyKey: "k-overdue", uploaded: [], wire: overdueWire, hadAttachments: false, sentAt: Date(timeIntervalSinceNow: -2 * SendQueue.retryWindow)),
+            .init(id: UUID(), sessionID: "E", message: "a month old", idempotencyKey: "k-expired", uploaded: [], wire: expiredWire, hadAttachments: false, sentAt: Date(timeIntervalSinceNow: -SendKey.lifetime - 60)),
             .init(id: UUID(), sessionID: "U", message: "lost upload", idempotencyKey: "k-lost", uploaded: nil, wire: nil, hadAttachments: true, sentAt: Date()),
             .init(id: UUID(), sessionID: "F", message: "with file", idempotencyKey: "k-file", uploaded: ["up-1"], wire: nil, hadAttachments: true, sentAt: Date(), files: [UploadedAttachment(id: "up-1", name: "notes.txt", mediaType: "text/plain", bytes: 3)])
         ]
@@ -77,6 +79,14 @@ struct OutboxTest {
         check(relaunched.localSends["T"] == nil && relaunched.draft(for: "T").text == "overdue", "Put back returns the text to the composer and drops the row")
         check(await wait { !relaunchStore.load().saved.sends.contains { $0.sessionID == "T" } }, "a put-back send leaves the saved file")
         check(StubDaemon.sends(of: "overdue").isEmpty, "Put back sends nothing")
+
+        let expired = relaunched.localSends["E"]?.first
+        check(expired?.keyExpired == true && expired?.unconfirmedTitle?.contains("too old to retry") == true, "a send older than the daemon keeps its key says it may have arrived and cannot be retried: \(String(describing: expired))")
+        if let expired { relaunched.retrySend(expired, in: "E") }
+        try? await Task.sleep(for: .milliseconds(300))
+        check(StubDaemon.sends(of: "a month old").isEmpty, "a tap on Retry does not send a message whose key the daemon may have dropped")
+        if let expired = relaunched.localSends["E"]?.first { relaunched.putBackSend(expired, in: "E") }
+        check(relaunched.draft(for: "E").text == "a month old", "Put back returns its text so it can be sent again as a new message")
 
         let spoolStore = ComposerStore(file: folder.appendingPathComponent("spooled.json"))
         let sendFile = ComposerAttachment(name: "spooled.txt", data: Data("kept".utf8), mediaType: "text/plain")

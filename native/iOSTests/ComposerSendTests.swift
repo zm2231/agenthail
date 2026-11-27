@@ -941,6 +941,25 @@ final class ComposerSendTests: XCTestCase {
         try await waitUntil { queue.pending.isEmpty }
     }
 
+    func testASendOlderThanItsKeyIsNotRetriedByATap() async throws {
+        let queue = SendQueue()
+        var attempts = 0
+        queue.deliver = { _ in
+            attempts += 1
+            return .unconfirmed
+        }
+        queue.restore([PendingSend(sessionID: "a", message: "a month old", attachments: [], unconfirmed: true, sentAt: Date(timeIntervalSinceNow: -SendKey.lifetime - 60))])
+        try await waitUntil { queue.pending["a"]?.first?.retryStopped == true }
+        let stopped = attempts
+        let send = try XCTUnwrap(queue.pending["a"]?.first)
+        XCTAssertFalse(send.offersRetry, "the daemon may have dropped its key, so Retry could send it twice")
+        XCTAssertTrue(send.unconfirmedTitle.contains("too old to retry"))
+        queue.retry(send)
+        try await Task.sleep(for: .milliseconds(1200))
+        XCTAssertEqual(attempts, stopped, "a tap sends nothing")
+        XCTAssertEqual(queue.pending["a"]?.first?.message, "a month old", "it keeps its text to put back")
+    }
+
     func testAWaitingSendIsNamedByItsFirstLine() {
         let send = PendingSend(sessionID: "a", message: "  Check the signing step\nthen rerun", attachments: [])
         XCTAssertEqual(send.previewLine, "Check the signing step")

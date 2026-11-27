@@ -19,6 +19,10 @@
 -- migration 2026-11-26-your-work-items-carry-asks
 -- migration 2026-11-26-your-workers-stopped-mid-turn-close-their-turn
 -- migration 2026-11-26-yours-told-apart-from-your-agents
+-- migration 2026-11-27-action-receipts-expire
+
+-- index action_receipts_updated
+CREATE INDEX action_receipts_updated ON action_receipts(updated_at) WHERE status='completed';
 
 -- index agent_inbox_message
 CREATE UNIQUE INDEX agent_inbox_message ON agent_inbox(identity_id, message_uuid) WHERE message_uuid<>'';

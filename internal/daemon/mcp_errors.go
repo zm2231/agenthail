@@ -51,7 +51,7 @@ func mcpCodeFor(status int, code string) (mcpRefusal, bool) {
 		return mcpRefusal{Code: "refused"}, true
 	case status == http.StatusBadGateway && code == "control_failed":
 		return mcpRefusal{Code: "busy", Retryable: true}, true
-	case status == http.StatusBadGateway && strings.HasSuffix(code, "_unknown"):
+	case status == http.StatusBadGateway && strings.HasSuffix(code, "_unknown"), status == http.StatusConflict && code == "action_outcome_unknown":
 		return mcpRefusal{Code: "busy", Detail: map[string]any{"outcome": "unknown"}}, true
 	case status == http.StatusBadGateway && (code == "bad_gateway" || strings.HasSuffix(code, "_failed")):
 		return mcpRefusal{Code: "refused", Retryable: true}, true

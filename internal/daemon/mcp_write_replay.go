@@ -58,7 +58,7 @@ func (d *Daemon) replayMCPWrite(ctx context.Context, caller *mcpCaller, tool str
 	sum := sha256.Sum256(append([]byte(tool+"\n"), encoded...))
 	hash := hex.EncodeToString(sum[:])
 	ctx = context.WithValue(ctx, mcpRequestHashKey{}, hash)
-	receipt, found, err := d.Registry.ActionReceipt(sessionPrincipal(caller.session.ID).ID, key)
+	receipt, found, err := d.actionRuns.current(d.Registry, sessionPrincipal(caller.session.ID).ID, key, hash, encoded)
 	if err != nil {
 		return ctx, mcpReplay{done: true, err: err}
 	}
@@ -68,7 +68,10 @@ func (d *Daemon) replayMCPWrite(ctx context.Context, caller *mcpCaller, tool str
 	if receipt.RequestHash != hash {
 		return ctx, mcpReplay{done: true, err: refuse("idempotency_conflict", "This clientRequestId was already used for a different request; choose a new one.")}
 	}
-	if receipt.Status != registry.ActionReceiptCompleted {
+	switch receipt.Status {
+	case registry.ActionReceiptRetry:
+		return ctx, mcpReplay{}
+	case registry.ActionReceiptPending:
 		return ctx, mcpReplay{done: true, err: mcpUnknownOutcome()}
 	}
 	var stored actionReplay
@@ -94,7 +97,7 @@ func (d *Daemon) mcpOnce(ctx context.Context, caller *mcpCaller, key string, inp
 	}
 	var value any
 	ran := false
-	reply := d.idempotentReply(sessionPrincipal(caller.session.ID).ID, key, body, mcpRequestHash(ctx), func([]byte) actionReply {
+	reply := d.idempotentReply(sessionPrincipal(caller.session.ID).ID, key, body, mcpRequestHash(ctx), func(*actionAttempt, []byte) actionReply {
 		ran = true
 		value, err = run()
 		return mcpOutcomeReply(value, err)

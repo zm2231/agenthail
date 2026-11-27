@@ -9,7 +9,7 @@ import (
 	"github.com/zm2231/agenthail/internal/registry/registrytest"
 )
 
-// Apps resend unconfirmed messages under their saved keys after any delay.
+// Apps resend unconfirmed messages under their saved keys long after they were sent.
 func TestActionIdempotencyOldReceiptReplaysAfterRestartWithoutDispatch(t *testing.T) {
 	path := registrytest.Path(t)
 	fake := idempotencyFake()
@@ -27,7 +27,7 @@ func TestActionIdempotencyOldReceiptReplaysAfterRestartWithoutDispatch(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	old := time.Now().AddDate(-1, 0, 0).UTC().Format(time.RFC3339Nano)
+	old := time.Now().Add(-actionReceiptRetention + time.Hour).UTC().Format(time.RFC3339Nano)
 	if _, err := db.Exec(`UPDATE action_receipts SET created_at=?, updated_at=?`, old, old); err != nil {
 		t.Fatal(err)
 	}
@@ -42,6 +42,6 @@ func TestActionIdempotencyOldReceiptReplaysAfterRestartWithoutDispatch(t *testin
 		t.Fatalf("replay status=%d body=%s, want %d %s", replay.Code, replay.Body.String(), first.Code, first.Body.String())
 	}
 	if len(restartedFake.sent) != 0 {
-		t.Fatalf("a year-old key re-dispatched after restart: sends=%d", len(restartedFake.sent))
+		t.Fatalf("a key inside the retention window re-dispatched after restart: sends=%d", len(restartedFake.sent))
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -35,6 +36,9 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 	}
 	if action, _ := request["action"].(string); !p.forThePerson() && personOnlyActions[action] != nil {
 		return replyWith(func(w http.ResponseWriter) { writeActionResult(w, actionResult{}, personOnlyActions[action]) })
+	}
+	if attempt := attemptFrom(ctx); attempt != nil && attempt.prior != nil {
+		return d.resendHostAction(ctx, p, key, *attempt.prior)
 	}
 	host, rewritten, err := d.routeActionRequest(ctx, request)
 	if err != nil {
@@ -77,10 +81,43 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 	}
 	body, _ := json.Marshal(request)
 	reply := d.forwardHostAction(ctx, p, key, host, request, body)
-	if hostTask {
+	if hostTask && !provisionalActionReply(reply) {
 		reply = d.recordHostTask(host, request, reply)
 	}
 	return reply
+}
+
+// Only the host a forward last reached holds a receipt for its key, so a
+// resend goes there with the bytes it sent, whatever the route says now. A
+// host that never got the request answers that the session moved, and the
+// forward follows it.
+func (d *Daemon) resendHostAction(ctx context.Context, p principal, key string, prior actionForward) actionReply {
+	host, paired := d.pairedHost(prior.Host)
+	if !paired {
+		return replyWith(func(w http.ResponseWriter) {
+			writeAPIError(w, http.StatusConflict, "action_outcome_unknown", "This request was forwarded to a host that is no longer paired, and it did not answer, so it may have happened. Check what it was meant to change before sending it again as a new request.")
+		})
+	}
+	if err := d.hostTransit(ctx, host); err != nil {
+		return replyWith(func(w http.ResponseWriter) { writeActionResult(w, actionResult{}, err) })
+	}
+	if err := incompatibleHost(host); err != nil {
+		return replyWith(func(w http.ResponseWriter) { writeActionResult(w, actionResult{}, err) })
+	}
+	var request map[string]any
+	_ = json.Unmarshal(prior.Body, &request)
+	reply := d.forwardHostAction(ctx, p, key, host, request, prior.Body)
+	if task, _ := request["task"].(bool); !task || request["action"] != "session-create" || provisionalActionReply(reply) {
+		return reply
+	}
+	if reply.Status >= http.StatusOK && reply.Status < http.StatusMultipleChoices {
+		if err := d.hostTaskParent(request); err != nil {
+			return replyWith(func(w http.ResponseWriter) {
+				writeAPIError(w, http.StatusConflict, "task_parent_moved", fmt.Sprintf("The session started on host %s, but the session that asked for it is no longer on this computer, so it is not recorded as its task here: %s", host.record.Name, err))
+			})
+		}
+	}
+	return d.recordHostTask(host, request, reply)
 }
 
 func (d *Daemon) decodeAction(ctx context.Context, p principal, raw []byte, key string) actionReply {

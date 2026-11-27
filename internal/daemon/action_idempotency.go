@@ -49,7 +49,7 @@ func (d *Daemon) idempotentActionHandler(next http.HandlerFunc) http.HandlerFunc
 			writeAPIError(w, http.StatusBadRequest, "invalid_request", "The action request is invalid.")
 			return
 		}
-		d.idempotentReply(principalFromRequest(r).ID, key, raw, mcpRequestHash(r.Context()), func(body []byte) actionReply {
+		d.idempotentReply(principalFromRequest(r).ID, key, raw, mcpRequestHash(r.Context()), func(_ *actionAttempt, body []byte) actionReply {
 			r.Body = io.NopCloser(bytes.NewReader(body))
 			recorder := newActionRecorder()
 			next(recorder, r)
@@ -58,10 +58,10 @@ func (d *Daemon) idempotentActionHandler(next http.HandlerFunc) http.HandlerFunc
 	}
 }
 
-func (d *Daemon) idempotentReply(principalID, rawKey string, body []byte, requestHash string, run func([]byte) actionReply) actionReply {
+func (d *Daemon) idempotentReply(principalID, rawKey string, body []byte, requestHash string, run func(attempt *actionAttempt, body []byte) actionReply) actionReply {
 	key := strings.TrimSpace(rawKey)
 	if key == "" {
-		return run(body)
+		return run(&actionAttempt{}, body)
 	}
 	if len(key) > registry.ActionReceiptKeyLimit {
 		return replyWith(func(w http.ResponseWriter) {
@@ -78,19 +78,19 @@ func (d *Daemon) idempotentReply(principalID, rawKey string, body []byte, reques
 		hash := sha256.Sum256(canonical)
 		requestHash = hex.EncodeToString(hash[:])
 	}
-	reservation, err := d.Registry.ReserveActionReceipt(principalID, key, requestHash, time.Now().UTC())
+	claim, err := d.actionRuns.claim(d.Registry, principalID, key, requestHash, canonical)
 	if err != nil {
 		return replyWith(func(w http.ResponseWriter) {
 			writeAPIError(w, http.StatusInternalServerError, "action_reservation_failed", "The action reservation could not be recorded.")
 		})
 	}
-	if !reservation.Acquired {
+	if !claim.Acquired {
 		return replyWith(func(w http.ResponseWriter) {
 			switch {
-			case reservation.Receipt.RequestHash != requestHash:
+			case claim.Receipt.RequestHash != requestHash:
 				writeAPIError(w, http.StatusConflict, "action_idempotency_mismatch", "The Idempotency-Key was already used for a different action request.")
-			case reservation.Receipt.Status == registry.ActionReceiptCompleted:
-				if err := replayActionReceipt(w, reservation.Receipt.Receipt); err != nil {
+			case claim.Receipt.Status == registry.ActionReceiptCompleted:
+				if err := replayActionReceipt(w, claim.Receipt.Receipt); err != nil {
 					writeAPIError(w, http.StatusInternalServerError, "action_receipt_invalid", "The stored action receipt is invalid.")
 				}
 			default:
@@ -98,15 +98,76 @@ func (d *Daemon) idempotentReply(principalID, rawKey string, body []byte, reques
 			}
 		})
 	}
-	reply := run(body)
-	replay, err := json.Marshal(actionReplay{Status: reply.Status, Headers: actionReplayHeaders(reply.Header), Body: append([]byte(nil), reply.Body...)})
-	if len(reply.Body) > actionReplayBodyLimit || err != nil || len(replay) > actionReplayBodyLimit {
-		return replyWith(writeActionSubmitted)
+	defer d.actionRuns.done(principalID, key)
+	attempt := &actionAttempt{}
+	if len(claim.Receipt.Receipt) > 0 {
+		var prior actionForward
+		if json.Unmarshal(claim.Receipt.Receipt, &prior) == nil && prior.Host != "" {
+			attempt.prior = &prior
+		}
 	}
-	if err := d.Registry.CompleteActionReceipt(principalID, key, requestHash, replay, time.Now().UTC()); err != nil {
-		return replyWith(writeActionSubmitted)
+	reply := run(attempt, body)
+	now := time.Now().UTC()
+	if provisionalActionReply(reply) {
+		var memo []byte
+		if attempt.forwarded != nil {
+			memo, _ = json.Marshal(attempt.forwarded)
+		}
+		if err := d.Registry.RetryActionReceipt(principalID, key, requestHash, memo, now); err != nil {
+			d.logRuntimeError("action receipt "+key, err)
+		}
+		return reply
+	}
+	replay, err := encodeActionReplay(reply)
+	if err == nil {
+		err = d.Registry.CompleteActionReceipt(principalID, key, requestHash, replay, now)
+	}
+	if err != nil {
+		d.logRuntimeError("action receipt "+key, err)
 	}
 	return reply
+}
+
+// A reply over the receipt limit is kept as its status and a short body, so a
+// resend learns whether the action succeeded rather than waiting forever.
+func encodeActionReplay(reply actionReply) ([]byte, error) {
+	encode := func(reply actionReply) ([]byte, error) {
+		return json.Marshal(actionReplay{Status: reply.Status, Headers: actionReplayHeaders(reply.Header), Body: append([]byte(nil), reply.Body...)})
+	}
+	replay, err := encode(reply)
+	if err == nil && len(reply.Body) <= actionReplayBodyLimit && len(replay) <= actionReplayBodyLimit {
+		return replay, nil
+	}
+	status := reply.Status
+	return encode(replyWith(func(w http.ResponseWriter) {
+		if status >= http.StatusOK && status < http.StatusMultipleChoices {
+			writeDashboardJSON(w, status, map[string]any{"ok": true, "status": "completed", "detail": "The action completed; its reply was too large to keep for a resend."})
+			return
+		}
+		writeAPIError(w, status, "action_reply_too_large", "The action failed; its reply was too large to keep for a resend.")
+	}))
+}
+
+// A 503 says the request was not served; a paired host that did not answer or
+// is still running the request has not given this action's outcome either. A
+// resend under the same key runs again, and a forward goes to the host's own
+// receipt for that key, which keeps it from running twice.
+func provisionalActionReply(reply actionReply) bool {
+	var body map[string]json.RawMessage
+	if json.Unmarshal(reply.Body, &body) != nil {
+		return false
+	}
+	var failure struct{ Code string }
+	_ = json.Unmarshal(body["error"], &failure)
+	switch reply.Status {
+	case http.StatusAccepted:
+		return len(body) == 2 && string(body["ok"]) == "true" && string(body["status"]) == `"submitted"`
+	case http.StatusServiceUnavailable:
+		return true
+	case http.StatusGatewayTimeout:
+		return failure.Code == "host_outcome_unknown"
+	}
+	return false
 }
 
 func canonicalActionBody(body io.ReadCloser) ([]byte, []byte, error) {

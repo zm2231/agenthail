@@ -41,7 +41,7 @@ func (d *Daemon) mcpReport(ctx context.Context, caller *mcpCaller, input mcpRepo
 	if err != nil {
 		return nil, err
 	}
-	reply := d.idempotentReply(sessionPrincipal(caller.session.ID).ID, key, body, mcpRequestHash(ctx), func([]byte) actionReply {
+	reply := d.idempotentReply(sessionPrincipal(caller.session.ID).ID, key, body, mcpRequestHash(ctx), func(*actionAttempt, []byte) actionReply {
 		return d.recordReport(caller.session.ID, task.ID, state, input.Result)
 	})
 	result, refusal := mcpActionOutcome(reply)

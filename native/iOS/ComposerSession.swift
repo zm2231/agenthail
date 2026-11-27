@@ -379,7 +379,7 @@ final class ComposerSession {
     }
 
     func retrySend(_ send: PendingSend) {
-        guard sendQueue.holds(send) else { return }
+        guard sendQueue.holds(send), !send.keyExpired else { return }
         deliveryStatus[send.sessionID] = "Not confirmed yet · retrying"
         sendQueue.retry(send)
     }

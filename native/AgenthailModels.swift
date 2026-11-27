@@ -411,7 +411,7 @@ struct SessionCreationReceipt: Decodable {
     var firstMessageNotSent: Bool { sent == false }
     static let notSentMessage = "The session started, but it was interrupted before your first message reached it. Your message is back in the composer."
     static let notSentUnopenedMessage = "The session started, but it was interrupted before your first message reached it, and it isn't in the sidebar yet. Your message is still here, and it is waiting in that session's composer for when the session appears."
-    var outcomeUnknown: Bool { ["create_unknown", "host_outcome_unknown"].contains(error?.code) }
+    var outcomeUnknown: Bool { ["create_unknown", "host_outcome_unknown", "action_outcome_unknown"].contains(error?.code) }
     static let unknownOutcomeMessage = "Agenthail can't tell whether this session started. Check the sidebar before trying again."
 }
 

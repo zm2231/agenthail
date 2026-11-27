@@ -301,7 +301,7 @@ A role's `ledgers` is null (the default for its reach: every project for reach `
 
 ### Idempotency
 
-A write takes an optional `clientRequestId`. Without one the write runs once and keeps no receipt, so it cannot be replayed. With one, the action receipt is keyed `<tool>:<clientRequestId>` per calling session and records a hash of the tool's arguments: a repeat with the same arguments replays the first result, and a repeat with different arguments is `idempotency_conflict`. The receipt is read before any capability, scope or ceiling check, so a retry replays even after the caller lost the role that let the first call through (a replaced voice operator, a lead that stepped down). A first request still running, or one whose outcome was not recorded, answers `busy` with `detail.outcome: "unknown"`; retrying with the same id reads its result.
+A write takes an optional `clientRequestId`. Without one the write runs once and keeps no receipt, so it cannot be replayed. With one, the action receipt is keyed `<tool>:<clientRequestId>` per calling session and records a hash of the tool's arguments: a repeat with the same arguments replays the first result, and a repeat with different arguments is `idempotency_conflict`. The receipt is read before any capability, scope or ceiling check, so a retry replays even after the caller lost the role that let the first call through (a replaced voice operator, a lead that stepped down). A first request still running answers `busy` with `detail.outcome: "unknown"`, and retrying with the same id reads its result. One that was interrupted before its outcome was recorded answers `busy` with `detail.outcome: "unknown"` and is not retryable: it may have happened, and retrying with the same id gives the same answer.
 
 ### Audit
 
@@ -331,7 +331,7 @@ A tool that refuses returns an MCP tool error (`isError: true`) whose structured
 - `409 move_busy` and `session_adopt_busy` → `busy`, retryable;
 - other `409`s → `refused`;
 - `502 control_failed` → `busy`, retryable;
-- `502 *_unknown` → `busy` with `detail.outcome: "unknown"`, not retryable;
+- `502 *_unknown` and `409 action_outcome_unknown` → `busy` with `detail.outcome: "unknown"`, not retryable;
 - other `502`s and any `500` → `refused`, retryable.
 
 `TestEveryActionErrorMapsToAnMCPCode` fails when the parity table records an error code with no rule.

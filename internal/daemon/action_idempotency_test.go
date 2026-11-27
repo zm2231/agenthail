@@ -18,22 +18,26 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
-func TestActionIdempotencyResponseOverflowLeavesPending(t *testing.T) {
+func TestActionIdempotencyOversizedReplyReplaysItsStatus(t *testing.T) {
 	r := openActionTestRegistry(t)
 	d := newTestDaemon(t, r, nil)
 	var effects atomic.Int32
 	handler := d.idempotentActionHandler(func(w http.ResponseWriter, _ *http.Request) {
 		effects.Add(1)
+		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write(bytes.Repeat([]byte("x"), actionReplayBodyLimit+1))
 	})
 	first := serveAction(handler, actionRequestWithKey(`{"action":"large"}`, "overflow"), "device-a")
 	second := serveAction(handler, actionRequestWithKey(`{"action":"large"}`, "overflow"), "device-a")
-	if first.Code != http.StatusAccepted || second.Code != http.StatusAccepted || effects.Load() != 1 {
-		t.Fatalf("first=%d second=%d effects=%d", first.Code, second.Code, effects.Load())
+	if first.Code != http.StatusCreated || first.Body.Len() != actionReplayBodyLimit+1 || effects.Load() != 1 {
+		t.Fatalf("first=%d len=%d effects=%d", first.Code, first.Body.Len(), effects.Load())
 	}
-	if first.Body.String() != `{"ok":true,"status":"submitted"}
-` || second.Body.String() != first.Body.String() {
-		t.Fatalf("first body=%q second body=%q", first.Body.String(), second.Body.String())
+	var replay struct {
+		OK     bool   `json:"ok"`
+		Status string `json:"status"`
+	}
+	if second.Code != http.StatusCreated || json.Unmarshal(second.Body.Bytes(), &replay) != nil || !replay.OK || replay.Status != "completed" {
+		t.Fatalf("resend=%d body=%s, want the stored status with a short body", second.Code, second.Body.String())
 	}
 }
 
@@ -159,7 +163,7 @@ func TestActionIdempotencyReplaysCanonicalRequestAndRejectsMismatch(t *testing.T
 	}
 }
 
-func TestActionIdempotencyPendingAndRestartNeverRedispatches(t *testing.T) {
+func TestActionIdempotencyInterruptedRunIsUnknownNotRedispatched(t *testing.T) {
 	path := registrytest.Path(t)
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -193,7 +197,13 @@ func TestActionIdempotencyPendingAndRestartNeverRedispatches(t *testing.T) {
 	}
 	restartedFake := idempotencyFake()
 	_, restarted := openIdempotencyFixture(t, path, restartedFake)
-	assertActionSubmitted(t, serveV1Action(restarted, `{"action":"send","sessionId":"from","message":"restart"}`, "restart", token))
+	for range 2 {
+		response := serveV1Action(restarted, `{"action":"send","sessionId":"from","message":"restart"}`, "restart", token)
+		assertAPIV1Error(t, response, http.StatusConflict, "action_outcome_unknown")
+		if !bytes.Contains(response.Body.Bytes(), []byte("transcript")) {
+			t.Fatalf("an interrupted send does not say where to check: %s", response.Body.String())
+		}
+	}
 	if len(restartedFake.sent) != 0 {
 		t.Fatalf("restarted daemon re-dispatched a reserved action: sends=%d", len(restartedFake.sent))
 	}
@@ -232,7 +242,7 @@ func TestActionIdempotencyRunsAfterAPIAuthorization(t *testing.T) {
 	}
 }
 
-func TestActionIdempotencyCompletionFailureLeavesPending(t *testing.T) {
+func TestActionIdempotencyLostCompletionIsUnknownNotRedispatched(t *testing.T) {
 	path := registrytest.Path(t)
 	fake := idempotencyFake()
 	var r *registry.Registry
@@ -240,14 +250,33 @@ func TestActionIdempotencyCompletionFailureLeavesPending(t *testing.T) {
 	r, handler := openIdempotencyFixture(t, path, adapter)
 	token := pairedControlToken(t, r)
 	const body = `{"action":"send","sessionId":"from","message":"one"}`
-	assertActionSubmitted(t, serveV1Action(handler, body, "write-fails", token))
+	serveV1Action(handler, body, "write-fails", token)
 	if len(fake.sent) != 1 {
 		t.Fatalf("sends=%d", len(fake.sent))
 	}
 	retriedFake := idempotencyFake()
 	_, retried := openIdempotencyFixture(t, path, retriedFake)
-	assertActionSubmitted(t, serveV1Action(retried, body, "write-fails", token))
+	assertAPIV1Error(t, serveV1Action(retried, body, "write-fails", token), http.StatusConflict, "action_outcome_unknown")
 	if len(retriedFake.sent) != 0 {
 		t.Fatalf("retry after lost completion re-dispatched: sends=%d", len(retriedFake.sent))
+	}
+}
+
+func TestActionIdempotencyUnservedRequestRunsAgainUnderItsKey(t *testing.T) {
+	r := openActionTestRegistry(t)
+	d := newTestDaemon(t, r, nil)
+	var calls atomic.Int32
+	handler := d.idempotentActionHandler(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			writeAPIError(w, http.StatusServiceUnavailable, "ledger_owner_unreachable", "The ledger's host cannot be reached; nothing was recorded.")
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+	first := serveAction(handler, actionRequestWithKey(`{"text":"add"}`, "owner-down"), "device-a")
+	second := serveAction(handler, actionRequestWithKey(`{"text":"add"}`, "owner-down"), "device-a")
+	third := serveAction(handler, actionRequestWithKey(`{"text":"add"}`, "owner-down"), "device-a")
+	if first.Code != http.StatusServiceUnavailable || second.Code != http.StatusOK || third.Code != http.StatusOK || calls.Load() != 2 {
+		t.Fatalf("first=%d second=%d third=%d calls=%d", first.Code, second.Code, third.Code, calls.Load())
 	}
 }

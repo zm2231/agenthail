@@ -72,7 +72,7 @@ const send = async (page, message, sessionId) => {
   await settled();
 };
 const age = (storage, by) => {
-  for (const item of stored(storage)) storage.setItem(`agenthail.pendingSend.${item.id}`, JSON.stringify({ ...item, createdAt: item.createdAt - by, attemptedAt: item.attemptedAt && item.attemptedAt - by }));
+  for (const item of stored(storage)) storage.setItem(`agenthail.pendingSend.${item.id}`, JSON.stringify({ ...item, createdAt: item.createdAt - by, sentAt: item.sentAt - by, attemptedAt: item.attemptedAt && item.attemptedAt - by }));
 };
 
 {
@@ -148,6 +148,22 @@ const age = (storage, by) => {
   await page.retrySend(item.id);
   assert.deepEqual(server.delivered, ["late"], "a tap retries it");
   assert.equal(server.calls[0].key, server.calls.at(-1).key);
+}
+
+{
+  const storage = browserStorage();
+  const server = daemon();
+  const page = await tab(storage, server);
+  server.answer = lost;
+  await send(page, "a month old");
+  server.answer = null;
+  age(storage, 29 * 24 * hour + 1);
+  const calls = server.calls.length;
+  const [item] = page.unconfirmedSends("session-1");
+  assert.equal(item.expired, true, "a send older than the daemon keeps its key is marked too old to retry");
+  await page.retrySend(item.id);
+  assert.equal(server.calls.length, calls, "a tap does not retry a send whose key the daemon may have dropped");
+  assert.equal(page.takeBackSend(item.id).text, "a month old", "put back still hands over its text to send as a new message");
 }
 
 {
