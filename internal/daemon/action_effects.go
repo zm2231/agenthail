@@ -137,6 +137,9 @@ func (d *Daemon) announceAction(request dashboardActionRequest) {
 func (d *Daemon) actionEntity(request dashboardActionRequest) string {
 	switch actionScopes[request.Action] {
 	case scopeSession:
+		if id, err := d.Registry.ResolveTarget(request.SessionID); err == nil {
+			return id
+		}
 		return request.SessionID
 	case scopeQueued:
 		if item, err := d.Registry.QueueItem(request.QueueID, d.adapters()); err == nil {

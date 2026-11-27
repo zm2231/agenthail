@@ -120,7 +120,9 @@ final class NativeQueueController: ObservableObject {
         } catch {
             guard generation == started else { return false }
             busy = false
-            self.error = AgenthailAPIError.userMessage(error)
+            let message = AgenthailAPIError.userMessage(error)
+            if stale { await reload(api) }
+            if generation == started { self.error = message }
             return false
         }
     }

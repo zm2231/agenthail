@@ -59,6 +59,10 @@ func TestOnlyActionsThatChangeSomethingAnnounceIt(t *testing.T) {
 	if !announced(sent, "state.changed", from.ID) || announced(sent, "state.changed", "") {
 		t.Fatalf("a send published %+v, want state.changed for %s and none for everyone", sent, from.ID)
 	}
+	cleared := act(`{"action":"queue-clear","sessionId":"fro"}`)
+	if !announced(cleared, "state.changed", from.ID) {
+		t.Fatalf("clearing the queue of a session named by an id prefix published %+v, want state.changed for %s", cleared, from.ID)
+	}
 	edited := act(`{"action":"native-queue","sessionId":"from","nativeQueue":{"queueAction":"add","message":"next","clientUserMessageId":"queued-1"}}`)
 	if !announced(edited, nativeQueueChangedEvent, from.ID) || len(edited) != 1 {
 		t.Fatalf("a native queue add published %+v, want only %s for %s", edited, nativeQueueChangedEvent, from.ID)

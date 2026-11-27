@@ -236,6 +236,14 @@ struct SessionOperationsTest {
         await loading.value
         check(StubProtocol.bodies.count == 2 && controller.items.map(\.id) == ["q1", "q2"], "a queue change heard during a load lists the queue again after it")
 
+        reset([(400, #"{"error":{"code":"invalid_request","message":"refused"}}"#), (200, empty)])
+        let deleting = Task { await controller.delete(controller.items[0], api: api) }
+        for _ in 0..<100 where !controller.busy { await Task.yield() }
+        check(controller.busy, "the edit is still running when the change is heard")
+        await controller.refresh(api)
+        await deleting.value
+        check(StubProtocol.bodies.count == 2 && controller.items.isEmpty && controller.error != nil, "a queue change heard during a failed edit still lists the queue, and the edit's error stays shown")
+
         controller.reset(sessionID: "T")
         check(controller.items.isEmpty && !controller.loaded && controller.sessionID == "T", "switching sessions clears the queue")
     }
