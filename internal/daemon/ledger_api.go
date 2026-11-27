@@ -94,6 +94,7 @@ func (d *Daemon) markTurnTyped(sessionID string, typed bool) {
 func (d *Daemon) registerLedgerRoutes(mux *http.ServeMux, dashboard *dashboardServer) {
 	mux.HandleFunc("/api/v1/ledger", d.apiV1Guard(dashboard, "read", d.ledgerProjectRoute(d.apiLedgerReadHandler)))
 	mux.HandleFunc("/api/v1/ledger/events", d.apiV1Guard(dashboard, "read", d.apiLedgerEventsHandler))
+	mux.HandleFunc("/api/v1/ledger/search", d.apiV1Guard(dashboard, "read", d.apiLedgerSearchHandler))
 	mux.HandleFunc("/api/v1/ledger/capture", d.apiV1Guard(dashboard, "control", d.apiLedgerCaptureHandler))
 	mux.HandleFunc("/api/v1/ledger/scope", d.apiV1Guard(dashboard, "control", d.ledgerProjectRoute(d.apiLedgerScopeHandler)))
 	mux.HandleFunc("/api/v1/ledger/checkpoint", d.apiV1Guard(dashboard, "control", d.apiLedgerCheckpointHandler))
