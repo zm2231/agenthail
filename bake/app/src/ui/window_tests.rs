@@ -125,6 +125,10 @@ fn a_window_saves_where_it_is_and_a_maximized_one_its_normal_frame() {
     assert_eq!(placement_frame(placed), Frame { x: 10, y: 20, width: 1800, height: 1640, scale: 2.0, maximized: false, full_screen: false });
     let big = WindowPlacement { maximized: true, restore: Some(((5, 6), (900, 820))), ..placed };
     assert_eq!(placement_frame(big), Frame { x: 5, y: 6, width: 900, height: 820, scale: 2.0, maximized: true, full_screen: false });
+    let zoomed = WindowPlacement { maximized: true, position: (0, 0), content_size: (3000, 1900), ..placed };
+    let normal = Frame { x: 7, y: 8, width: 1000, height: 900, scale: 2.0, maximized: false, full_screen: false };
+    assert_eq!(saved_frame(Some(normal), zoomed), Frame { maximized: true, ..normal }, "without a restore frame the last normal one is kept");
+    assert_eq!(saved_frame(None, zoomed).width, 3000);
 }
 
 fn turn(s: &mut App, rt: &mut rune::Runtime<App>, key: &str) {

@@ -94,22 +94,30 @@ pub struct Opened {
     pub frame: Option<Frame>,
     title: String,
     handle: Option<rune::WindowHandle>,
-    menu: Option<(rune::AppHandle<App>, Option<super::keys::MenuState>)>,
+    menu: Option<(rune::AppHandle<App>, Option<(super::keys::MenuState, u64)>)>,
 }
 
 impl Opened {
-    fn frame(&self) -> Option<Frame> {
-        let now = self.handle.as_ref().and_then(rune::WindowHandle::placement)?;
-        let mut f = placement_frame(now);
-        if (now.maximized || now.full_screen) && now.restore.is_none() && let Some(saved) = self.frame {
-            (f.x, f.y, f.width, f.height) = (saved.x, saved.y, saved.width, saved.height);
-        }
-        Some(f)
+    fn frame_or_saved(&self) -> Option<Frame> {
+        self.handle.as_ref().and_then(rune::WindowHandle::placement).map(|now| saved_frame(self.frame, now)).or(self.frame)
     }
 
-    fn frame_or_saved(&self) -> Option<Frame> {
-        self.frame().or(self.frame)
+    fn note_normal(&mut self) {
+        if let Some(now) = self.handle.as_ref().and_then(rune::WindowHandle::placement)
+            && !now.maximized
+            && !now.full_screen
+        {
+            self.frame = Some(placement_frame(now));
+        }
     }
+}
+
+fn saved_frame(normal: Option<Frame>, now: WindowPlacement) -> Frame {
+    let mut f = placement_frame(now);
+    if (now.maximized || now.full_screen) && now.restore.is_none() && let Some(n) = normal {
+        (f.x, f.y, f.width, f.height) = (n.x, n.y, n.width, n.height);
+    }
+    f
 }
 
 fn placement_frame(p: WindowPlacement) -> Frame {
@@ -331,9 +339,9 @@ pub fn open_shown(s: &mut App) {
 
 fn sync_menu(s: &mut App) {
     let id = s.windows.current;
-    let state = super::keys::menu_state(s);
+    let state = (super::keys::menu_state(s), s.bar.revision());
     let stale = s.windows.open.iter().find(|o| o.id == id).and_then(|o| o.menu.as_ref()).is_some_and(|(_, shown)| *shown != Some(state));
-    let Some(items) = crate::menubar::items(s, state).filter(|_| stale) else { return };
+    let Some(items) = crate::menubar::items(s, state.0).filter(|_| stale) else { return };
     if let Some((app, shown)) = s.windows.open.iter_mut().find(|o| o.id == id).and_then(|o| o.menu.as_mut()) {
         let _ = app.set_menu(items);
         *shown = Some(state);
@@ -402,6 +410,10 @@ pub fn poll(s: &mut App, _: f64, tx: &mut rune::Tx) -> bool {
     changed |= crate::look::poll_seen(&mut s.windows.look, tx);
     retitle(s, tx);
     sync_menu(s);
+    let id = s.windows.current;
+    if let Some(o) = s.windows.open.iter_mut().find(|o| o.id == id) {
+        o.note_normal();
+    }
     crate::switch_composer(s);
     changed |= super::complete::pump(s);
     keep_draft(s);

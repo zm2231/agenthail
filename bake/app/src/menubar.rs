@@ -17,11 +17,16 @@ pub struct Bar {
     shown: Option<(MenuBar, Link, Option<&'static str>)>,
     keys: Option<MenuState>,
     warning: bool,
+    revision: u64,
 }
 
 impl Bar {
     pub fn is_shown(&self) -> bool {
         self.shown.is_some()
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 }
 
@@ -91,6 +96,7 @@ pub fn refresh(s: &mut App) {
         tray.set_menu(tray_items(&bar, link, note));
     }
     s.bar.shown = Some((bar, link, note));
+    s.bar.revision += 1;
     s.bar.keys = None;
     sync_keys(s);
 }
@@ -176,7 +182,7 @@ fn dock_items(bar: &MenuBar) -> Vec<MenuItem<App>> {
 
 fn open_target(s: &mut App, target: &Target) {
     front(s);
-    crate::over::open_target(s, target);
+    crate::ui::window::within(s, crate::ui::window::MAIN, |s| crate::over::open_target(s, target));
 }
 
 pub fn front(s: &App) {
