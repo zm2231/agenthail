@@ -218,7 +218,7 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
                 }
             }
             let retry = known.next_retry().map(|at| at.saturating_duration_since(std::time::Instant::now()));
-            let wait = if due { Duration::ZERO } else { feed::watch::OVERVIEW_EVERY.saturating_sub(last.map(|at| at.elapsed()).unwrap_or_default()).min(retry.unwrap_or(Duration::MAX)) };
+            let wait = if due || !known.orphans().is_empty() { Duration::ZERO } else { feed::watch::OVERVIEW_EVERY.saturating_sub(last.map(|at| at.elapsed()).unwrap_or_default()).min(retry.unwrap_or(Duration::MAX)) };
             let mut reads = Vec::new();
             let mut take = |ask: Ask| match ask {
                 Ask::Refresh => due = true,
@@ -254,6 +254,7 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
             }
             due |= last.is_none_or(|at| at.elapsed() >= feed::watch::OVERVIEW_EVERY) || known.actors_due(std::time::Instant::now());
             reads.extend(known.retries_due(std::time::Instant::now()));
+            reads.extend(known.orphans());
             reads.sort();
             reads.dedup();
             if let Some(at) = stream.settles_at().filter(|_| !reads.is_empty()) {

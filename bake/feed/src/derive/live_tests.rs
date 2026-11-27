@@ -451,9 +451,8 @@ fn a_reset_keeps_every_opened_project_but_forgets_what_was_read() {
     known.read("old", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: vec!["gone".into()] }));
     assert_eq!(known.opened(), ["old".to_string()], "only projects outside the overview are read again");
     let mut fresh = known.carry();
-    let mut opened = fresh.opened();
-    opened.sort();
-    assert_eq!(opened, ["old", "p"], "both stay followed");
+    assert_eq!(fresh.opened(), ["old".to_string()], "the overview still reads the other");
+    assert_eq!(fresh.changed("old", Instant::now()), Change::Read("old".into()), "both stay followed");
     assert!(!fresh.skips_ledger("p", Some(Instant::now() - std::time::Duration::from_secs(5))) && !fresh.skips_actor("gone"));
     assert!(fresh.open("p"), "nothing is held any more");
 }
@@ -480,4 +479,18 @@ fn a_due_lookup_retires_once_an_overview_no_longer_asks_for_it_and_a_failed_over
     assert!(known.actors_due(Instant::now()));
     known.learn(&fetched("2026-11-24T12:00:00Z", Vec::new(), Vec::new()));
     assert!(!known.actors_due(Instant::now()) && known.next_retry().is_none(), "an overview that no longer asks retires it");
+}
+
+#[test]
+fn an_opened_project_that_drops_out_of_the_overview_after_a_reset_is_read_on_its_own() {
+    let mut known = super::live::Known::default();
+    known.learn(&fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(Vec::new()))]));
+    known.open("p");
+    let mut known = known.carry();
+    assert!(known.orphans().is_empty(), "the overview after a reset reads it with the rest");
+    known.learn(&fetched("2026-11-24T12:01:00Z", Vec::new(), Vec::new()));
+    assert_eq!(known.orphans(), ["p".to_string()], "the overview no longer reads it, so it is read alone");
+    assert_eq!(known.changed("p", Instant::now()), Change::Read("p".into()));
+    known.read("p", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new() }));
+    assert!(known.orphans().is_empty());
 }

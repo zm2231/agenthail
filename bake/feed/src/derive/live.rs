@@ -112,6 +112,7 @@ impl Known {
             return Change::Nothing;
         }
         match self.ledgers.get(&id) {
+            None if !self.wanted.contains(&id) => Change::Read(id),
             None => Change::Overview,
             Some(h) if h.retry.is_some() || h.read_at < at => Change::Read(id),
             Some(_) => Change::Nothing,
@@ -128,7 +129,11 @@ impl Known {
     }
 
     pub fn carry(&mut self) -> Known {
-        Known { opened: std::mem::take(&mut self.opened), ..Known::default() }
+        Known { opened: std::mem::take(&mut self.opened), wanted: std::mem::take(&mut self.wanted), ..Known::default() }
+    }
+
+    pub fn orphans(&self) -> Vec<String> {
+        self.opened.iter().filter(|id| !self.wanted.contains(*id) && !self.ledgers.contains_key(*id)).cloned().collect()
     }
 
     pub fn opened(&self) -> Vec<String> {
