@@ -16,6 +16,8 @@ mod text_scale;
 mod keyboard;
 #[path = "role_pickers_tests.rs"]
 mod role_pickers;
+#[path = "project_menus_tests.rs"]
+mod project_menus;
 
 const DT: f64 = 1.0 / 60.0;
 const EPOCH: &str = "e1";
