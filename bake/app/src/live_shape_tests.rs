@@ -59,6 +59,12 @@ fn probe() {
     app.now = app.ov.d.now;
     app.fixtures = Some(Fixtures { dir: dir.path(), streams: HashMap::new(), speed: 1.0 });
     app.status = "fixtures".into();
+    if let Ok(path) = std::env::var("AGENTHAIL_LIVE_DECISIONS") {
+        let page: feed::decisions::Page = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let mut inbox = feed::decisions::Inbox::default();
+        inbox.add(page, "", "", "");
+        app.ov.inbox.inbox = Some(inbox);
+    }
     let mut rt = runtime(app, (1440.0, 900.0));
     rt.update(|s, _| {
         crate::over::go(s, Screen::Now);
