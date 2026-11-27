@@ -12,7 +12,6 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	testkit.StopGitAtTempDir()
 	daemonStartBound = 20 * time.Second
 	doctorSimulators = func(context.Context) *simhost.Status { return nil }
 	os.Exit(testkit.RunInOwnHome(func() int {

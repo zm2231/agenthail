@@ -9,7 +9,6 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	testkit.StopGitAtTempDir()
 	os.Exit(testkit.RunInOwnHome(func() int {
 		return testkit.RunAwayFromLiveDashboard(m.Run, dashconfig.StandardListen, &dashconfig.DefaultListen)
 	}))

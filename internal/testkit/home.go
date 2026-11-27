@@ -1,15 +1,30 @@
 package testkit
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
 )
 
-// RunInOwnHome runs a test binary in a new HOME it removes afterwards, so no
-// test touches the person's own Agenthail, Claude or Codex state. It also
-// drops the Claude configuration directory and every variable an agent session
-// sets for its children: with them, a fixture writes into the real
+const (
+	homePrefix = "agenthail-test-home-"
+	homeOwner  = ".agenthail-test-owner"
+	staleAfter = 5 * time.Minute
+	// The suite's deepest Unix sockets sit below TMPDIR and fit under macOS's
+	// 104-byte limit only while TMPDIR is no longer than macOS's own.
+	maxTempDir = len("/var/folders/xx/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/T/")
+)
+
+// RunInOwnHome runs a test binary in a new HOME, with its TMPDIR inside, and
+// removes it afterwards, so no test touches the person's own Agenthail, Claude
+// or Codex state, and a killed binary's leftovers sit in one marked folder.
+// It also drops the Claude configuration directory and every variable an agent
+// session sets for its children: with them, a fixture writes into the real
 // configuration directory and takes the enclosing session as its caller. Go's
 // caches stay where they were, or a test that runs the go command downloads
 // every module again.
@@ -18,15 +33,28 @@ func RunInOwnHome(run func() int) int {
 		fmt.Fprintf(os.Stderr, "FAIL: keep the go command's caches: %v\n", err)
 		return 1
 	}
-	home, err := os.MkdirTemp("", "agenthail-test-home-")
+	base := tempBase()
+	removeDeadHomes(base)
+	home, err := os.MkdirTemp(base, homePrefix)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: make the test binary's HOME: %v\n", err)
 		return 1
 	}
 	defer os.RemoveAll(home)
+	if err := os.WriteFile(filepath.Join(home, homeOwner), []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: mark the test binary's HOME: %v\n", err)
+		return 1
+	}
+	tmp := filepath.Join(home, "t")
+	if err := os.Mkdir(tmp, 0o700); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: make the test binary's TMPDIR: %v\n", err)
+		return 1
+	}
 	for _, name := range []string{"HOME", "CFFIXED_USER_HOME"} {
 		os.Setenv(name, home)
 	}
+	os.Setenv("TMPDIR", tmp)
+	stopGitAt(tmp, base)
 	for _, name := range []string{"CODEX_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"} {
 		os.Unsetenv(name)
 	}
@@ -58,4 +86,46 @@ func keepGoEnv() error {
 		}
 	}
 	return nil
+}
+
+func tempBase() string {
+	base := os.TempDir()
+	if len(filepath.Join(base, homePrefix+"4294967295", "t")) > maxTempDir {
+		return "/tmp"
+	}
+	return base
+}
+
+// removeDeadHomes clears homes whose test binary was killed before its deferred
+// removal ran. A home without an owner marker is never touched.
+func removeDeadHomes(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), homePrefix) {
+			continue
+		}
+		home := filepath.Join(dir, entry.Name())
+		if owner, ok := deadOwner(filepath.Join(home, homeOwner)); ok && owner != os.Getpid() {
+			os.RemoveAll(home)
+		}
+	}
+}
+
+func deadOwner(marker string) (int, bool) {
+	info, err := os.Lstat(marker)
+	if err != nil || !info.Mode().IsRegular() || time.Since(info.ModTime()) < staleAfter {
+		return 0, false
+	}
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 1 {
+		return 0, false
+	}
+	return pid, errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
 }

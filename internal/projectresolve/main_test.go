@@ -8,6 +8,5 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	testkit.StopGitAtTempDir()
 	os.Exit(testkit.RunInOwnHome(m.Run))
 }
