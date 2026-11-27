@@ -1,0 +1,180 @@
+use crate::shortcuts::Stored;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    Taken(Option<String>),
+    Denied,
+    Unsupported,
+    Invalid,
+    Failed(String),
+}
+
+pub trait Registrar {
+    type Id: Copy;
+    fn register(&mut self, shortcut: Stored) -> Result<Self::Id, Refusal>;
+    fn unregister(&mut self, id: Self::Id);
+}
+
+#[derive(Debug)]
+pub struct Hotkey<I> {
+    held: Option<I>,
+    tried: Option<Stored>,
+    refused: Option<Refusal>,
+}
+
+impl<I> Default for Hotkey<I> {
+    fn default() -> Self {
+        Hotkey { held: None, tried: None, refused: None }
+    }
+}
+
+impl<I: Copy> Hotkey<I> {
+    pub fn want<R: Registrar<Id = I>>(&mut self, registrar: &mut R, shortcut: Option<Stored>) -> bool {
+        if shortcut == self.tried {
+            return false;
+        }
+        self.attempt(registrar, shortcut);
+        true
+    }
+
+    pub fn retry<R: Registrar<Id = I>>(&mut self, registrar: &mut R) -> bool {
+        if !matches!(self.refused, Some(Refusal::Taken(_))) {
+            return false;
+        }
+        self.attempt(registrar, self.tried);
+        true
+    }
+
+    fn attempt<R: Registrar<Id = I>>(&mut self, registrar: &mut R, shortcut: Option<Stored>) {
+        if let Some(id) = self.held.take() {
+            registrar.unregister(id);
+        }
+        self.tried = shortcut;
+        self.refused = None;
+        let Some(shortcut) = shortcut else { return };
+        match registrar.register(shortcut) {
+            Ok(id) => self.held = Some(id),
+            Err(refusal) => self.refused = Some(refusal),
+        }
+    }
+
+    pub fn held(&self) -> bool {
+        self.held.is_some()
+    }
+
+    pub fn refused(&self) -> Option<&Refusal> {
+        self.refused.as_ref()
+    }
+}
+
+pub fn note(refusal: &Refusal, keys: &str) -> String {
+    match refusal {
+        Refusal::Taken(Some(owner)) => format!("{keys} is already used by {owner}. Agenthail tries again when you change it or come back to Agenthail."),
+        Refusal::Taken(None) => format!("{keys} is already used by another app. Agenthail tries again when you change it or come back to Agenthail."),
+        Refusal::Denied => format!("{keys} wasn't allowed from other apps. It works once the desktop allows it."),
+        Refusal::Unsupported => "This desktop doesn't offer shortcuts that work from other apps.".to_string(),
+        Refusal::Invalid => format!("{keys} can't be used from other apps. Add ⌘, ⌃ or ⌥."),
+        Refusal::Failed(why) => format!("{keys} couldn't be set up: {why}."),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct Fake {
+        next: u32,
+        live: Vec<(u32, Stored)>,
+        taken: Vec<(Stored, Option<String>)>,
+        refuse: Option<Refusal>,
+        calls: usize,
+    }
+
+    impl Registrar for Fake {
+        type Id = u32;
+
+        fn register(&mut self, shortcut: Stored) -> Result<u32, Refusal> {
+            self.calls += 1;
+            if let Some(refusal) = self.refuse.clone() {
+                return Err(refusal);
+            }
+            if let Some((_, owner)) = self.taken.iter().find(|(s, _)| *s == shortcut) {
+                return Err(Refusal::Taken(owner.clone()));
+            }
+            self.next += 1;
+            self.live.push((self.next, shortcut));
+            Ok(self.next)
+        }
+
+        fn unregister(&mut self, id: u32) {
+            self.live.retain(|(i, _)| *i != id);
+        }
+    }
+
+    fn s(spec: &str) -> Stored {
+        Stored::parse(spec).unwrap()
+    }
+
+    #[test]
+    fn an_unset_shortcut_registers_nothing() {
+        let (mut fake, mut hk) = (Fake::default(), Hotkey::default());
+        assert!(!hk.want(&mut fake, None));
+        assert_eq!(fake.calls, 0);
+        assert!(!hk.held());
+        assert_eq!(hk.refused(), None);
+    }
+
+    #[test]
+    fn a_rebinding_releases_the_old_shortcut_before_taking_the_new_one() {
+        let (mut fake, mut hk) = (Fake::default(), Hotkey::default());
+        assert!(hk.want(&mut fake, Some(s("alt+mod+k"))));
+        assert_eq!(fake.live, vec![(1, s("alt+mod+k"))]);
+        assert!(!hk.want(&mut fake, Some(s("alt+mod+k"))), "the same binding does nothing");
+        assert_eq!(fake.calls, 1);
+        assert!(hk.want(&mut fake, Some(s("ctrl+alt+space"))));
+        assert_eq!(fake.live, vec![(2, s("ctrl+alt+space"))]);
+        assert!(hk.want(&mut fake, None));
+        assert!(fake.live.is_empty(), "clearing the binding releases it");
+        assert!(!hk.held());
+    }
+
+    #[test]
+    fn a_taken_shortcut_names_its_owner_and_retries_only_when_asked() {
+        let mut fake = Fake { taken: vec![(s("alt+mod+k"), None)], ..Fake::default() };
+        let mut hk = Hotkey::default();
+        hk.want(&mut fake, Some(s("alt+mod+k")));
+        assert_eq!(hk.refused(), Some(&Refusal::Taken(None)));
+        assert!(!hk.want(&mut fake, Some(s("alt+mod+k"))), "no retry without a change");
+        assert_eq!(fake.calls, 1);
+        assert!(hk.retry(&mut fake), "coming back retries a taken shortcut");
+        assert_eq!(fake.calls, 2);
+        fake.taken.clear();
+        assert!(hk.retry(&mut fake));
+        assert!(hk.held());
+        assert_eq!(hk.refused(), None);
+        assert!(!hk.retry(&mut fake), "a held shortcut isn't retried");
+        assert_eq!(fake.calls, 3);
+
+        let mut fake = Fake { taken: vec![(s("mod+space"), Some("Spotlight".into()))], ..Fake::default() };
+        let mut hk = Hotkey::default();
+        hk.want(&mut fake, Some(s("mod+space")));
+        assert_eq!(note(hk.refused().unwrap(), "⌘Space"), "⌘Space is already used by Spotlight. Agenthail tries again when you change it or come back to Agenthail.");
+        assert!(hk.want(&mut fake, Some(s("alt+mod+k"))), "a rebinding moves off the taken shortcut");
+        assert!(hk.held());
+    }
+
+    #[test]
+    fn a_refusal_other_than_taken_waits_for_a_rebinding() {
+        for refusal in [Refusal::Unsupported, Refusal::Denied, Refusal::Invalid, Refusal::Failed("native status -1".into())] {
+            let mut fake = Fake { refuse: Some(refusal.clone()), ..Fake::default() };
+            let mut hk = Hotkey::default();
+            hk.want(&mut fake, Some(s("alt+mod+k")));
+            assert_eq!(hk.refused(), Some(&refusal));
+            assert!(!hk.retry(&mut fake));
+            assert_eq!(fake.calls, 1);
+            assert!(!note(&refusal, "⌥⌘K").is_empty());
+        }
+        assert_eq!(note(&Refusal::Unsupported, "⌥⌘K"), "This desktop doesn't offer shortcuts that work from other apps.");
+    }
+}

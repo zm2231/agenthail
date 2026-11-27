@@ -1,4 +1,5 @@
 mod history;
+mod hotkey;
 mod icons;
 mod instance;
 mod link;
@@ -1596,6 +1597,12 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     (!over::projects::open(s) && ui::new_session::on_key(s, ev, tx)) || over::on_key(s, ev, tx)
 }
 
+fn on_focus(_: &mut App, focused: bool, _: &mut Tx) {
+    if focused {
+        hotkey::regained();
+    }
+}
+
 fn on_quit(s: &mut App, _: &mut Tx) {
     ui::paste::finish(s);
     if let Some(id) = s.composer_for.clone() {
@@ -1632,7 +1639,10 @@ fn main() {
         .window_options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
         .srgb_blend(true)
         .on_quit(on_quit)
+        .on_focus(on_focus)
         .on_open_url(link::on_open_url);
+    hotkey::keep(app.handle());
+    app.handle().update(|_, _| hotkey::sync());
     let mut prefs = settings::spec();
     prefs.options = WindowOptions { visible: false, resizable: true, ..Default::default() };
     let (handle, window) = app.window(prefs);

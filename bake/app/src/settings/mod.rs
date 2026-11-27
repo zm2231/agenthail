@@ -741,6 +741,7 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
             devices::hide_link(s);
         } else {
             overview::focused(s);
+            crate::hotkey::regained();
         }
     })
 }
