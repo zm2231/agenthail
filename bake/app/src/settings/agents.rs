@@ -6,7 +6,7 @@ use rune::{El, TextEdit, Tx, col, el, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit, SegmentedControl, Select, SelectAppearance, Switch, TextArea, TextInput};
 
 use super::parts::{self, line, section};
-use super::{Done, Prefs};
+use super::{Done, Prefs, Read, Section};
 use crate::theme::{self, BODY, META, accent, failed, faint, muted};
 
 pub const TAB: usize = 5;
@@ -14,7 +14,7 @@ pub const TAB: usize = 5;
 pub enum Got {
     Read(u64, Result<Loaded, Failure>),
     Sessions(u64, Vec<(String, String)>),
-    Wrote(After, Result<Roles, Change>),
+    Wrote(After, u64, Result<Roles, Change>),
 }
 
 pub enum After {
@@ -36,6 +36,7 @@ pub struct Form {
     selected: Option<String>,
     draft: Option<Draft>,
     kept: HashMap<String, Draft>,
+    orphans: Vec<Draft>,
     description: TextEdit,
     creating: Option<TextEdit>,
     removing: bool,
@@ -71,7 +72,7 @@ pub fn opened(s: &mut Prefs) {
 }
 
 pub fn reload(s: &mut Prefs) {
-    if s.tab == TAB {
+    if s.tab == TAB && s.agents.page != 0 {
         read(s);
     }
 }
@@ -119,10 +120,11 @@ pub fn take(s: &mut Prefs, got: Got) {
                 s.agents.sessions = list;
             }
         }
-        Got::Wrote(after, result) => {
+        Got::Wrote(after, started, result) => {
             s.agents.busy = false;
             match result {
                 Ok(updated) => {
+                    let overtaken = started != s.agents.seq;
                     s.agents.seq += 1;
                     let read_only = s.agents.read_only.clone();
                     s.agents.read = Some(Ok(Loaded { roles: updated, read_only }));
@@ -136,6 +138,7 @@ pub fn take(s: &mut Prefs, got: Got) {
                         }
                         After::Created(name) => {
                             s.agents.creating = None;
+                            s.agents.orphans.retain(|d| d.name != name);
                             select(s, name);
                         }
                         After::Assigned => {
@@ -145,6 +148,9 @@ pub fn take(s: &mut Prefs, got: Got) {
                         After::Unassigned => {}
                     }
                     settle(s);
+                    if overtaken {
+                        read(s);
+                    }
                 }
                 Err(Change::ReadOnly) => {
                     s.agents.read_only = Some(agents::READ_ONLY.into());
@@ -165,10 +171,13 @@ pub fn take(s: &mut Prefs, got: Got) {
 fn settle(s: &mut Prefs) {
     let Some(r) = roles(s) else { return };
     let names: Vec<String> = r.roles.iter().map(|x| x.name.clone()).collect();
+    let gone: Vec<String> = s.agents.kept.keys().filter(|n| !names.contains(n)).cloned().collect();
+    for name in gone {
+        s.agents.orphans.extend(s.agents.kept.remove(&name));
+    }
     if s.agents.selected.as_ref().is_none_or(|n| !names.contains(n)) {
-        if let Some(d) = s.agents.draft.take().filter(Draft::changed) {
-            s.agents.kept.insert(d.name.clone(), d);
-        }
+        s.agents.orphans.extend(s.agents.draft.take().filter(Draft::changed));
+        s.agents.draft = None;
         s.agents.selected = names.first().cloned();
     }
     let Some(role) = s.agents.selected.as_ref().and_then(|n| roles(s)?.role(n)).cloned() else { return };
@@ -219,8 +228,9 @@ fn write(s: &mut Prefs, after: After, job: impl FnOnce(&feed::catalog::Client) -
     s.agents.save_error = None;
     s.in_flight += 1;
     let tx = s.tx.clone();
+    let started = s.agents.seq;
     std::thread::spawn(move || {
-        let _ = tx.send(Done::Agents(Got::Wrote(after, job(&client))));
+        let _ = tx.send(Done::Agents(Got::Wrote(after, started, job(&client))));
     });
 }
 
@@ -482,6 +492,29 @@ fn new_dialog(s: &Prefs, r: &Roles, from: &RoleView, layer: &mut Vec<El>, k: &Ki
     Dialog::new("agent-role-new", format!("New role from {}", from.name)).open(true).fit().width(360.0).on_close(close).child(body).child(buttons).build(k, layer);
 }
 
+fn orphans(s: &Prefs, k: &Kit) -> Option<El> {
+    if s.agents.orphans.is_empty() {
+        return None;
+    }
+    let locked = !editable(s);
+    let rows = s
+        .agents
+        .orphans
+        .iter()
+        .map(|d| {
+            let (again, drop) = (d.clone(), d.name.clone());
+            let recreate = small(&format!("Recreate {}", d.name), &format!("agent-orphan-recreate-{}", d.name), locked, move |s| {
+                let (name, from) = (again.name.clone(), again.definition.clone());
+                write(s, After::Created(name.clone()), move |c| c.create_agent_role(&name, &from));
+            }, k);
+            let discard = small("Discard", &format!("agent-orphan-discard-{}", d.name), false, move |s| s.agents.orphans.retain(|x| x.name != drop), k);
+            let words = text(format!("{} was removed elsewhere while it had changes you hadn't saved.", d.name)).font(META).color(theme::text()).wrap();
+            row().w_full().gap(8.0).items_center().px(14.0).py(10.0).child(col().grow(1.0).min_w(0.0).child(words)).child(discard).child(recreate)
+        })
+        .collect();
+    Some(section("Unsaved changes", rows, None))
+}
+
 fn roles_page(s: &Prefs, r: &Roles, layer: &mut Vec<El>, k: &Kit) -> El {
     let chosen = s.agents.selected.as_ref().and_then(|n| r.role(n));
     let right = match (chosen, &s.agents.draft) {
@@ -492,7 +525,8 @@ fn roles_page(s: &Prefs, r: &Roles, layer: &mut Vec<El>, k: &Kit) -> El {
         }
         _ => col().w_full().py(20.0).items_center().child(text("Choose a role.").font(BODY).color(muted())),
     };
-    row().w_full().gap(16.0).items_start().child(role_list(s, r)).child(col().grow(1.0).min_w(0.0).child(right))
+    let split = row().w_full().gap(16.0).items_start().child(role_list(s, r)).child(col().grow(1.0).min_w(0.0).child(right));
+    col().w_full().gap(18.0).children(orphans(s, k)).child(split)
 }
 
 fn session_name(s: &Prefs, id: &str) -> Option<String> {
@@ -560,13 +594,48 @@ fn assignments_page(s: &Prefs, r: &Roles, layer: &mut Vec<El>, k: &Kit) -> El {
     col().w_full().gap(22.0).child(section("Assigned", assigned, None)).child(section("Assign a role", rows, Some(kind(s).footer().into())))
 }
 
+fn this_mac(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
+    let mut out = col().w_full().gap(22.0).child(section("", vec![parts::words(feed::prefs::AGENT_SWITCH_NOTE)], None));
+    let list = match &s.settings {
+        None => return out.child(parts::reading("agents")),
+        Some(Err(f)) => return out.child(parts::failure(s, f)),
+        Some(Ok(st)) => &st.agents,
+    };
+    let labels: Vec<String> = feed::prefs::AGENT_MODES.iter().map(|(_, t)| t.to_string()).collect();
+    let rows = list
+        .iter()
+        .map(|a| {
+            let current = feed::prefs::AGENT_MODES.iter().find(|(id, _)| *id == a.mode).map(|(_, t)| *t);
+            let id = a.id.clone();
+            let control = picker(s, format!("agent-mode-{}", a.id), &a.label, labels.clone(), current, 220.0, super::busy(s), layer, move |s, i| {
+                let (id, mode) = (id.clone(), feed::prefs::AGENT_MODES[i].0);
+                super::write(s, format!("agent-mode-{id}"), Section::Agents, &[Read::Settings], move |c| c.set_agent_mode(&id, mode));
+            }, k);
+            let state = text(a.state_line()).font(META).color(if a.missing() { failed() } else { muted() }).wrap();
+            row().w_full().gap(16.0).items_center().px(14.0).py(10.0).child(col().gap(2.0).grow(1.0).min_w(0.0).child(text(a.label.clone()).font(BODY).color(theme::text())).child(state)).child(control)
+        })
+        .collect();
+    out = out.child(section("Agents", rows, None));
+    if let Some(f) = s.notes.get(&Section::Agents) {
+        out = out.child(parts::failure(s, f));
+    }
+    out
+}
+
 pub fn page(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
-    let pages = SegmentedControl::new(&["Roles", "Assignments"], Some(s.agents.page)).label("Agents").fit().on_pick(|s: &mut Prefs, i, _| {
+    let pages = SegmentedControl::new(&["On this Mac", "Roles", "Assignments"], Some(s.agents.page)).label("Agents").fit().on_pick(|s: &mut Prefs, i, _| {
+        let first = s.agents.page == 0;
         s.agents.page = i;
         s.agents.open = None;
         s.agents.save_error = None;
+        if first {
+            reload(s);
+        }
     });
     let mut out = parts::page().child(row().w_full().justify_center().child(pages.build(k).key("settings-agents-page")));
+    if s.agents.page == 0 {
+        return out.child(this_mac(s, layer, k));
+    }
     out = out.children(notices(s));
     let Some(r) = roles(s) else {
         return match &s.agents.read {
@@ -574,5 +643,5 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
             Some(_) => out,
         };
     };
-    if s.agents.page == 1 { out.child(assignments_page(s, r, layer, k)) } else { out.child(roles_page(s, r, layer, k)) }
+    if s.agents.page == 2 { out.child(assignments_page(s, r, layer, k)) } else { out.child(roles_page(s, r, layer, k)) }
 }

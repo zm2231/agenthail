@@ -53,6 +53,7 @@ pub enum Section {
     Relays,
     Channels,
     Queue,
+    Agents,
 }
 
 enum Done {
@@ -156,6 +157,7 @@ pub fn open() {
                 devices::opened(s);
                 reload(s);
                 appearance::opened(s);
+                keyboard::opened(s);
             });
             window.open();
             window.focus();

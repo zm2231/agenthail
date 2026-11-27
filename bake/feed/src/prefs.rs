@@ -105,6 +105,41 @@ pub struct Settings {
     pub notifications: NotifyStatus,
     #[serde(default)]
     pub remote_access: Option<crate::devices::RemoteAccess>,
+    #[serde(default)]
+    pub agents: Vec<AgentSwitch>,
+}
+
+#[derive(Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct AgentSwitch {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub mode: String,
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub detail: Option<String>,
+}
+
+pub const AGENT_MODES: [(&str, &str); 3] = [("auto", "Automatic (when installed)"), ("on", "On"), ("off", "Off")];
+
+pub const AGENT_SWITCH_NOTE: &str = "Agenthail works with each agent installed on this Mac. One that is not installed is unavailable, not a problem. Turn an agent on to make a missing one a failure, or off to leave it alone. agenthail agents use sets the same thing.";
+
+impl AgentSwitch {
+    pub fn missing(&self) -> bool {
+        self.state == "missing"
+    }
+
+    pub fn state_line(&self) -> String {
+        match self.state.as_str() {
+            "on" => "In use on this Mac.".into(),
+            "off" => format!("Off: Agenthail leaves {} alone.", self.label),
+            "unavailable" => "Not installed on this Mac.".into(),
+            _ => self.detail.clone().unwrap_or_else(|| format!("{} is on but not installed.", self.label)),
+        }
+    }
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -354,6 +389,10 @@ impl Client {
 
     pub fn set_claude_default_root(&self, name: &str) -> Result<(), Failure> {
         self.post_settings(json!({"action": "claude-default-root", "claudeDefaultRoot": name}))
+    }
+
+    pub fn set_agent_mode(&self, agent: &str, mode: &str) -> Result<(), Failure> {
+        self.post_settings(json!({"action": "agent-mode", "agent": agent, "mode": mode}))
     }
 
     pub fn set_person_name(&self, name: &str) -> Result<(), Failure> {
@@ -613,6 +652,18 @@ impl CompactDraft {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn agent_switches_read_and_word_their_state_like_the_mac_app() {
+        let st: Settings = serde_json::from_value(json!({"agents": [{"id": "claude", "label": "Claude", "mode": "auto", "state": "on"}, {"id": "devin", "label": "Devin", "mode": "on", "state": "missing", "detail": "devin is not on PATH"}, {"id": "codex", "label": "Codex", "mode": "off", "state": "off"}]})).unwrap();
+        let lines: Vec<String> = st.agents.iter().map(AgentSwitch::state_line).collect();
+        assert_eq!(lines, ["In use on this Mac.", "devin is not on PATH", "Off: Agenthail leaves Codex alone."]);
+        assert!(st.agents[1].missing());
+        let bare = AgentSwitch { id: "x".into(), label: "X".into(), mode: "on".into(), state: "missing".into(), detail: None };
+        assert_eq!(bare.state_line(), "X is on but not installed.");
+        assert_eq!(AgentSwitch { state: "unavailable".into(), ..bare }.state_line(), "Not installed on this Mac.");
+        assert!(serde_json::from_value::<Settings>(json!({})).unwrap().agents.is_empty());
+    }
+
     use super::*;
     use crate::mock::{daemon, replies};
 
