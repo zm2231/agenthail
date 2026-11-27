@@ -44,6 +44,13 @@ pub fn expand(draft: &str) -> String {
     paste::shared().expand(draft)
 }
 
+pub fn tokenized(text: &str) -> String {
+    if !paste::is_long(text) {
+        return text.to_string();
+    }
+    paste::shared().add(text).unwrap_or_else(|| text.to_string())
+}
+
 pub fn set_composer(s: &mut App, draft: &str) {
     finish(s);
     let focused = s.composer.focused;
@@ -165,6 +172,15 @@ mod tests {
         assert_eq!(e.text, "before Pasted text · 12 lines after");
         assert_eq!(e.pills().map(|(_, id)| id.to_string()).collect::<Vec<_>>(), vec![marker.clone()]);
         assert_eq!(paste::shared().draft(&e.text, e.pills()), format!("before {marker} after"));
+    }
+
+    #[test]
+    fn only_long_text_becomes_a_token() {
+        assert_eq!(tokenized("short"), "short");
+        let long = "x".repeat(700);
+        let marker = tokenized(&long);
+        assert_ne!(marker, long);
+        assert_eq!(expand(&marker), long);
     }
 
     #[test]

@@ -560,7 +560,7 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
     let Input::Command(command, argument) = input else { return false };
     let typed_argument = match Input::parse(&draft, &available) {
         Input::Command(typed, kept) if typed == command => kept,
-        _ => argument.clone(),
+        _ => super::paste::tokenized(&argument),
     };
     if command == Slash::Name
         && let Some(problem) = feed::menu::rename_problem(&argument, super::session_menu::current_alias(s, id).as_deref())
