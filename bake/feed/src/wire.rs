@@ -45,6 +45,7 @@ pub enum Event {
     Remove(String),
     Done,
     SourceError(String),
+    State(String),
 }
 
 pub enum Outcome {
@@ -86,6 +87,8 @@ impl Rebuild {
             let bytes = item.text.len();
             self.rows.insert(item.id.clone(), (item.clone(), bytes));
             events.push(Event::Upsert(item));
+        } else if matches!(data.kind.as_str(), "context" | "goal") {
+            events.push(Event::State(data.kind.clone()));
         }
         if data.kind == "done" {
             events.push(Event::Done);
@@ -126,5 +129,15 @@ mod tests {
         let Outcome::Events(4, events) = Rebuild::default().apply(wire) else { panic!("no events") };
         let Event::Upsert(item) = &events[0] else { panic!("{events:?}") };
         assert_eq!((item.version, item.body_ref.as_deref(), item.truncated), (812, Some("r"), true));
+    }
+
+    #[test]
+    fn a_context_or_goal_row_arrives_as_state_without_an_item() {
+        for kind in ["context", "goal"] {
+            let raw = format!(r#"{{"seq":9,"type":"item","data":{{"itemId":"state:{kind}","providerKey":"state:{kind}","version":1,"op":"replace","kind":"{kind}"}}}}"#);
+            let wire: Wire = serde_json::from_str(&raw).unwrap();
+            let Outcome::Events(9, events) = Rebuild::default().apply(wire) else { panic!("no events") };
+            assert!(matches!(&events[..], [Event::State(k)] if k == kind), "{events:?}");
+        }
     }
 }
