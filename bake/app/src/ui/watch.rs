@@ -13,8 +13,8 @@ pub enum Feed {
     Poke,
     Changed,
     Confirm,
-    Catalog(CatalogEvent),
-    Gap,
+    Catalog(u64, CatalogEvent),
+    Gap(u64),
 }
 
 pub fn events(client: Client, mut after: u64, tx: Sender<Bg>) {
@@ -82,8 +82,7 @@ pub fn ledgers(client: Client, tx: Sender<Bg>, stream: Stream) {
     });
 }
 
-pub fn catalog(client: Client, cursor: Arc<AtomicU64>, resume: Receiver<()>, tx: Sender<Feed>, generation: Arc<AtomicU64>) {
-    let mine = generation.load(Ordering::Acquire);
+pub fn catalog(client: Client, cursor: Arc<AtomicU64>, resume: Receiver<()>, tx: Sender<Feed>, generation: Arc<AtomicU64>, mine: u64) {
     let current = move || generation.load(Ordering::Acquire) == mine;
     std::thread::spawn(move || {
         let mut failures = 0u32;
@@ -96,7 +95,7 @@ pub fn catalog(client: Client, cursor: Arc<AtomicU64>, resume: Receiver<()>, tx:
                 }
                 let Some(event) = CatalogEvent::of(&e) else { return true };
                 cursor.fetch_max(event.seq, Ordering::AcqRel);
-                gone |= tx.send(Feed::Catalog(event)).is_err();
+                gone |= tx.send(Feed::Catalog(mine, event)).is_err();
                 !gone
             });
             if gone || !current() {
@@ -104,7 +103,7 @@ pub fn catalog(client: Client, cursor: Arc<AtomicU64>, resume: Receiver<()>, tx:
             }
             match result {
                 Ok(Opened::Gap) => {
-                    if tx.send(Feed::Gap).is_err() || resume.recv().is_err() {
+                    if tx.send(Feed::Gap(mine)).is_err() || resume.recv().is_err() {
                         return;
                     }
                     failures = 0;

@@ -50,7 +50,7 @@ fn attach(s: &mut App, client: Client) {
 fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>) {
     std::thread::spawn(move || {
         let mut catalog = Catalog::default();
-        let cursor = Arc::new(AtomicU64::new(0));
+        let mut cursor = Arc::new(AtomicU64::new(0));
         let (mut resume, resumed) = channel();
         let generation = Arc::new(AtomicU64::new(0));
         let mut resumed = Some(resumed);
@@ -77,15 +77,15 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                         }
                         if let Some(resumed) = resumed.take() {
                             cursor.store(catalog.seq(), Ordering::Release);
-                            watch::catalog(c.clone(), cursor.clone(), resumed, poke.clone(), generation.clone());
+                            watch::catalog(c.clone(), cursor.clone(), resumed, poke.clone(), generation.clone(), 0);
                             watch::events(c.clone(), snap.event_cursor, tx.clone());
                         } else if applied.restart {
                             gap = false;
-                            generation.fetch_add(1, Ordering::AcqRel);
-                            cursor.store(catalog.seq(), Ordering::Release);
+                            let mine = generation.fetch_add(1, Ordering::AcqRel) + 1;
+                            cursor = Arc::new(AtomicU64::new(catalog.seq()));
                             let (fresh, resumed) = channel();
                             resume = fresh;
-                            watch::catalog(c.clone(), cursor.clone(), resumed, poke.clone(), generation.clone());
+                            watch::catalog(c.clone(), cursor.clone(), resumed, poke.clone(), generation.clone(), mine);
                         } else if std::mem::take(&mut gap) {
                             cursor.store(catalog.seq(), Ordering::Release);
                             let _ = resume.send(());
@@ -118,11 +118,16 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                                 last = None;
                                 confirm = 1;
                             }
-                            Feed::Gap => {
+                            Feed::Gap(from) if from != generation.load(Ordering::Acquire) => {}
+                            Feed::Gap(_) => {
                                 due = true;
                                 gap = true;
                             }
-                            Feed::Catalog(event) => batch.push(event),
+                            Feed::Catalog(from, event) => {
+                                if from == generation.load(Ordering::Acquire) {
+                                    batch.push(event);
+                                }
+                            }
                         }
                         next = poked.recv_timeout(settle.saturating_duration_since(Instant::now())).ok();
                     }
