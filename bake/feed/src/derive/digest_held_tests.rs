@@ -29,6 +29,12 @@ fn world() -> World {
     World::from_json(&v.to_string()).unwrap()
 }
 
+fn ledger(rows: serde_json::Value) -> World {
+    let s = json!({"id": "s1", "name": "s1", "lastActive": "2026-11-20T11:50:00Z", "project": {"id": "p", "name": "P"}, "display": {"kind": "idle"}});
+    let v = json!({"updatedAt": "2026-11-24T12:00:00Z", "projects": [{"id": "p", "displayName": "P"}], "sessions": [s], "ledgers": {"p": rows}});
+    World::from_json(&v.to_string()).unwrap()
+}
+
 fn shown(w: &World, held: &mut Held, window: f64) -> Vec<String> {
     w.digests_held(held, window).iter().map(|(p, lines)| format!("{} {lines:?}", p.key)).collect()
 }
@@ -84,4 +90,28 @@ fn a_log_works_out_whether_it_reports_a_failed_ci_run_from_its_own_text() {
     assert!(!copy.reports_ci_failure(), "a copy works it out again from its own text");
     assert_eq!(e.clone(), e, "the worked-out answer doesn't make equal entries differ");
     assert!(!Entry { kind: "state".into(), text: Some("The CI run failed.".into()), ..Default::default() }.reports_ci_failure());
+}
+
+#[test]
+fn a_kept_duplicate_leaving_the_window_brings_back_the_one_it_hid() {
+    let done = |id: &str, at: &str| json!({"id": id, "text": "Ship the parser", "state": "done", "timeline": [{"at": at, "kind": "state", "state": "done"}]});
+    let mut w = ledger(json!([done("p-A", "2026-11-24T00:30:00Z"), done("p-B", "2026-11-24T00:30:00.5Z")]));
+    let mut held = Held::default();
+    let first = shown(&w, &mut held, 12.0);
+    assert!(first[0].contains("p-A") && !first[0].contains("p-B"), "the same text shows once: {first:?}");
+    w.now += time::Duration::milliseconds(30 * 60_000 + 200);
+    let after = shown(&w, &mut held, 12.0);
+    assert_eq!(after, fresh(&w, 12.0));
+    assert!(after[0].contains("p-B"), "the newer one shows once the other leaves: {after:?}");
+}
+
+#[test]
+fn a_clock_moving_back_works_the_lines_out_again() {
+    let mut w = ledger(json!([{"id": "p-C", "text": "Review the docs", "state": "in_review", "timeline": [{"at": "2026-11-22T11:30:00Z", "kind": "state", "state": "in_review"}]}]));
+    let mut held = Held::default();
+    assert_eq!(shown(&w, &mut held, 72.0), Vec::<String>::new(), "a review 48.5 hours old has left");
+    w.now -= time::Duration::hours(1);
+    let back = shown(&w, &mut held, 12.0);
+    assert_eq!(back, fresh(&w, 12.0));
+    assert_eq!(back.len(), 1, "an hour earlier it is 47.5 hours old: {back:?}");
 }

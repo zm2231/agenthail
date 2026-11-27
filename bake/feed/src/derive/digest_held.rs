@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use time::OffsetDateTime;
 
-use super::digest::{Happened, Line};
+use super::digest::{Happened, Line, first_of_each};
 use super::needs::{REVIEW_WINDOW_HOURS, headline};
 use super::world::{Project, Work, World};
 
@@ -17,9 +17,9 @@ struct Kept {
     window_hours: f64,
     works: Vec<Arc<Work>>,
     names: Vec<(String, String)>,
-    work_lines: Arc<Vec<Line>>,
+    work_sorted: Arc<Vec<Line>>,
     said: Vec<Said>,
-    said_lines: Arc<Vec<Line>>,
+    said_sorted: Arc<Vec<Line>>,
     lines: Arc<Vec<Line>>,
 }
 
@@ -49,24 +49,24 @@ impl World {
     }
 
     fn keep(&self, last: Option<Kept>, p: &Project, works: Vec<Arc<Work>>, said: Vec<Said>, window_hours: f64) -> Kept {
-        let last = last.filter(|k| (self.now - k.now).as_seconds_f64() / 3600.0 >= window_hours - k.window_hours);
+        let last = last.filter(|k| self.now >= k.now && (self.now - k.now).as_seconds_f64() / 3600.0 >= window_hours - k.window_hours);
         let same_work = last.as_ref().is_some_and(|k| {
             k.works.len() == works.len() && k.works.iter().zip(&works).all(|(a, b)| Arc::ptr_eq(a, b)) && k.names.iter().all(|(actor, name)| self.name_of(actor) == *name)
         });
         let same_said = last.as_ref().is_some_and(|k| k.said == said);
-        let (names, work_lines) = match last.as_ref().filter(|_| same_work) {
-            Some(k) => (k.names.clone(), self.still_within(&k.work_lines, window_hours)),
+        let (names, work_sorted) = match last.as_ref().filter(|_| same_work) {
+            Some(k) => (k.names.clone(), self.still_within(&k.work_sorted, window_hours)),
             None => (self.starters(&works, window_hours), Arc::new(self.work_lines(works.iter().map(|w| &**w), window_hours))),
         };
-        let said_lines = match last.as_ref().filter(|_| same_said) {
-            Some(k) => self.still_within(&k.said_lines, window_hours),
+        let said_sorted = match last.as_ref().filter(|_| same_said) {
+            Some(k) => self.still_within(&k.said_sorted, window_hours),
             None => Arc::new(self.said_lines(p, window_hours)),
         };
         let lines = match last {
-            Some(k) if Arc::ptr_eq(&k.work_lines, &work_lines) && Arc::ptr_eq(&k.said_lines, &said_lines) => k.lines,
-            _ => Arc::new(work_lines.iter().chain(said_lines.iter()).cloned().collect()),
+            Some(k) if Arc::ptr_eq(&k.work_sorted, &work_sorted) && Arc::ptr_eq(&k.said_sorted, &said_sorted) => k.lines,
+            _ => Arc::new(first_of_each(&work_sorted).into_iter().chain(first_of_each(&said_sorted)).collect()),
         };
-        Kept { now: self.now, window_hours, works, names, work_lines, said, said_lines, lines }
+        Kept { now: self.now, window_hours, works, names, work_sorted, said, said_sorted, lines }
     }
 
     fn starters(&self, works: &[Arc<Work>], window_hours: f64) -> Vec<(String, String)> {

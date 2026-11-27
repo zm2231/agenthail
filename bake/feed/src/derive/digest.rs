@@ -75,9 +75,8 @@ impl World {
     }
 
     pub fn digest(&self, project: &Project, window_hours: f64) -> Vec<Line> {
-        let mut lines = self.work_lines(self.works().filter(|w| w.project == project.key), window_hours);
-        lines.extend(self.said_lines(project, window_hours));
-        lines
+        let work = self.work_lines(self.works().filter(|w| w.project == project.key), window_hours);
+        first_of_each(&work).into_iter().chain(first_of_each(&self.said_lines(project, window_hours))).collect()
     }
 
     pub(super) fn work_lines<'a>(&self, works: impl Iterator<Item = &'a Work>, window_hours: f64) -> Vec<Line> {
@@ -98,7 +97,7 @@ impl World {
                 lines.push(Line { kind: Happened::Waiting, text: plain(&w.text), detail: "Check the proof".into(), at: w.submitted_at(), target: Target::Work(w.key()) });
             }
         }
-        ordered(lines)
+        sorted(lines)
     }
 
     pub(super) fn said_lines(&self, project: &Project, window_hours: f64) -> Vec<Line> {
@@ -108,7 +107,7 @@ impl World {
                 lines.push(Line { kind: Happened::Said, text: plain(&h), detail: self.title(s), at, target: Target::Session(s.id.clone()) });
             }
         }
-        ordered(lines)
+        sorted(lines)
     }
 
     pub fn digests(&self, window_hours: f64) -> Vec<(&Project, Vec<Line>)> {
@@ -116,11 +115,14 @@ impl World {
     }
 }
 
-fn ordered(mut lines: Vec<Line>) -> Vec<Line> {
-    let mut seen = HashSet::new();
+fn sorted(mut lines: Vec<Line>) -> Vec<Line> {
     lines.sort_by(|a, b| a.kind.cmp(&b.kind).then(b.at.cmp(&a.at)).then(a.text.cmp(&b.text)).then(a.target.cmp(&b.target)));
-    lines.retain(|l| seen.insert((l.kind, l.text.clone())));
     lines
+}
+
+pub(super) fn first_of_each(sorted: &[Line]) -> Vec<Line> {
+    let mut seen = HashSet::new();
+    sorted.iter().filter(|l| seen.insert((l.kind, l.text.as_str()))).cloned().collect()
 }
 
 pub(super) fn rank(out: &mut [(&Project, std::sync::Arc<Vec<Line>>)]) {
