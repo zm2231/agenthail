@@ -15,6 +15,7 @@ pub enum Listing {
     Found(Session),
     Absent,
     Unchecked(String),
+    Unsearchable(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -54,6 +55,7 @@ pub struct Gone {
     pub exchanges: Vec<Exchange>,
     pub read_error: Option<String>,
     pub history: History,
+    pub incomplete: bool,
 }
 
 pub const PAGE: usize = 50;
@@ -194,11 +196,12 @@ pub fn classify(id: &str, detail: &Detail, listing: Listing, known: Option<&Sess
     let mut row = listed.clone().or_else(|| known.cloned()).or_else(|| detail.row(id)).unwrap_or_else(|| Session { id: id.to_string(), ..Session::default() });
     row.name = crate::search::one_line(&row.name);
     let archived = listed.as_ref().map_or(row.archived, |l| l.archived);
+    let incomplete = matches!(detail, Detail::Failed(_)) || matches!(listing, Listing::Unchecked(_));
     let why = if archived {
         Why::Archived
     } else if *detail == Detail::Unreachable || !reachable(&row) {
         Why::Offline(row.host.name.clone())
-    } else if let Listing::Unchecked(e) = listing {
+    } else if let Listing::Unchecked(e) | Listing::Unsearchable(e) = listing {
         Why::Unchecked(e)
     } else {
         Why::Unlisted
@@ -216,7 +219,7 @@ pub fn classify(id: &str, detail: &Detail, listing: Listing, known: Option<&Sess
     Ok(Gone { row, why, fix, exchanges: detail.exchanges(), read_error: match detail {
         Detail::Failed(e) => Some(e.clone()),
         _ => detail.read_error(),
-    }, history: detail.history() })
+    }, history: detail.history(), incomplete })
 }
 
 pub fn search_terms<'a>(rows: impl Iterator<Item = &'a Session>) -> Vec<String> {
@@ -237,7 +240,7 @@ impl Client {
         let detail = Detail::read(self.get_coded(&format!("/api/v1/session?id={}&limit={PAGE}", enc(id))));
         let found = detail.row(id);
         let terms = search_terms([known, found.as_ref()].into_iter().flatten());
-        let mut listing = if terms.is_empty() { Listing::Unchecked("it has no name or folder to search by".into()) } else { Listing::Absent };
+        let mut listing = if terms.is_empty() { Listing::Unsearchable("it has no name or folder to search by".into()) } else { Listing::Absent };
         for term in &terms {
             match self.listed(id, term) {
                 Ok(Some(row)) => {
@@ -404,6 +407,16 @@ mod tests {
         let g = classify("s1", &detail(), Listing::Unchecked("timed out".into()), None).unwrap();
         assert_eq!(g.why, Why::Unchecked("timed out".into()));
         assert!(g.note().contains("couldn't check whether it was archived: timed out"));
+    }
+
+    #[test]
+    fn a_lookup_that_failed_part_way_is_incomplete() {
+        assert!(classify("s1", &detail(), Listing::Unchecked("timed out".into()), None).unwrap().incomplete);
+        let listed = Session { id: "s1".into(), archived: true, ..Session::default() };
+        assert!(classify("s1", &Detail::Failed("timeout".into()), Listing::Found(listed.clone()), None).unwrap().incomplete);
+        assert!(!classify("s1", &detail(), Listing::Found(listed), None).unwrap().incomplete);
+        assert!(!classify("s1", &detail(), Listing::Unsearchable("it has no name or folder to search by".into()), None).unwrap().incomplete);
+        assert!(!classify("s1", &Detail::Unreachable, Listing::Absent, None).unwrap().incomplete);
     }
 
     #[test]

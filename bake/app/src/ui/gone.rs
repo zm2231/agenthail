@@ -38,8 +38,12 @@ fn due(m: &Missing, clock: f64) -> bool {
     if m.asking.is_some() || m.fixing.is_some() {
         return false;
     }
-    match m.look {
-        Look::Found(_) | Look::Deleted(_) => m.stale || m.asked == f64::NEG_INFINITY,
+    if m.stale || m.asked == f64::NEG_INFINITY {
+        return true;
+    }
+    match &m.look {
+        Look::Found(g) => g.incomplete && clock - m.asked >= RETRY,
+        Look::Deleted(_) => false,
         Look::Pending | Look::Failed(_) => clock - m.asked >= RETRY,
     }
 }
@@ -250,7 +254,14 @@ mod tests {
         let mut f = missing(Look::Failed("offline".into()), 0.0);
         assert!(!due(&f, RETRY - 1.0));
         assert!(due(&f, RETRY));
+        f.stale = true;
+        assert!(due(&f, 1.0), "a change after a failed lookup looks it up again at once");
         f.asking = Some(1);
         assert!(!due(&f, RETRY), "one lookup at a time");
+        let gone = |incomplete| Gone { row: Session::default(), why: feed::gone::Why::Unlisted, fix: None, exchanges: Vec::new(), read_error: None, history: Default::default(), incomplete };
+        assert!(!due(&missing(Look::Found(gone(false)), 0.0), RETRY));
+        let partial = missing(Look::Found(gone(true)), 0.0);
+        assert!(!due(&partial, RETRY - 1.0));
+        assert!(due(&partial, RETRY), "a lookup that failed part way tries again");
     }
 }
