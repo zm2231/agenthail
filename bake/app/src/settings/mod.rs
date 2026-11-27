@@ -1,8 +1,10 @@
+mod agents;
 mod appearance;
 mod claude;
 mod devices;
 mod general;
 mod handoffs;
+mod keyboard;
 mod notify;
 mod parts;
 
@@ -58,6 +60,7 @@ enum Done {
     Wrote(String, Section, Result<(), Failure>, &'static [Read]),
     Devices(devices::Got),
     Look(appearance::Got),
+    Agents(agents::Got),
 }
 
 pub struct Prefs {
@@ -100,6 +103,8 @@ pub struct Prefs {
     pub home: String,
     pub handoffs: handoffs::Form,
     pub appearance: appearance::Form,
+    pub agents: agents::Form,
+    pub keyboard: keyboard::Form,
     loaded: bool,
     in_flight: usize,
     seq: HashMap<Read, u64>,
@@ -233,6 +238,8 @@ fn init() -> Prefs {
         home: std::env::var("HOME").unwrap_or_default(),
         handoffs: handoffs::Form::default(),
         appearance: appearance::Form::default(),
+        agents: agents::Form::default(),
+        keyboard: keyboard::Form::default(),
         loaded: false,
         in_flight: 0,
         seq: HashMap::new(),
@@ -294,6 +301,7 @@ pub fn reload(s: &mut Prefs) {
     if fresh.is_some() || s.client.is_none() {
         (s.client, s.no_client) = (fresh, why);
     }
+    agents::reload(s);
     if s.client.is_none() {
         for what in ALL {
             fetch(s, what);
@@ -526,6 +534,7 @@ fn take_one(s: &mut Prefs, done: Done) {
         }
         Done::Devices(got) => devices::take(s, got),
         Done::Look(got) => appearance::take(s, got),
+        Done::Agents(got) => agents::take(s, got),
         Done::Wrote(key, section, result, then) => {
             if s.writing.as_deref() == Some(key.as_str()) {
                 s.writing = None;
@@ -600,7 +609,7 @@ fn on_key(s: &mut Prefs, ev: &KeyEvent, tx: &mut Tx) -> bool {
         tx.close_window();
         return true;
     }
-    if matches!(ev.key, rune::Key::Escape) && s.open_select.take().is_some() {
+    if matches!(ev.key, rune::Key::Escape) && (s.open_select.take().is_some() || agents::escape(s)) {
         return true;
     }
     false
@@ -622,7 +631,7 @@ fn unfollowed(s: &Prefs) -> Option<El> {
     Some(col().w_full().items_center().pb(8.0).child(parts::failure(s, &note).w(parts::WIDTH)))
 }
 
-pub const TABS: [&str; 6] = ["General", "Claude", "Notifications", "Devices", "Handoffs", "Appearance"];
+pub const TABS: [&str; 8] = ["General", "Claude", "Notifications", "Devices", "Handoffs", "Appearance", "Agents", "Keyboard"];
 
 pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     let themes = crate::look::frame(cx, false, false, false);
@@ -638,6 +647,8 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         devices::hide_link(s);
         handoffs::changed(s);
         appearance::opened(s);
+        agents::opened(s);
+        keyboard::opened(s);
     });
     let page = match s.tab {
         1 => claude::page(s, &mut layer, &k),
@@ -645,6 +656,8 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         3 => devices::page(s, &mut layer, &k),
         handoffs::TAB => handoffs::page(s, &mut layer, &k),
         appearance::TAB => appearance::page(s, &k),
+        agents::TAB => agents::page(s, &mut layer, &k),
+        keyboard::TAB => keyboard::page(s, &k),
         _ => general::page(s, &mut layer, &k),
     };
     let body = col()

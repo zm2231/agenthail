@@ -301,7 +301,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
     if let Some(done) = search::activity_key(s, ev) {
         return done;
     }
-    if ev.is_command('k') {
+    if crate::ui::keys::is(crate::ui::keys::Act::GoToSession, ev, tx) {
         if s.ov.jump.is_some() {
             s.ov.jump = None;
         } else {

@@ -11,6 +11,7 @@ use crate::{App, Bg, Screen, Tab, answer_request, pick_work, session_edits, shor
 
 pub mod accounts;
 pub mod attach;
+pub mod bindings;
 pub(crate) mod background;
 mod chips;
 pub mod complete;
