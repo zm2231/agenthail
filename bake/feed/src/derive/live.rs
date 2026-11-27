@@ -69,7 +69,7 @@ impl Known {
         }
         self.wanted = fetched.ledgers.keys().chain(&fetched.held).cloned().collect();
         self.sessions = fetched.recorded.sessions.clone();
-        self.asked(&fetched.asked, &fetched.recorded.actors);
+        self.asked(&fetched.asked, &fetched.recorded.actors, fetched.started);
         again
     }
 
@@ -77,17 +77,16 @@ impl Known {
         self.opened.insert(id.to_string());
         self.hold(id, started, result.as_ref().ok().map(|l| &l.rows));
         if let Ok(l) = result {
-            self.asked(&l.asked, &l.actors);
+            self.asked(&l.asked, &l.actors, started);
         }
     }
 
     fn hold(&mut self, id: &str, read_at: Instant, rows: Option<&Vec<Work>>) {
-        self.ledgers.insert(id.to_string(), Held { read_at, retry: rows.is_none().then(|| Instant::now() + RETRY) });
+        self.ledgers.insert(id.to_string(), Held { read_at, retry: rows.is_none().then(|| read_at + RETRY) });
         self.candidates.extend(rows.into_iter().flatten().flat_map(|w| &w.timeline).map(|t| t.actor.clone()));
     }
 
-    fn asked(&mut self, asked: &[String], found: &HashMap<String, Actor>) {
-        let now = Instant::now();
+    fn asked(&mut self, asked: &[String], found: &HashMap<String, Actor>, now: Instant) {
         for id in asked {
             self.actors.insert(id.clone(), (!found.contains_key(id)).then(|| now + RETRY));
         }
@@ -108,6 +107,10 @@ impl Known {
 
     fn opened_retries(&self) -> impl Iterator<Item = (&String, Instant)> {
         self.opened.iter().filter(|id| !self.wanted.contains(*id)).filter_map(|id| Some((id, self.ledgers.get(id)?.retry?)))
+    }
+
+    pub fn opened(&self) -> Vec<String> {
+        self.opened.iter().filter(|id| !self.wanted.contains(*id)).cloned().collect()
     }
 
     pub fn next_retry(&self) -> Option<Instant> {

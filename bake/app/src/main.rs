@@ -178,6 +178,7 @@ fn load_recorded(path: &str) -> Result<Recorded, String> {
 pub enum Ask {
     Refresh,
     Reset,
+    Reopened,
     Ledger(String, std::time::Instant),
     Read(String),
 }
@@ -227,6 +228,10 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
                     feed::derive::live::Change::Nothing => {}
                 },
                 Ask::Read(id) => reads.push(id),
+                Ask::Reopened => {
+                    due = true;
+                    reads.extend(known.opened());
+                }
             };
             match poke.recv_timeout(wait) {
                 Ok(ask) => take(ask),
@@ -240,6 +245,9 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
             reads.extend(known.retries_due(std::time::Instant::now()));
             reads.sort();
             reads.dedup();
+            if let Some(at) = stream.settles_at().filter(|_| !reads.is_empty()) {
+                std::thread::sleep(at.saturating_duration_since(std::time::Instant::now()));
+            }
             for id in reads {
                 let started = std::time::Instant::now();
                 let result = feed::derive::live::ledger(&client, &id, &known);
@@ -1100,7 +1108,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Changed(wants) => changed_elsewhere(s, wants),
             Bg::Reopened => reopened(s),
             Bg::LedgerChanged(key, at) => ask_overview(s, Ask::Ledger(key, at)),
-            Bg::LedgersReopened => ask_overview(s, Ask::Refresh),
+            Bg::LedgersReopened => ask_overview(s, Ask::Reopened),
             Bg::SessionNews => ask_overview(s, Ask::Refresh),
             Bg::Item(id, item) => {
                 s.items.insert(id, item);

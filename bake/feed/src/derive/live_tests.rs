@@ -413,3 +413,21 @@ fn a_failed_read_of_an_opened_project_is_tried_again_on_its_own_timer() {
     known.read("old", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new() }));
     assert_eq!(known.next_retry(), None);
 }
+
+#[test]
+fn failed_lookups_come_due_when_the_next_overview_starts() {
+    let mut known = super::live::Known::default();
+    let started = Instant::now() - std::time::Duration::from_secs(61);
+    let f = Fetched { started, asked: vec!["gone".into()], ..fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("h2::p", Err("status code 404".into()))]) };
+    known.learn(&f);
+    assert!(!known.skips_actor("gone") && !known.skips_ledger("h2::p", None), "retries count from when the read started");
+}
+
+#[test]
+fn a_reopened_ledger_stream_reads_opened_projects_again() {
+    let mut known = super::live::Known::default();
+    known.learn(&fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(Vec::new()))]));
+    known.read("old", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new() }));
+    known.read("p", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new() }));
+    assert_eq!(known.opened(), ["old".to_string()], "projects the overview reads anyway aren't read twice");
+}
