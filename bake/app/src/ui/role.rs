@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::time::{Duration, Instant};
 
 use feed::role::SessionRole;
 
@@ -7,10 +8,13 @@ use crate::App;
 
 type Read = (String, u64, Result<Option<SessionRole>, String>);
 
+const RETRY: Duration = Duration::from_secs(30);
+
 pub struct Roles {
     shown: HashMap<String, SessionRole>,
     seq: u64,
     newest: HashMap<String, u64>,
+    failed: Option<(String, Instant)>,
     tx: Sender<Read>,
     rx: Receiver<Read>,
 }
@@ -18,13 +22,14 @@ pub struct Roles {
 impl Roles {
     pub fn new() -> Roles {
         let (tx, rx) = channel();
-        Roles { shown: HashMap::new(), seq: 0, newest: HashMap::new(), tx, rx }
+        Roles { shown: HashMap::new(), seq: 0, newest: HashMap::new(), failed: None, tx, rx }
     }
 }
 
 pub fn load(s: &mut App, id: &str) {
     s.roles.shown.retain(|k, _| k == id);
     s.roles.newest.retain(|k, _| k == id);
+    s.roles.failed = None;
     refresh(s, id);
 }
 
@@ -46,15 +51,21 @@ pub fn drain(s: &mut App) -> bool {
             continue;
         }
         match read {
-            Ok(Some(role)) => {
-                s.roles.shown.insert(id, role);
+            Ok(role) => {
+                s.roles.failed.take_if(|(failed, _)| *failed == id);
+                match role {
+                    Some(role) => s.roles.shown.insert(id, role),
+                    None => s.roles.shown.remove(&id),
+                };
+                changed = true;
             }
-            Ok(None) => {
-                s.roles.shown.remove(&id);
-            }
-            Err(_) => continue,
+            Err(_) => s.roles.failed = Some((id, Instant::now())),
         }
-        changed = true;
+    }
+    let due = s.roles.failed.as_ref().filter(|(id, at)| at.elapsed() >= RETRY && s.screen == crate::Screen::Session && s.selected.as_deref() == Some(id.as_str())).map(|(id, _)| id.clone());
+    if let Some(id) = due {
+        s.roles.failed = None;
+        refresh(s, &id);
     }
     changed
 }

@@ -187,6 +187,12 @@ pub(crate) fn changed(s: &mut App, id: &str) {
     fetch_context(s, id, Duration::ZERO);
 }
 
+pub(crate) fn agent_mode_changed(s: &mut App, id: &str) {
+    if s.client.is_some() && session(s, id).is_some_and(|x| feed::create::is_acp(&x.surface)) {
+        fetch_settings(s, id, Duration::ZERO);
+    }
+}
+
 pub(crate) fn streamed_context(s: &mut App, id: &str, usage: Option<ContextUsage>) {
     s.menus.context_error.remove(id);
     match usage {
@@ -231,13 +237,14 @@ fn refresh_shown(s: &mut App) {
     if !s.menus.models_asked.contains_key(&id) {
         fetch_models(s, &id);
     }
-    let failed = s.menus.note.contains_key(&id) || s.menus.context_error.contains_key(&id) || s.menus.models_error.contains_key(&id);
+    let unread = s.menus.settings.get(&id).is_some_and(|x| x.agent_mode_unread);
+    let failed = unread || s.menus.note.contains_key(&id) || s.menus.context_error.contains_key(&id) || s.menus.models_error.contains_key(&id);
     let due = s.menus.refreshed.as_ref().is_none_or(|(shown, at)| *shown != id || at.elapsed() >= RETRY);
     if !failed || !due {
         return;
     }
     s.menus.refreshed = Some((id.clone(), Instant::now()));
-    if s.menus.note.contains_key(&id) {
+    if unread || s.menus.note.contains_key(&id) {
         fetch_settings(s, &id, Duration::ZERO);
     }
     if s.menus.context_error.contains_key(&id) {

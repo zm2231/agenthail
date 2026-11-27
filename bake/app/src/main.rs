@@ -501,7 +501,6 @@ fn selected_changed(s: &mut App, id: &str) {
         ui::queue::fetch(s, id);
     }
     ui::subagents::refresh(s, id);
-    ui::role::refresh(s, id);
     if let Some(work) = session(s, id).and_then(|x| x.primary_work(s.work_pick.get(id).map(String::as_str)).cloned()) {
         fetch_item(s, &work.project_key, &work.item_id);
     }
@@ -533,7 +532,13 @@ fn changed_elsewhere(s: &mut App, wants: feed::watch::Wants) {
         && s.selected.as_deref() == Some(id.as_str())
     {
         selected_changed(s, &id);
+        selected_moved(s, &id);
     }
+}
+
+fn selected_moved(s: &mut App, id: &str) {
+    ui::role::refresh(s, id);
+    ui::session_menu::agent_mode_changed(s, id);
 }
 
 fn reopened(s: &mut App) {
@@ -543,6 +548,7 @@ fn reopened(s: &mut App) {
     over::extensions::reopened(s);
     if let Some(id) = s.selected.clone() {
         selected_changed(s, &id);
+        selected_moved(s, &id);
     }
 }
 
@@ -1150,9 +1156,12 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 ui::connect::up(s);
                 link::listed(s);
                 if let Some(id) = s.selected.clone()
-                    && touched.is_none_or(|t| t.contains(&id))
+                    && touched.as_ref().is_none_or(|t| t.contains(&id))
                 {
                     selected_changed(s, &id);
+                    if touched.is_some() {
+                        selected_moved(s, &id);
+                    }
                 }
             }
             Bg::Changed(wants) => changed_elsewhere(s, wants),

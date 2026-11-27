@@ -38,6 +38,8 @@ pub struct SessionSettings {
     pub unavailable: BTreeMap<String, String>,
     #[serde(skip)]
     pub agent_modes: Vec<String>,
+    #[serde(skip)]
+    pub agent_mode_unread: bool,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -116,6 +118,7 @@ impl Client {
             Ok(options) => settings.agent_modes = options.surface(&session.surface).map(|x| x.modes.clone()).unwrap_or_default(),
             Err(error) => missing.push(format!("the agent's modes aren't readable: {error}")),
         }
+        settings.agent_mode_unread = !missing.is_empty();
         if missing.is_empty() {
             settings.unavailable.remove("mode");
         } else {
@@ -617,10 +620,12 @@ mod tests {
         ]));
         let mut remote: Session = serde_json::from_value(json!({"id": "d1", "surface": "devin", "host": {"id": "h3a", "state": "connected"}})).unwrap();
         let read = client.settings_for(&remote).unwrap();
+        assert!(!read.agent_mode_unread);
         assert_eq!((read.permission.unwrap().mode, read.agent_modes, read.unavailable.get("mode")), ("ask".into(), vec!["ask".to_string(), "bypass".into()], None));
         remote.host.state = "local".into();
         let half = client.settings_for(&remote).unwrap();
         assert!(half.permission.is_none() && half.agent_modes.is_empty());
+        assert!(half.agent_mode_unread, "a half-read mode is read again");
         assert!(half.unavailable["mode"].starts_with("the current mode isn't readable"), "{:?}", half.unavailable);
         let claude: Session = serde_json::from_value(json!({"id": "c1", "surface": "claude"})).unwrap();
         assert!(client.settings_for(&claude).unwrap().agent_modes.is_empty());
