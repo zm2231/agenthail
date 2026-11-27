@@ -15,8 +15,8 @@ pub enum Done {
     Files(u64, String, String, Result<SessionFiles, String>),
     Prompts(u64, String, Result<Vec<Prompt>, String>),
     Found(u64, Result<Found, String>),
-    Forked(String, String, String, String, Result<String, RespondError>),
-    Goal(String, String, String, String, Result<feed::composer::Delivered, RespondError>),
+    Forked(String, String, String, String, super::window::Id, Result<String, RespondError>),
+    Goal(String, String, String, String, super::window::Id, Result<feed::composer::Delivered, RespondError>),
 }
 
 pub struct Search {
@@ -549,7 +549,7 @@ pub fn done(s: &mut App, done: Done) {
                 }
             }
         }
-        Done::Forked(from, point, prompt, key, result) => {
+        Done::Forked(from, point, prompt, key, asker, result) => {
             s.complete.forking = false;
             if result.as_ref().is_err_and(RespondError::outcome_unknown) {
                 s.complete.told_unknown.insert(key);
@@ -562,30 +562,16 @@ pub fn done(s: &mut App, done: Done) {
                 }
             }
             let from = feed::composer::current(&s.rekeyed, &from).to_string();
-            match result {
-                Ok(id) if !id.is_empty() => {
-                    s.drafts.set(&id, &prompt);
-                    if s.composer_for.as_deref() == Some(from.as_str()) {
-                        crate::over::open_session(s, &id);
-                    } else if prompt.is_empty() {
-                        s.ov.notice = Some("The fork is ready. Find it in the sidebar.".into());
-                    } else {
-                        s.ov.notice = Some("The fork is ready, with your prompt in its composer. Find it in the sidebar.".into());
-                    }
-                }
-                Ok(_) => s.ov.notice = Some("The fork started, but the daemon didn't say which session it made.".into()),
-                Err(error) if error.outcome_unknown() => {
-                    crate::note(s, &from, format!("{} {} sends a new request.", feed::catalog::unknown_outcome(&error.message), feed::menu::FORK_AS_NEW));
-                }
-                Err(error) if error.maybe_delivered => {
-                    let again = if point.ends_with('/') { "Fork" } else { "Fork from here" };
-                    crate::note(s, &from, format!("Fork sent, not confirmed: {}. {again} again checks the same request; it won't make a second copy.", error.message));
-                }
-                Err(error) => s.ov.notice = Some(format!("Couldn't fork: {}", error.message)),
-            }
+            let to = super::window::asker_or_showing(s, asker, &from).unwrap_or(super::window::MAIN);
+            super::window::within(s, to, |s| forked(s, &from, &point, &prompt, result));
         }
-        Done::Goal(asked, typed, goal, key, result) => {
+        Done::Goal(asked, typed, goal, key, asker, result) => {
             let id = feed::composer::current(&s.rekeyed, &asked).to_string();
+            let to = super::window::asker_or_showing(s, asker, &id).unwrap_or(super::window::MAIN);
+            if to != s.windows.current() {
+                super::window::within(s, to, |s| crate::ui::complete::done(s, Done::Goal(asked, typed, goal, key, to, result)));
+                return;
+            }
             if result.as_ref().is_err_and(RespondError::outcome_unknown) {
                 s.complete.told_unknown.insert(key);
             }
@@ -611,7 +597,7 @@ pub fn done(s: &mut App, done: Done) {
                 Ok(feed::composer::Delivered::Queued(_) | feed::composer::Delivered::QueuedUntilAnswer(_)) => "Goal queued; it's set when this turn ends".to_string(),
                 Ok(feed::composer::Delivered::Unconfirmed) => "Goal sent, not confirmed yet. Sending the same /goal again checks it; it won't set it twice.".to_string(),
                 Ok(_) => "Goal set".to_string(),
-                Err(error) if error.outcome_unknown() => format!("{} Sending the same /goal again sends a new request.", feed::catalog::unknown_outcome(&error.message)),
+                Err(error) if error.outcome_unknown() => format!("{} {GOAL_AS_NEW} sends a new request.", feed::catalog::unknown_outcome(&error.message)),
                 Err(error) if error.maybe_delivered => format!("Goal sent, not confirmed: {}. Sending the same /goal again checks it; it won't set it twice.", error.message),
                 Err(error) => format!("Couldn't set the goal: {}", error.message),
             };
@@ -653,21 +639,11 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         return true;
     }
     if command == Slash::Goal {
-        if !s.complete.goal_pending.insert(id.to_string()) {
-            crate::note(s, id, "The goal is still being set.".into());
+        if unknown_goal(s, id).as_deref() == Some(argument.as_str()) {
+            crate::note(s, id, GOAL_ASKED_UNKNOWN.into());
             return true;
         }
-        let typed = draft.trim().to_string();
-        let point = (id.to_string(), argument.clone());
-        if s.complete.goal_keys.get(&point).is_some_and(|(key, _)| s.complete.told_unknown.remove(key)) {
-            s.complete.goal_keys.remove(&point);
-        }
-        let (key, asked) = s.complete.goal_keys.entry(point).or_insert_with(|| (feed::catalog::request_key(), id.to_string())).clone();
-        crate::note(s, id, "Setting the goal…".into());
-        spawn(s, move |c| {
-            let result = c.goal_set(&asked, &argument, &key);
-            Done::Goal(asked.clone(), typed.clone(), argument.clone(), key.clone(), result)
-        });
+        send_goal(s, id, argument, draft.trim().to_string());
         return true;
     }
     let busy = |what: &str| s.menus.busy.iter().any(|(k, w)| *w == what && feed::composer::current(&s.rekeyed, k) == id);
@@ -805,6 +781,76 @@ pub fn fork_unknown(s: &App, from: &str, item: &str) -> bool {
     s.complete.fork_keys.get(&format!("{from}/{item}")).is_some_and(|(key, _)| s.complete.told_unknown.contains(key))
 }
 
+fn forked(s: &mut App, from: &str, point: &str, prompt: &str, result: Result<String, RespondError>) {
+    let main = s.windows.current() == super::window::MAIN;
+    let tell = |s: &mut App, line: String| {
+        if main {
+            s.ov.notice = Some(line);
+        } else {
+            crate::note(s, from, line);
+        }
+    };
+    match result {
+        Ok(id) if !id.is_empty() => {
+            s.drafts.set(&id, prompt);
+            if s.composer_for.as_deref() == Some(from) {
+                if main {
+                    crate::over::open_session(s, &id);
+                } else {
+                    super::window::show(s, &id);
+                }
+            } else if prompt.is_empty() {
+                tell(s, "The fork is ready. Find it in the sidebar.".into());
+            } else {
+                tell(s, "The fork is ready, with your prompt in its composer. Find it in the sidebar.".into());
+            }
+        }
+        Ok(_) => tell(s, "The fork started, but the daemon didn't say which session it made.".into()),
+        Err(error) if error.outcome_unknown() => {
+            crate::note(s, from, format!("{} {} sends a new request.", feed::catalog::unknown_outcome(&error.message), feed::menu::FORK_AS_NEW));
+        }
+        Err(error) if error.maybe_delivered => {
+            let again = if point.ends_with('/') { "Fork" } else { "Fork from here" };
+            crate::note(s, from, format!("Fork sent, not confirmed: {}. {again} again checks the same request; it won't make a second copy.", error.message));
+        }
+        Err(error) => tell(s, format!("Couldn't fork: {}", error.message)),
+    }
+}
+
+pub const GOAL_AS_NEW: &str = "Set goal again as new";
+
+const GOAL_ASKED_UNKNOWN: &str = "Agenthail can't tell whether this goal was set, and sending it the same way gets the same answer. Check the session, then use Set goal again as new in its Goal section.";
+
+pub fn unknown_goal(s: &App, id: &str) -> Option<String> {
+    s.complete.goal_keys.iter().find(|((sess, _), (key, _))| sess == id && s.complete.told_unknown.contains(key)).map(|((_, goal), _)| goal.clone())
+}
+
+pub fn goal_as_new(s: &mut App, id: &str) {
+    let Some(goal) = unknown_goal(s, id) else { return };
+    if s.client.is_none() || s.complete.goal_pending.contains(id) {
+        return;
+    }
+    if let Some((key, _)) = s.complete.goal_keys.remove(&(id.to_string(), goal.clone())) {
+        s.complete.told_unknown.remove(&key);
+    }
+    let typed = format!("/goal {goal}");
+    send_goal(s, id, goal, typed);
+}
+
+fn send_goal(s: &mut App, id: &str, argument: String, typed: String) {
+    if !s.complete.goal_pending.insert(id.to_string()) {
+        crate::note(s, id, "The goal is still being set.".into());
+        return;
+    }
+    let (key, asked) = s.complete.goal_keys.entry((id.to_string(), argument.clone())).or_insert_with(|| (feed::catalog::request_key(), id.to_string())).clone();
+    let asker = s.windows.current();
+    crate::note(s, id, "Setting the goal…".into());
+    spawn(s, move |c| {
+        let result = c.goal_set(&asked, &argument, &key);
+        Done::Goal(asked.clone(), typed.clone(), argument.clone(), key.clone(), asker, result)
+    });
+}
+
 fn fork(s: &mut App, from: &str, prompt: &Prompt) {
     fork_at(s, from, &prompt.item_id, prompt.turn_id.clone(), prompt.text.clone());
 }
@@ -828,9 +874,10 @@ fn fork_at(s: &mut App, from: &str, item: &str, turn: Option<String>, text: Stri
     }
     let (key, sent_from) = s.complete.fork_keys.entry(point.clone()).or_insert_with(|| (feed::catalog::request_key(), from.to_string())).clone();
     let from = sent_from;
+    let asker = s.windows.current();
     spawn(s, move |c| {
         let result = c.fork(&from, turn.as_deref(), &key);
-        Done::Forked(from.clone(), point.clone(), text.clone(), key.clone(), result)
+        Done::Forked(from.clone(), point.clone(), text.clone(), key.clone(), asker, result)
     });
 }
 
@@ -930,4 +977,26 @@ pub fn search(s: &App, x: &Session, k: &Kit) -> Option<El> {
         list = list.child(text(problem.clone()).font(k.text(META)).color(failed()).px(10.0).py(2.0));
     }
     Some(col().key("prompt-search-panel").w_full().gap(6.0).px(12.0).pt(10.0).child(head).child(list))
+}
+
+#[cfg(test)]
+mod goal_tests {
+    use super::*;
+
+    #[test]
+    fn an_interrupted_goal_keeps_its_key_until_set_again_as_new() {
+        let mut s = crate::empty(feed::derive::live::Overview::default(), false);
+        s.client = Some(feed::catalog::Client::new("http://127.0.0.1:1", "t"));
+        let point = ("a".to_string(), "ship it".to_string());
+        send_goal(&mut s, "a", "ship it".into(), "/goal ship it".into());
+        let key = s.complete.goal_keys[&point].0.clone();
+        let interrupted = RespondError::from_status("goal-set", 409, r#"{"error":{"code":"action_outcome_unknown","message":"This request was interrupted before its outcome was recorded, so it may have happened."}}"#);
+        done(&mut s, Done::Goal("a".into(), "/goal ship it".into(), "ship it".into(), key.clone(), super::super::window::MAIN, Err(interrupted)));
+        assert_eq!(unknown_goal(&s, "a").as_deref(), Some("ship it"));
+        assert_eq!(s.complete.goal_keys[&point].0, key, "the interrupted goal keeps its key");
+        assert!(s.status_line.get("a").is_some_and(|l| l.ends_with("Set goal again as new sends a new request.")));
+        goal_as_new(&mut s, "a");
+        assert_ne!(s.complete.goal_keys[&point].0, key, "only the labeled control takes a fresh key");
+        assert!(unknown_goal(&s, "a").is_none());
+    }
 }

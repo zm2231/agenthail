@@ -311,15 +311,20 @@ fn goal_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
     let can = inspect::goal_controls(x);
     let data = s.inspect.meta.get(&x.id);
     let goal = data.and_then(|d| d.goal.as_ref());
-    if goal.is_none() && (!can.editable || data.is_none_or(|d| d.goal_failed)) {
+    let unknown = super::complete::unknown_goal(s, &x.id).is_some();
+    if goal.is_none() && !unknown && (!can.editable || data.is_none_or(|d| d.goal_failed)) {
         return None;
     }
     let busy = s.inspect.goal_busy.contains_key(&x.id);
-    let buttons = row().w_full().flex_wrap().gap(6.0).children(inspect::goal_buttons(goal, can).into_iter().map(|(act, label)| {
+    let mut buttons = row().w_full().flex_wrap().gap(6.0).children(inspect::goal_buttons(goal, can).into_iter().map(|(act, label)| {
         let id = x.id.clone();
         let variant = if act == GoalAct::Clear { ButtonVariant::Ghost } else { ButtonVariant::Neutral };
         small(label, format!("goal-{}", act.action()), variant, busy, move |s: &mut App| press_goal(s, &id, act), k)
     }));
+    if unknown {
+        let id = x.id.clone();
+        buttons = buttons.child(small(super::complete::GOAL_AS_NEW, "goal-again-as-new".to_string(), ButtonVariant::Neutral, busy, move |s: &mut App| super::complete::goal_as_new(s, &id), k));
+    }
     let mut body = col().w_full().gap(8.0);
     if let Some(goal) = goal {
         let tint = if goal.needs_attention() { attention() } else { muted() };

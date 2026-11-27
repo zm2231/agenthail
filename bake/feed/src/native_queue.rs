@@ -234,6 +234,10 @@ pub struct Queue {
 }
 
 impl Queue {
+    pub fn of(session: &str, generation: u64) -> Queue {
+        Queue { session: Some(session.to_string()), generation, ..Queue::default() }
+    }
+
     pub fn reset(&mut self, session: &str) {
         if self.session.as_deref() == Some(session) {
             return;

@@ -17,17 +17,17 @@ fn menu_key(item: &str) -> String {
     format!("codex-queue-{item}")
 }
 
-fn item_row(item: &nq::Submission, can_write: bool, busy: bool, k: &Kit) -> El {
+fn item_row(session: &str, item: &nq::Submission, can_write: bool, busy: bool, k: &Kit) -> El {
     let shown = item.shown_text();
     let mut r = row().key(format!("codex-queue-row-{}", item.id)).w_full().gap(6.0).items_start().child(text(shown.clone()).font(k.text(META)).color(theme::text()).wrap_anywhere().max_lines(3).grow(1.0).min_w(0.0).help(shown));
     if can_write {
-        let id = item.id.clone();
+        let open = (session.to_string(), item.id.clone());
         let more = IconButton::new(&icons::MORE)
             .variant(IconButtonVariant::GhostMuted)
             .control_size(ControlSize::Small)
             .label("Queue item actions")
             .disabled(busy)
-            .on_press(move |s: &mut App| s.native_queue.menu = if s.native_queue.menu.as_deref() == Some(id.as_str()) { None } else { Some(id.clone()) })
+            .on_press(move |s: &mut App| s.native_queue.menu = if s.native_queue.menu.as_ref() == Some(&open) { None } else { Some(open.clone()) })
             .build(k)
             .key(format!("{}-trigger", menu_key(&item.id)));
         r = r.child(more);
@@ -39,10 +39,9 @@ pub(crate) fn section(s: &App, x: &Session, k: &Kit) -> Option<El> {
     if !nq::shown(x) {
         return None;
     }
-    let q = &s.native_queue.queue;
-    let current = q.session.as_deref() == Some(x.id.as_str());
+    let q = super::queue(s, &x.id);
     let can_write = nq::writable(x);
-    let busy = current && q.busy;
+    let busy = q.is_some_and(|q| q.busy);
     let reload_id = x.id.clone();
     let reload = IconButton::new(&icons::ROTATE_CW)
         .variant(IconButtonVariant::GhostMuted)
@@ -56,9 +55,9 @@ pub(crate) fn section(s: &App, x: &Session, k: &Kit) -> Option<El> {
     let trailing: Vec<El> = busy.then(|| text("Working…").font(k.text(META)).color(faint())).into_iter().chain([reload]).collect();
     let section = |body: El| rail_section_with(nq::TITLE, &icons::INBOX, trailing, body, k);
     let mut body = col().w_full().gap(8.0);
-    if !current {
+    let Some(q) = q else {
         return Some(section(body.child(text(nq::LOADING).font(k.text(META)).color(muted()))));
-    }
+    };
     if q.loaded && q.items.is_empty() {
         body = body.child(text(nq::EMPTY).font(k.text(META)).color(muted()));
     } else if !q.loaded && let Some(error) = &q.error {
@@ -66,16 +65,19 @@ pub(crate) fn section(s: &App, x: &Session, k: &Kit) -> Option<El> {
     } else if !q.loaded {
         body = body.child(text(nq::LOADING).font(k.text(META)).color(muted()));
     }
-    body = body.children(q.items.iter().map(|i| item_row(i, can_write, busy, k)));
+    body = body.children(q.items.iter().map(|i| item_row(&x.id, i, can_write, busy, k)));
     if q.next_cursor.is_some() {
         let load = text("Load more").font(k.text(META)).color(if busy { faint() } else { accent() }).key("codex-queue-more");
-        body = body.child(if busy { load } else { load.on_press(|s: &mut App| fetch(s, true)) });
+        let id = x.id.clone();
+        body = body.child(if busy { load } else { load.on_press(move |s: &mut App| fetch(s, &id, true)) });
     }
     if can_write && q.loaded {
-        let mut buttons = row().w_full().flex_wrap().gap(6.0).child(small("Add…", "codex-queue-add", busy, |s: &mut App| open_editor(s, None, String::new()), k));
+        let id = x.id.clone();
+        let mut buttons = row().w_full().flex_wrap().gap(6.0).child(small("Add…", "codex-queue-add", busy, move |s: &mut App| open_editor(s, &id, None, String::new()), k));
         if !q.items.is_empty() {
-            let start = |s: &mut App| {
-                act(s, Act::Start(None));
+            let id = x.id.clone();
+            let start = move |s: &mut App| {
+                act(s, &id, Act::Start(None));
             };
             buttons = buttons.child(small("Start next", "codex-queue-start-next", busy, start, k).help("Let Codex start its next queued input"));
         }
@@ -87,27 +89,28 @@ pub(crate) fn section(s: &App, x: &Session, k: &Kit) -> Option<El> {
     Some(section(body))
 }
 
-fn row_menu(s: &App, item_id: &str, layer: &mut Vec<El>, k: &Kit) {
-    let q = &s.native_queue.queue;
+fn row_menu(s: &App, session: &str, item_id: &str, layer: &mut Vec<El>, k: &Kit) {
+    let Some(q) = super::queue(s, session) else { return };
     let Some(index) = q.items.iter().position(|i| i.id == item_id) else { return };
     let item = &q.items[index];
     let run = |a: Act| {
+        let session = session.to_string();
         move |s: &mut App| {
-            act(s, a.clone());
+            act(s, &session, a.clone());
         }
     };
     let mut m = Menu::new(menu_key(item_id)).open(true).min_width(180.0).on_close(|s: &mut App| s.native_queue.menu = None);
     m = m.item(MenuItem::new("Start now").key("codex-queue-start-now").on_select(run(Act::Start(Some(item.id.clone())))));
     if let Some(original) = item.editable_text() {
-        let id = item.id.clone();
-        m = m.item(MenuItem::new("Edit…").key("codex-queue-edit").on_select(move |s: &mut App| open_editor(s, Some(id.clone()), original.clone())));
+        let (session, id) = (session.to_string(), item.id.clone());
+        m = m.item(MenuItem::new("Edit…").key("codex-queue-edit").on_select(move |s: &mut App| open_editor(s, &session, Some(id.clone()), original.clone())));
     }
     if q.can_reorder() {
         let shift = |by: isize| {
-            let id = item.id.clone();
+            let (session, id) = (session.to_string(), item.id.clone());
             move |s: &mut App| {
-                if let Some(a) = s.native_queue.queue.moved(&id, by) {
-                    act(s, a);
+                if let Some(a) = super::queue(s, &session).and_then(|q| q.moved(&id, by)) {
+                    act(s, &session, a);
                 }
             }
         };
@@ -146,8 +149,8 @@ fn editor(e: &Editor, layer: &mut Vec<El>, k: &Kit) {
 }
 
 pub(crate) fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
-    if let Some(id) = &s.native_queue.menu {
-        row_menu(s, id, layer, k);
+    if let Some((session, id)) = &s.native_queue.menu {
+        row_menu(s, session, id, layer, k);
     }
     if let Some(e) = &s.native_queue.editor {
         editor(e, layer, k);

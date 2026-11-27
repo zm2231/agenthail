@@ -364,3 +364,51 @@ fn a_move_from_one_window_leaves_another_window_s_limit_dialog_and_new_session_l
     assert_eq!((owner(&s, Kind::LimitConfirm), owner(&s, Kind::LimitPick)), (Some(w), Some(MAIN)));
     assert!(together(&s, Kind::LimitPick, Kind::Jump) && !together(&s, Kind::LimitConfirm, Kind::LimitPick));
 }
+
+fn codex(id: &str) -> feed::catalog::Session {
+    feed::catalog::Session { id: id.into(), surface: "codex".into(), ..Default::default() }
+}
+
+#[test]
+fn a_session_window_keeps_its_codex_queue_and_editor_while_main_shows_another_session() {
+    use crate::ui::native_queue::{Editor, drain, queue};
+    let mut s = app();
+    s.sessions = vec![codex("a"), codex("b")];
+    crate::select(&mut s, "a");
+    s.screen = Screen::Session;
+    let w = open(&mut s, "b");
+    assert!(queue(&s, "a").is_some() && queue(&s, "b").is_some(), "each shown session has its own queue");
+    s.native_queue.editor = Some(Editor { session: "b".into(), item: None, original: String::new(), text: rune::TextEdit::new("then tag"), saving: None, error: None, unknown: true });
+    give(&mut s, Kind::Queue, w);
+    drain(&mut s);
+    assert!(s.native_queue.editor.as_ref().is_some_and(|e| e.session == "b" && e.unknown), "main's poll keeps the window's editor and its unknown outcome");
+    assert!(queue(&s, "a").is_some() && queue(&s, "b").is_some(), "main's poll keeps the window's queue");
+    assert_eq!(owner(&s, Kind::Queue), Some(w));
+    close(&mut s, w);
+    drain(&mut s);
+    assert!(s.native_queue.editor.is_none() && queue(&s, "b").is_none() && queue(&s, "a").is_some(), "closing the window drops only its session's queue");
+}
+
+#[test]
+fn a_fork_result_lands_in_the_window_that_asked() {
+    use crate::ui::complete::{Done, done};
+    let mut s = app();
+    crate::select(&mut s, "a");
+    let w = open(&mut s, "b");
+    let refused = feed::catalog::RespondError::from_status("session-fork", 400, r#"{"error":{"code":"invalid_request","message":"no fork here"}}"#);
+    done(&mut s, Done::Forked("b".into(), "b/".into(), String::new(), "k1".into(), w, Err(refused.clone())));
+    assert_eq!((s.ov.notice.as_deref(), s.status_line.get("b").map(String::as_str)), (None, Some("Couldn't fork: no fork here")), "a refusal shows in the window that asked, not main's notice");
+    let interrupted = feed::catalog::RespondError::from_status("session-fork", 409, r#"{"error":{"code":"action_outcome_unknown","message":"This request was interrupted before its outcome was recorded, so it may have happened."}}"#);
+    done(&mut s, Done::Forked("b".into(), "b/".into(), String::new(), "k2".into(), w, Err(interrupted)));
+    assert!(s.ov.notice.is_none() && s.status_line.get("b").is_some_and(|l| l.ends_with("Fork again as new sends a new request.")));
+    within(&mut s, w, |s| s.composer_for = None);
+    done(&mut s, Done::Forked("b".into(), "b/".into(), String::new(), "k3".into(), w, Ok("c".into())));
+    assert!(s.windows.of("c").is_none());
+    assert!(s.ov.notice.is_none() && s.status_line.get("b").is_some_and(|l| l.starts_with("The fork is ready")));
+    within(&mut s, w, |s| s.composer_for = Some("b".into()));
+    done(&mut s, Done::Forked("b".into(), "b/".into(), String::new(), "k4".into(), w, Ok("d".into())));
+    assert!(s.windows.of("d").is_some(), "a fork from a session window opens in its own window");
+    assert_eq!((s.windows.current(), s.selected.as_deref()), (MAIN, Some("a")), "main stays where it was");
+    done(&mut s, Done::Forked("a".into(), "a/".into(), String::new(), "k5".into(), MAIN, Err(refused)));
+    assert_eq!(s.ov.notice.as_deref(), Some("Couldn't fork: no fork here"), "a fork from main tells main");
+}
