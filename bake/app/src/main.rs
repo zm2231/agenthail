@@ -450,7 +450,7 @@ pub fn draft_reply(s: &mut App, reply: &str) {
     let draft = ui::paste::draft(s);
     let draft = draft.trim_end();
     let text = if draft.is_empty() { reply.to_string() } else { format!("{draft}\n{reply}") };
-    s.composer = ui::paste::edit(&text);
+    ui::paste::set_composer(s, &text);
     s.composer.focused = true;
 }
 
@@ -511,7 +511,7 @@ pub fn show_changes(s: &mut App) {
 }
 
 pub fn send_text(s: &mut App, message: String, tx: &mut Tx) {
-    s.composer = TextEdit::new(message.as_str());
+    ui::paste::set_composer(s, &message);
     send(s, tx);
 }
 
@@ -580,9 +580,7 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
         }
         _ => busy,
     };
-    let focused = s.composer.focused;
-    s.composer = TextEdit::new("");
-    s.composer.focused = focused;
+    ui::paste::set_composer(s, "");
     ui::attach::clear(s, id);
     ui::complete::sending(s, id);
     match s.unsent.take_same(id, &message, &attachments) {
@@ -606,7 +604,7 @@ fn clear_sent(s: &mut App, id: &str, unsent: &Unsent) {
         return;
     }
     if s.composer_for.as_deref() == Some(id) {
-        s.composer = TextEdit::new("");
+        ui::paste::set_composer(s, "");
         s.composer.focused = true;
     } else {
         s.drafts.set(id, "");
@@ -678,7 +676,7 @@ pub fn put_back_unsent(s: &mut App, id: &str) {
     }
     let merged = feed::composer::put_back(&shown_text(s, id), &ui::paste::unsent_draft(&unsent));
     if s.composer_for.as_deref() == Some(id) {
-        s.composer = ui::paste::edit(&merged);
+        ui::paste::set_composer(s, &merged);
         s.composer.focused = true;
     }
     s.drafts.set(id, &merged);

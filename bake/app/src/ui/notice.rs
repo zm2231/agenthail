@@ -12,6 +12,7 @@ use crate::{App, Bg, icons};
 pub struct Notices {
     replacements: Vec<LeadReplacement>,
     acking: HashSet<i64>,
+    acked: HashSet<i64>,
     error: Option<String>,
     pub turn: TurnNotice,
 }
@@ -21,7 +22,9 @@ pub enum Done {
 }
 
 pub fn take_replacements(s: &mut App, list: Vec<LeadReplacement>) {
-    s.notices.replacements = list;
+    let n = &mut s.notices;
+    n.acked.retain(|id| list.iter().any(|r| r.id == *id));
+    n.replacements = list.into_iter().filter(|r| !n.acked.contains(&r.id)).collect();
 }
 
 pub fn take(s: &mut App, done: Done) {
@@ -29,6 +32,7 @@ pub fn take(s: &mut App, done: Done) {
         Done::Acked(id, Ok(())) => {
             s.notices.replacements.retain(|r| r.id != id);
             s.notices.acking.remove(&id);
+            s.notices.acked.insert(id);
         }
         Done::Acked(id, Err(error)) => {
             s.notices.acking.remove(&id);

@@ -96,7 +96,7 @@ fn run(s: &mut App, id: &str, row: Queued, op: Op) {
 fn hand_back(s: &mut App, id: &str, message: &str) {
     let merged = feed::composer::put_back(&crate::shown_text(s, id), message);
     if s.composer_for.as_deref() == Some(id) {
-        s.composer = super::paste::edit(&merged);
+        super::paste::set_composer(s, &merged);
         s.composer.focused = true;
     }
     s.drafts.set(id, &merged);

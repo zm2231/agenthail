@@ -11,7 +11,7 @@ pub struct Editing {
     edit: TextEdit,
 }
 
-pub fn edit(draft: &str) -> TextEdit {
+fn edit(draft: &str) -> TextEdit {
     let store = paste::shared();
     let mut text = String::with_capacity(draft.len());
     let mut marks = Vec::new();

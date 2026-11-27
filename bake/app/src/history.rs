@@ -150,7 +150,7 @@ pub fn copy(text: String) -> impl Fn(&mut App, &mut Tx) + 'static {
 pub fn edit(text: String) -> impl Fn(&mut App) + 'static {
     move |s: &mut App| {
         let merged = feed::composer::put_back(&crate::ui::paste::draft(s), &text);
-        s.composer = crate::ui::paste::edit(&merged);
+        crate::ui::paste::set_composer(s, &merged);
         s.composer.focused = true;
     }
 }
