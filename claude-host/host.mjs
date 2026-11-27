@@ -674,7 +674,7 @@ async function open(params) {
           // asks canUseTool for questions in bypassPermissions.
           allowDangerouslySkipPermissions: true,
           ...(params.mcp ? { allowedTools: [`mcp__${AGENTHAIL_MCP}`] } : {}),
-          ...(args.agenthail ? { hooks: sessionContextHooks(s) } : s.preface ? { hooks: { SessionStart: [{ hooks: [prefaceHook(s)] }] } } : {}),
+          ...(args.agenthail ? { hooks: sessionContextHooks(s) } : s.preface ? { hooks: { UserPromptSubmit: [{ hooks: [prefaceHook(s)] }] } } : {}),
           canUseTool: (toolName, input, options) => s.ask(toolName, input, options),
         };
     s.query = query({
@@ -1104,18 +1104,20 @@ function sessionContextHooks(s) {
       child.stdin.on('error', () => {});
       child.stdin.end(JSON.stringify(withAgenthailTools(s, withMessageUUID(s, input))));
     });
-  const start = async (input, toolUseID, options) => withPreface(s, input, await run(input, toolUseID, options));
+  const prompt = async (input, toolUseID, options) => withPreface(s, input, await run(input, toolUseID, options));
   return {
-    SessionStart: [{ hooks: [start] }],
-    UserPromptSubmit: [{ hooks: [run] }],
+    SessionStart: [{ hooks: [run] }],
+    UserPromptSubmit: [{ hooks: [prompt] }],
     SubagentStart: [{ hooks: [subagent] }],
     PreToolUse: [{ matcher: `mcp__${AGENTHAIL_MCP}__.*`, hooks: [subagent] }],
   };
 }
 
 // A preface is what the daemon tells a conversation it reopens, such as the
-// folder it now runs in; Claude reads it from SessionStart before whatever
-// message, by whatever route, starts the first turn.
+// folder it now runs in. Claude reads it with the first prompt, whichever route
+// it came by: Claude runs UserPromptSubmit for a peer message too, but runs
+// SessionStart before the SDK registers its callbacks, so they see it only
+// after a compaction.
 function prefaceHook(s) {
   return async (input) => withPreface(s, input, {});
 }

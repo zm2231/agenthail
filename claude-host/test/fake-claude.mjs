@@ -484,8 +484,9 @@ lines.on('line', (line) => {
     }
     if (subtype === 'set_model') model = message.request.model || 'claude-opus-5-5';
     if (subtype === 'initialize') {
+      // Like Claude, which has run SessionStart by the time the SDK registers
+      // its callbacks, so they never see a startup or a resume.
       hooks = message.request.hooks ?? {};
-      turns = turns.then(() => runHooks('SessionStart', { source: flag('resume') ? 'resume' : 'startup' }));
       fs.appendFileSync(path.join(dir, 'initialize.jsonl'), JSON.stringify({ sessionId, systemPrompt: message.request.systemPrompt ?? null, appendSystemPrompt: message.request.appendSystemPrompt ?? null, sdkMcpServers: message.request.sdkMcpServers ?? null }) + '\n');
     }
     if (subtype === 'set_permission_mode') {

@@ -258,19 +258,17 @@ process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input
   const recorded = all.filter((r) => r.event !== 'Stop');
   assert.deepEqual(
     recorded.map((r) => [r.event, r.output.hookSpecificOutput?.additionalContext ?? null]),
-    [['SessionStart', 'card for SessionStart'], ['UserPromptSubmit', 'card for UserPromptSubmit'], ['UserPromptSubmit', null], ['UserPromptSubmit', null], ['UserPromptSubmit', null], ['UserPromptSubmit', 'card for UserPromptSubmit']],
+    [['UserPromptSubmit', 'card for UserPromptSubmit'], ['UserPromptSubmit', null], ['UserPromptSubmit', null], ['UserPromptSubmit', null], ['UserPromptSubmit', 'card for UserPromptSubmit']],
   );
   assert.deepEqual(
-    recorded.map((r) => r.output).slice(0, 5),
-    [{ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'card for SessionStart' } }, { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'card for UserPromptSubmit' } }, {}, {}, {}],
+    recorded.map((r) => r.output).slice(0, 4),
+    [{ hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: 'card for UserPromptSubmit' } }, {}, {}, {}],
   );
   const ran = fs.readFileSync(calls, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.args[1] === 'session-context');
   assert.deepEqual(ran[0].args, ['hook', 'session-context', '--claude-pid', String(opened.pid)]);
   assert.equal(ran[0].input.session_id, id);
-  assert.equal(ran[0].input.source, 'startup');
-  assert.equal(ran[0].input.agenthail_message_uuid, undefined);
   assert.deepEqual(
-    ran.slice(1).map((r) => r.input.agenthail_message_uuid),
+    ran.map((r) => r.input.agenthail_message_uuid),
     [...sent, undefined],
     'each person message names the uuid Claude took; a peer message names none',
   );
@@ -572,7 +570,7 @@ test('a duplicate uuid runs once', async () => {
   c.close();
 });
 
-test("an open's preface reaches Claude at SessionStart, after the session card, once", async () => {
+test("an open's preface reaches Claude with the first prompt, after the session card, once", async () => {
   const f = fixture();
   const agenthail = path.join(f.root, 'agenthail');
   fs.writeFileSync(
@@ -591,12 +589,15 @@ process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input
   const uuid = randomUUID();
   await c.call('send', { sessionId: id, uuid, text: 'first' });
   await c.event(turnResult(id, uuid));
+  const peer = randomUUID();
+  await c.call('send', { sessionId: id, uuid: peer, text: 'second', origin: { kind: 'peer', from: randomUUID() } });
+  await c.event(turnResult(id, peer));
   const hooked = fs.readFileSync(path.join(f.claudeDir, 'hooks.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.event !== 'Stop');
   assert.deepEqual(
     hooked.map((r) => [r.event, r.output.hookSpecificOutput?.additionalContext]),
-    [['SessionStart', 'card\n\n[agenthail] Your folder moved.'], ['UserPromptSubmit', 'card']],
+    [['UserPromptSubmit', 'card\n\n[agenthail] Your folder moved.'], ['UserPromptSubmit', 'card']],
   );
-  assert.deepEqual(transcript(f, id).map((l) => l.text), ['first']);
+  assert.deepEqual(transcript(f, id).map((l) => l.text), ['first', 'second']);
   c.close();
 });
 
@@ -611,7 +612,7 @@ test('a host without the agenthail command still gives an open its preface', asy
   await c.call('send', { sessionId: id, uuid, text: 'first' });
   await c.event(turnResult(id, uuid));
   const hooked = fs.readFileSync(path.join(f.claudeDir, 'hooks.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-  assert.deepEqual(hooked.map((r) => [r.event, r.output]), [['SessionStart', { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: '[agenthail] Your folder moved.' } }]]);
+  assert.deepEqual(hooked.map((r) => [r.event, r.output]), [['UserPromptSubmit', { hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: '[agenthail] Your folder moved.' } }]]);
   c.close();
 });
 
