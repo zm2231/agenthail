@@ -23,7 +23,7 @@ fn recorded(at: &str, sessions: Vec<Session>) -> Recorded {
 }
 
 fn fetched(at: &str, sessions: Vec<Session>, ledgers: Vec<(&str, Result<Vec<Work>, String>)>) -> Fetched {
-    Fetched { recorded: recorded(at, sessions), ledgers: ledgers.into_iter().map(|(k, r)| (k.to_string(), r)).collect(), started: Instant::now() }
+    Fetched { recorded: recorded(at, sessions), ledgers: ledgers.into_iter().map(|(k, r)| (k.to_string(), r)).collect(), held: Vec::new(), started: Instant::now() }
 }
 
 fn status(w: &World, id: &str) -> String {
@@ -309,4 +309,26 @@ fn chained_read_marks_hold_against_a_row_older_than_both() {
     assert!(ov.patch("a", Patch::Read { receipt: ReadState { first_unread: "item-1".into(), revision: "C".into() }, from: vec!["B".into()] }, Instant::now()));
     assert!(ov.take_sessions("2026-11-24T12:00:03Z", vec![at_a]));
     assert_eq!(ov.sessions()[0].read_state.as_ref().unwrap().revision, "C");
+}
+
+#[test]
+fn a_ledger_change_refetches_only_a_project_whose_rows_are_shown() {
+    let mut ov = Overview::default();
+    let mut r = recorded("2026-11-24T12:00:00Z", vec![session("s", "p", "2026-11-24T11:00:00Z", "idle")]);
+    r.projects[0].ledger_key = "shared:x".into();
+    ov.refresh(Fetched { recorded: r, ledgers: [("p".to_string(), Ok(vec![work("p-W1", "open")]))].into(), held: Vec::new(), started: Instant::now() });
+    assert_eq!(ov.ledger_changed("shared:x").as_deref(), Some("p"));
+    assert_eq!(ov.ledger_changed("p").as_deref(), Some("p"));
+    assert_eq!(ov.ledger_changed("old"), None);
+    assert_eq!(ov.ledger_changed("project:elsewhere"), None);
+}
+
+#[test]
+fn ledgers_held_from_the_change_stream_survive_an_overview_that_skips_them() {
+    let mut ov = Overview::default();
+    let sessions = || vec![session("s", "p", "2026-11-24T11:00:00Z", "idle")];
+    ov.refresh(fetched("2026-11-24T12:00:00Z", sessions(), vec![("p", Ok(vec![work("p-W1", "open")]))]));
+    ov.refresh(Fetched { held: vec!["p".into()], ..fetched("2026-11-24T12:01:00Z", sessions(), Vec::new()) });
+    assert_eq!(board_ids(&ov.world(&[]), "p"), vec!["p-W1".to_string()]);
+    assert!(!ov.wants("p"));
 }

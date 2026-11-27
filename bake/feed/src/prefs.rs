@@ -386,21 +386,7 @@ pub fn rereads(event: &str) -> bool {
 }
 
 pub fn read_events(reader: impl std::io::BufRead, mut on: impl FnMut(&str, u64) -> bool) -> std::io::Result<()> {
-    let (mut kind, mut id) = (String::new(), 0u64);
-    for line in reader.lines() {
-        let line = line?;
-        if let Some(v) = line.strip_prefix("event:") {
-            kind = v.trim().to_string();
-        } else if let Some(v) = line.strip_prefix("id:") {
-            id = v.trim().parse().unwrap_or(id);
-        } else if line.is_empty() && !kind.is_empty() {
-            if !on(&kind, id) {
-                return Ok(());
-            }
-            kind.clear();
-        }
-    }
-    Ok(())
+    crate::watch::read(reader, |e| on(&e.kind, e.id))
 }
 
 impl Client {

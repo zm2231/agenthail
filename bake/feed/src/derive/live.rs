@@ -19,6 +19,7 @@ pub const EXPECT_HOLD: std::time::Duration = std::time::Duration::from_secs(15);
 pub struct Fetched {
     pub recorded: Recorded,
     pub ledgers: HashMap<String, Result<Vec<Work>, String>>,
+    pub held: Vec<String>,
     pub started: Instant,
 }
 
@@ -27,13 +28,13 @@ pub struct Ledger {
     pub actors: HashMap<String, Actor>,
 }
 
-pub fn fetch(client: &Client) -> Result<Fetched> {
+pub fn fetch(client: &Client, held: &HashSet<String>) -> Result<Fetched> {
     let started = Instant::now();
     let snap = client.get_json("/api/v1/snapshot")?;
     let now = snap["updatedAt"].as_str().and_then(parse_time).unwrap_or_else(OffsetDateTime::now_utc);
     let sessions: Vec<Session> = serde_json::from_value(snap["sessions"].clone()).unwrap_or_default();
     let recent: BTreeSet<String> = sessions.iter().filter(|s| hours(now, &s.last_active) < LEDGER_WINDOW_H).map(|s| s.project_key()).collect();
-    let keys: Vec<String> = snap["projects"].as_array().into_iter().flatten().filter(|p| p["archived"] != json!(true)).filter_map(|p| p["id"].as_str()).filter(|k| recent.contains(*k)).map(String::from).collect();
+    let (held, keys): (Vec<String>, Vec<String>) = snap["projects"].as_array().into_iter().flatten().filter(|p| p["archived"] != json!(true)).filter_map(|p| p["id"].as_str()).filter(|k| recent.contains(*k)).map(String::from).partition(|k| held.contains(k));
     let ledgers: HashMap<String, Result<Vec<Work>, String>> = std::thread::scope(|scope| {
         let jobs: Vec<_> = keys.iter().map(|k| (k.clone(), scope.spawn(|| rows(client, k, now)))).collect();
         jobs.into_iter().map(|(k, h)| (k, h.join().unwrap_or_else(|_| Err("the fetch stopped".into())))).collect()
@@ -57,7 +58,7 @@ pub fn fetch(client: &Client) -> Result<Fetched> {
     let mut recorded: Recorded = serde_json::from_value(raw)?;
     recorded.actors = actors(client, &sessions, ledgers.values().filter_map(|r| r.as_ref().ok()).flatten());
     recorded.sessions = sessions;
-    Ok(Fetched { recorded, ledgers, started })
+    Ok(Fetched { recorded, ledgers, held, started })
 }
 
 pub fn ledger(client: &Client, project: &str, sessions: &[Session]) -> Result<Ledger, String> {
@@ -210,7 +211,7 @@ impl Overview {
     }
 
     pub fn refresh(&mut self, fetched: Fetched) {
-        let Fetched { mut recorded, ledgers, started } = fetched;
+        let Fetched { mut recorded, ledgers, held, started } = fetched;
         let fresh = newer(&recorded.updated_at, &self.base.updated_at);
         if !fresh {
             recorded.updated_at = std::mem::take(&mut self.base.updated_at);
@@ -224,7 +225,7 @@ impl Overview {
         }
         self.stale = true;
         self.take_actors(started, actors);
-        self.covered = ledgers.keys().cloned().collect();
+        self.covered = ledgers.keys().cloned().chain(held).collect();
         for (key, result) in ledgers {
             self.apply(key, started, result);
         }
@@ -241,6 +242,15 @@ impl Overview {
         self.pending.insert(project.to_string());
         self.stale = true;
         true
+    }
+
+    pub fn ledger_changed(&mut self, ledger_key: &str) -> Option<String> {
+        let id = self.base.projects.iter().find(|p| !p.archived && (p.ledger_key == ledger_key || p.id == ledger_key))?.id.clone();
+        if !self.ledgers.contains_key(&id) && !self.failed.contains(&id) {
+            return None;
+        }
+        self.pending.insert(id.clone());
+        Some(id)
     }
 
     pub fn take_ledger(&mut self, project: &str, started: Instant, result: Result<Ledger, String>) {

@@ -374,6 +374,10 @@ pub struct Snapshot {
     pub queue: Vec<QueueRow>,
     #[serde(default)]
     pub decisions_rev: String,
+    #[serde(default)]
+    pub catalog_seq: u64,
+    #[serde(default)]
+    pub event_cursor: u64,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
