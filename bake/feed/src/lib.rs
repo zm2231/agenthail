@@ -31,6 +31,7 @@ mod mock;
 pub mod queue;
 pub mod prefer;
 pub mod prefs;
+pub mod projects;
 pub mod source;
 pub mod store;
 pub mod subagents;

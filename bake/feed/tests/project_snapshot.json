@@ -1,0 +1,21 @@
+{
+  "projects": [
+    {
+      "id": "repo:example.com/acme/app",
+      "displayName": "app",
+      "kind": "git",
+      "checkouts": [
+        {"host": {"id": "h1", "name": "studio", "state": "local"}, "projectId": "p-1", "rootPath": "/work/app", "added": true, "sessionCount": 1, "archived": false},
+        {"host": {"id": "h2", "name": "builder", "state": "connected"}, "projectId": "h2::implicit:/home/dev/app", "rootPath": "/home/dev/app", "added": false, "sessionCount": 2, "archived": false}
+      ],
+      "coordinators": [
+        {"host": {"id": "h1", "name": "studio", "state": "local"}, "name": "lead", "surface": "claude", "sessionId": "s-lead", "changedAt": "2026-11-03T22:51:40Z"}
+      ],
+      "lastActive": "2026-11-27T02:09:16Z",
+      "sessionCount": 3,
+      "archived": false,
+      "mcp": "on"
+    }
+  ],
+  "tileOrder": {"order": ["repo:example.com/acme/app", "p-2"], "pinned": [], "revision": 3}
+}

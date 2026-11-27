@@ -53,7 +53,7 @@ pub fn fetch(client: &Client) -> Result<Fetched> {
         .ok()
         .map(|hv| std::iter::once(json!({"name": hv["host"]["name"], "state": hv["host"]["state"]})).chain(hv["hosts"].as_array().cloned().unwrap_or_default().into_iter().map(|x| json!({"name": x["name"], "state": x["state"]}))).collect())
         .unwrap_or_default();
-    let raw = json!({"updatedAt": snap["updatedAt"], "projects": snap["projects"], "usage": usage, "hosts": hosts});
+    let raw = json!({"updatedAt": snap["updatedAt"], "projects": snap["projects"], "usage": usage, "hosts": hosts, "tileOrder": snap["tileOrder"]});
     let mut recorded: Recorded = serde_json::from_value(raw)?;
     recorded.actors = actors(client, &sessions, ledgers.values().filter_map(|r| r.as_ref().ok()).flatten());
     recorded.sessions = sessions;

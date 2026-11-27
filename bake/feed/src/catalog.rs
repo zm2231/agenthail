@@ -200,6 +200,8 @@ pub struct Session {
     pub read_only: bool,
     #[serde(default)]
     pub unavailable_reason: Option<String>,
+    #[serde(default)]
+    pub worktree: Option<crate::projects::Worktree>,
 }
 
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq)]
