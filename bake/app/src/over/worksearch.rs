@@ -24,7 +24,7 @@ pub struct State {
     requests: u64,
     reads: HashMap<WorkKey, u64>,
     found: HashMap<WorkKey, Work>,
-    steps: HashMap<String, Steps>,
+    steps: HashMap<String, (u64, Steps)>,
     names: HashMap<String, String>,
     opening: HashMap<WorkKey, Option<String>>,
     tx: Sender<Reply>,
@@ -43,19 +43,27 @@ impl State {
         self.found.retain(|key, _| !d.work.contains_key(key));
         d.found_names.extend(self.names.iter().map(|(k, v)| (k.clone(), v.clone())));
         self.steps.retain(|project, _| !d.steps.contains_key(project));
-        d.steps.extend(self.steps.iter().map(|(k, v)| (k.clone(), v.clone())));
+        d.steps.extend(self.steps.iter().map(|(k, (_, v))| (k.clone(), v.clone())));
         for (key, w) in &self.found {
             let steps = d.steps_for(&w.project).cloned().unwrap_or_default();
             d.work.entry(key.clone()).or_insert_with(|| Work { steps, ..w.clone() });
         }
     }
 
-    fn learn(&mut self, d: &mut World, work: Work) -> Work {
-        if !d.steps.contains_key(&work.project) || self.steps.contains_key(&work.project) {
-            self.steps.insert(work.project.clone(), work.steps.clone());
-            d.steps.insert(work.project.clone(), work.steps.clone());
+    fn learn(&mut self, d: &mut World, work: Work, seq: u64) -> Work {
+        let project = work.project.clone();
+        let ours = match self.steps.get(&project) {
+            Some((at, _)) => *at < seq,
+            None => !d.steps.contains_key(&project),
+        };
+        if ours {
+            self.steps.insert(project.clone(), (seq, work.steps.clone()));
+            d.steps.insert(project.clone(), work.steps.clone());
+            for w in d.work.values_mut().filter(|w| w.project == project) {
+                w.steps = work.steps.clone();
+            }
         }
-        let steps = d.steps_of(&work.project);
+        let steps = d.steps_of(&project);
         Work { steps, ..work }
     }
 }
@@ -159,7 +167,7 @@ pub fn drain(s: &mut App) -> bool {
                 match *read {
                     Ok(work) => {
                         let work = s.ov.d.place(work, &key.ledger);
-                        let work = s.ov.worksearch.learn(&mut s.ov.d, work);
+                        let work = s.ov.worksearch.learn(&mut s.ov.d, work, seq);
                         s.ov.worksearch.opening.remove(&key);
                         s.ov.worksearch.found.insert(key.clone(), work.clone());
                         super::jump::keep_highlight(s, |s| {
@@ -250,7 +258,7 @@ mod tests {
     fn a_search_item_takes_its_projects_ledger_names_over_its_own_reply() {
         let mut state = State::default();
         let mut d = world();
-        let w = state.learn(&mut d, item("p-1-W9", "p-1", "project:p-1", "Make"));
+        let w = state.learn(&mut d, item("p-1-W9", "p-1", "project:p-1", "Make"), 1);
         assert_eq!(w.steps.name(1), "Craft", "an older item reply doesn't replace the project's ledger names");
         state.found.insert(w.key(), item("p-1-W9", "p-1", "project:p-1", "Make"));
         let mut d = world();
@@ -262,11 +270,17 @@ mod tests {
     fn a_project_known_only_from_search_names_its_steps_from_its_newest_item_reply() {
         let mut state = State::default();
         let mut d = world();
-        let first = state.learn(&mut d, item("z-W1", "shared:z", "shared:z", "Make"));
-        state.found.insert(first.key(), first);
+        let first = state.learn(&mut d, item("z-W1", "shared:z", "shared:z", "Make"), 1);
+        state.found.insert(first.key(), first.clone());
+        d.work.insert(first.key(), first);
         assert_eq!(d.steps_of("shared:z").name(1), "Make", "the reply's names reach the project's other search rows");
-        let second = state.learn(&mut d, item("z-W2", "shared:z", "shared:z", "Forge"));
-        state.found.insert(second.key(), second);
+        let second = state.learn(&mut d, item("z-W2", "shared:z", "shared:z", "Forge"), 3);
+        state.found.insert(second.key(), second.clone());
+        d.work.insert(second.key(), second);
+        assert_eq!(word(&d, WorkKey::new("shared:z", "z-W1")), "Forge", "an item opened earlier takes the newer names at once");
+        let late = state.learn(&mut d, item("z-W3", "shared:z", "shared:z", "Old"), 2);
+        assert_eq!(late.steps.name(1), "Forge", "a reply to an older read doesn't bring its names back");
+        assert_eq!(word(&d, WorkKey::new("shared:z", "z-W1")), "Forge");
         let mut d = world();
         state.keep(&mut d);
         assert_eq!(d.steps_of("shared:z").name(1), "Forge");
