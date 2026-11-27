@@ -276,8 +276,9 @@ fn fetch(s: &mut Prefs, what: Read) {
 
 pub fn reload(s: &mut Prefs) {
     s.loaded = true;
-    if s.client.is_none() {
-        (s.client, s.no_client) = connect();
+    let (fresh, why) = connect();
+    if fresh.is_some() || s.client.is_none() {
+        (s.client, s.no_client) = (fresh, why);
     }
     if s.client.is_none() {
         for what in ALL {

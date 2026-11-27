@@ -49,6 +49,7 @@ fn spawn(s: &mut Prefs, job: impl FnOnce(&Client) -> Got + Send + 'static) -> bo
         s.appearance.error = Some(super::unread(s));
         return false;
     };
+    let client = Client::from_env().unwrap_or(client);
     s.in_flight += 1;
     let tx = s.tx.clone();
     std::thread::spawn(move || {
