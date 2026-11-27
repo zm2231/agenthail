@@ -51,6 +51,18 @@ func (d *Daemon) routeHostAction(ctx context.Context, p principal, raw []byte, k
 			}
 		})
 	}
+	// Only the host the action was last forwarded to holds a receipt for its
+	// key, so a resend goes there whatever the route says now; a host that
+	// never got it answers that the session moved, and the forward follows.
+	if attempt := attemptFrom(ctx); attempt != nil && attempt.prior != nil {
+		prior, paired := d.pairedHost(attempt.prior.Host)
+		if !paired {
+			return replyWith(func(w http.ResponseWriter) {
+				writeAPIError(w, http.StatusConflict, "action_outcome_unknown", "This request was forwarded to a host that is no longer paired, and it did not answer, so it may have happened. Check what it was meant to change before sending it again as a new request.")
+			})
+		}
+		host = prior
+	}
 	if host == nil {
 		if rewritten {
 			raw, _ = json.Marshal(request)

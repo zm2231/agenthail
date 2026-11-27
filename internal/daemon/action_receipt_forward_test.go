@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -100,5 +101,35 @@ func TestAResendForwardsTheSameBodyItFirstSent(t *testing.T) {
 	resend := local.keyedAction(t, "channel-once", action)
 	if resend.Code == http.StatusGatewayTimeout || apiErrorCode(t, resend) == "action_idempotency_mismatch" {
 		t.Fatalf("resend status=%d body=%s, want the host's stored outcome", resend.Code, resend.Body.String())
+	}
+}
+
+func TestAResendGoesToTheHostThatMayHaveRunItEvenAfterTheRouteChanged(t *testing.T) {
+	local, remote, record := pairedFederation(t)
+	action := map[string]string{"action": "interrupt", "sessionId": "remote-a"}
+	remote.gate.drops.Store(2)
+	lost := local.keyedAction(t, "stop-moved", action)
+	if lost.Code != http.StatusGatewayTimeout {
+		t.Fatalf("lost answer status=%d body=%s", lost.Code, lost.Body.String())
+	}
+	remote.gate.drops.Store(0)
+	db, err := sql.Open("sqlite", local.reg.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA busy_timeout=10000`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE sessions SET host_id='' WHERE id=? OR id=?`, "remote-a", hosts.Qualify(record.ID, "remote-a")); err != nil {
+		t.Fatal(err)
+	}
+	learned := local.keyedAction(t, "stop-moved", action)
+	if learned.Code != http.StatusOK {
+		t.Fatalf("resend status=%d body=%s, want the first host's stored outcome", learned.Code, learned.Body.String())
+	}
+	if remote.fake.interrupts() != 1 || local.fake.interrupts() != 0 {
+		t.Fatalf("interrupts remote=%d local=%d, want the first host's one run only", remote.fake.interrupts(), local.fake.interrupts())
 	}
 }
