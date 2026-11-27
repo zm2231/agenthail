@@ -11,7 +11,7 @@ import (
 )
 
 type mcpSimulatorInput struct {
-	Action    string            `json:"action" jsonschema:"list, acquire, renew, release, install, uninstall, launch, terminate, openUrl, describe, tap, type, swipe, button, screenshot, push, location or logs."`
+	Action    string            `json:"action" jsonschema:"list, acquire, renew, release, install, uninstall, launch, terminate, openUrl, describe, tap, type, key, swipe, button, screenshot, push, location or logs."`
 	Kind      string            `json:"kind,omitempty" jsonschema:"iphone or ipad; needed when you hold both."`
 	Runtime   string            `json:"runtime,omitempty" jsonschema:"acquire: an installed iOS version such as 18.5; without it, the shared device, whatever its version. Other actions: which held device. release with neither kind nor runtime ends every lease."`
 	App       string            `json:"app,omitempty" jsonschema:"install: a .app in your outDir, or in your folders when the simulators are on another host."`
@@ -27,6 +27,9 @@ type mcpSimulatorInput struct {
 	Seconds   float64           `json:"seconds,omitempty" jsonschema:"swipe: duration; logs: how far back, at most 300."`
 	Text      string            `json:"text,omitempty" jsonschema:"type: text for the focused field."`
 	Button    string            `json:"button,omitempty" jsonschema:"home, lock or side-button."`
+	Key       *int              `json:"key,omitempty" jsonschema:"key: one HID keycode, 0 to 255: 40 Return, 41 Escape, 42 Backspace, 43 Tab, 44 Space, 79 to 82 Right, Left, Down, Up, 4 to 29 a to z."`
+	Keys      []int             `json:"keys,omitempty" jsonschema:"key: HID keycodes pressed in order, at most 100, instead of key."`
+	Modifiers []int             `json:"modifiers,omitempty" jsonschema:"key: distinct modifiers held while key is pressed: 224 Control, 225 Shift, 226 Option, 227 Command; [225] with key 43 is Shift-Tab."`
 	Payload   json.RawMessage   `json:"payload,omitempty" jsonschema:"push: a JSON object with aps."`
 	Latitude  *float64          `json:"latitude,omitempty" jsonschema:"location: with longitude; neither clears it."`
 	Longitude *float64          `json:"longitude,omitempty" jsonschema:"location: with latitude."`
@@ -65,7 +68,7 @@ func (d *Daemon) mcpSimulator(ctx context.Context, caller *mcpCaller, input mcpS
 	if input.Action == "describe" || input.Action == "logs" {
 		limit = browserTextLimit
 	}
-	out, err := d.callSimulator(ctx, caller.session.ID, simhost.Request{Action: input.Action, Kind: input.Kind, Runtime: input.Runtime, App: input.App, BundleID: input.BundleID, Args: input.Args, Env: input.Env, URL: input.URL, Ref: input.Ref, X: input.X, Y: input.Y, ToX: input.ToX, ToY: input.ToY, Seconds: input.Seconds, Text: input.Text, Button: input.Button, Payload: input.Payload, Latitude: input.Latitude, Longitude: input.Longitude, Limit: limit})
+	out, err := d.callSimulator(ctx, caller.session.ID, simhost.Request{Action: input.Action, Kind: input.Kind, Runtime: input.Runtime, App: input.App, BundleID: input.BundleID, Args: input.Args, Env: input.Env, URL: input.URL, Ref: input.Ref, X: input.X, Y: input.Y, ToX: input.ToX, ToY: input.ToY, Seconds: input.Seconds, Text: input.Text, Button: input.Button, Key: input.Key, Keys: input.Keys, Modifiers: input.Modifiers, Payload: input.Payload, Latitude: input.Latitude, Longitude: input.Longitude, Limit: limit})
 	if err != nil {
 		return nil, simulatorRefusal(err)
 	}

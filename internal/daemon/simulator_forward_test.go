@@ -137,6 +137,35 @@ func TestAHostWithoutSimulatorsUninstallsFromAPairedMacsLeasedDevice(t *testing.
 	}
 }
 
+func TestAHostWithoutSimulatorsPressesKeysOnAPairedMacsLeasedDevice(t *testing.T) {
+	f := simulatorsOnTwoHosts(t)
+	ctx := context.Background()
+	tab := 43
+	shiftTab := simhost.Request{Action: "key", Key: &tab, Modifiers: []int{225}}
+	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-a", shiftTab); refusalOf(err) != "not_held" {
+		t.Fatalf("forwarded key without a lease = %v", err)
+	}
+	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "acquire", Kind: "iphone"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "key", Keys: []int{43, 256}}); refusalOf(err) != "invalid" {
+		t.Fatalf("forwarded out-of-range keycode = %v", err)
+	}
+	if f.commands.ran("axe key") {
+		t.Fatal("a refused key reached the Mac's simulator")
+	}
+	out, err := f.linux.daemon.forwardSimulator(ctx, "local-a", shiftTab)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out["host"] != "mac" || !f.commands.ran("axe key-combo --modifiers 225 --key 43 --udid U1") {
+		t.Fatalf("forwarded Shift-Tab = %v", out)
+	}
+	if _, err := f.linux.daemon.forwardSimulator(ctx, "local-a", simhost.Request{Action: "key", Keys: []int{82, 40}}); err != nil || !f.commands.ran("axe key-sequence --keycodes 82,40 --udid U1") {
+		t.Fatalf("forwarded key sequence = %v", err)
+	}
+}
+
 func TestOnlyAPairedHostForwardsSimulatorCalls(t *testing.T) {
 	f := simulatorsOnTwoHosts(t)
 	response := f.mac.request(t, http.MethodPost, "/api/v1/simulator", simulatorForwardRequest{Owner: "local-a", Request: simhost.Request{Action: "acquire", Kind: "iphone"}})

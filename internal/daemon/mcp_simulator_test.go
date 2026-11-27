@@ -141,6 +141,21 @@ func TestSimulatorToolLeasesADeviceToOneSessionAndArchivingReleasesIt(t *testing
 	}
 }
 
+func TestSimulatorToolPressesShiftTabAndKeySequences(t *testing.T) {
+	commands := &simCommands{}
+	f := newSimFixture(t, commands)
+	simulate(t, f.parent, map[string]any{"action": "acquire", "kind": "iphone"})
+	simulate(t, f.parent, map[string]any{"action": "key", "key": 43, "modifiers": []int{225}})
+	simulate(t, f.parent, map[string]any{"action": "key", "keys": []int{80, 81}})
+	simulate(t, f.parent, map[string]any{"action": "key", "key": 0})
+	if !commands.ran("axe key-combo --modifiers 225 --key 43 --udid U1") || !commands.ran("axe key-sequence --keycodes 80,81 --udid U1") || !commands.ran("axe key 0 --udid U1") {
+		t.Fatal("the tool's key fields did not reach axe")
+	}
+	if code := refusalCode(t, f.parent, "agenthail_simulator", map[string]any{"action": "key", "key": 4, "modifiers": []int{4}}); code != "invalid" {
+		t.Fatalf("a non-modifier held as a modifier = %q", code)
+	}
+}
+
 func TestSimulatorScreenshotSavesToAPathInTheSessionsFolders(t *testing.T) {
 	commands := &simCommands{shotPNG: []byte("\x89PNG\r\n\x1a\nnot really")}
 	f := newSimFixture(t, commands)

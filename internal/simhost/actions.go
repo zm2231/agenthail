@@ -25,13 +25,16 @@ type Request struct {
 	Seconds   float64           `json:"seconds,omitempty"`
 	Text      string            `json:"text,omitempty"`
 	Button    string            `json:"button,omitempty"`
+	Key       *int              `json:"key,omitempty"`
+	Keys      []int             `json:"keys,omitempty"`
+	Modifiers []int             `json:"modifiers,omitempty"`
 	Payload   json.RawMessage   `json:"payload,omitempty"`
 	Latitude  *float64          `json:"latitude,omitempty"`
 	Longitude *float64          `json:"longitude,omitempty"`
 	Limit     int               `json:"limit,omitempty"`
 }
 
-var Actions = []string{"list", "acquire", "renew", "release", "install", "uninstall", "launch", "terminate", "openUrl", "describe", "tap", "type", "swipe", "button", "screenshot", "push", "location", "logs"}
+var Actions = []string{"list", "acquire", "renew", "release", "install", "uninstall", "launch", "terminate", "openUrl", "describe", "tap", "type", "key", "swipe", "button", "screenshot", "push", "location", "logs"}
 
 var buttons = map[string]bool{"home": true, "lock": true, "side-button": true}
 
@@ -95,6 +98,8 @@ func (h *Host) Call(ctx context.Context, owner string, req Request) (map[string]
 		}
 		_, err := h.exec(ctx, Command{Name: "axe", Args: []string{"type", "--stdin", "--udid", l.udid}, Stdin: []byte(req.Text)})
 		return map[string]any{"typed": len([]rune(req.Text))}, err
+	case "key":
+		return h.press(ctx, l, req)
 	case "swipe":
 		return h.swipe(ctx, l, req)
 	case "button":
@@ -115,7 +120,7 @@ func (h *Host) Call(ctx context.Context, owner string, req Request) (map[string]
 	return nil, refuse("invalid", "action must be %s.", strings.Join(Actions, ", "))
 }
 
-const HowTo = "Read the screen with describe, then tap a ref from it (refs last until the next describe), or tap, swipe by x,y in points. type enters text into the focused field; button presses home, lock or side-button. install takes a .app you copied into outDir, or from your folders when the simulators run on another host; launch, terminate and uninstall take its bundleId; openUrl opens a link or deep link. screenshot saves a PNG; logs reads an app's recent log. The lease ends after 10 minutes unused or at endsAt; renew moves endsAt on. release it when you are done."
+const HowTo = "Read the screen with describe, then tap a ref from it (refs last until the next describe), or tap, swipe by x,y in points. type enters text into the focused field; key presses a hardware key by HID keycode (43 Tab, 40 Return, 79 to 82 the arrows) while holding modifiers (225 Shift), or keys presses up to 100 in order; button presses home, lock or side-button. install takes a .app you copied into outDir, or from your folders when the simulators run on another host; launch, terminate and uninstall take its bundleId; openUrl opens a link or deep link. screenshot saves a PNG; logs reads an app's recent log. The lease ends after 10 minutes unused or at endsAt; renew moves endsAt on. release it when you are done."
 
 func (h *Host) list(ctx context.Context, owner string) (map[string]any, error) {
 	all, err := h.devices(ctx)
