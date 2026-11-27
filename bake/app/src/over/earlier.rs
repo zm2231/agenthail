@@ -66,8 +66,8 @@ fn reread(s: &mut App, key: &str) {
     }
     s.earlier.seq += 1;
     let seq = s.earlier.seq;
-    shown.reread = false;
     shown.asked = Some(seq);
+    shown.error = None;
     let (tx, key, pages) = (s.earlier.tx.clone(), key.to_string(), shown.pages.max(1));
     std::thread::spawn(move || {
         let mut all = Page { sessions: Vec::new(), next: None };
@@ -105,7 +105,7 @@ pub fn removed(s: &mut App, gone: &[Removal]) {
                 continue;
             }
             shown.removed.retain(|o| *o != x.id);
-            shown.reread |= shown.open && shown.read && listed.as_ref().is_none_or(|r| r.project_key() == *key);
+            shown.reread |= shown.open && (shown.read || shown.asked.is_some()) && listed.as_ref().is_none_or(|r| r.project_key() == *key);
             if let Some(row) = listed.as_ref().filter(|r| r.project_key() == *key && !shown.sessions.iter().any(|o| o.id == r.id)) {
                 shown.sessions.push(row.clone());
             }
@@ -122,6 +122,14 @@ pub fn reopened(s: &mut App) {
     s.earlier.projects.clear();
     for key in open {
         show(s, &key);
+    }
+}
+
+fn again(s: &mut App, key: &str) {
+    if s.earlier.projects.get(key).is_some_and(|x| x.reread) {
+        reread(s, key);
+    } else {
+        more(s, key);
     }
 }
 
@@ -143,6 +151,7 @@ pub fn poll(s: &mut App) -> bool {
             Ok(page) if whole => {
                 shown.sessions = page.sessions.into_iter().filter(|x| !shown.removed.contains(&x.id)).collect();
                 shown.pages = shown.pages.max(1);
+                shown.reread = false;
                 shown.next = page.next;
             }
             Ok(page) => {
@@ -156,7 +165,7 @@ pub fn poll(s: &mut App) -> bool {
             }
             Err(error) => shown.error = Some(error),
         }
-        if shown.reread {
+        if shown.reread && shown.error.is_none() {
             reread(s, &key);
         }
         changed = true;
@@ -221,7 +230,7 @@ pub fn section(s: &App, key: &str) -> El {
     } else if shown.is_some_and(|x| x.next.is_some() || x.error.is_some()) {
         let k = key.to_string();
         let label = if shown.is_some_and(|x| x.error.is_some()) { "Try again" } else { "Show more" };
-        c = c.child(Button::new(label).variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(move |s: &mut App| more(s, &k)).build(kit()).key(format!("earlier-more-{key}")));
+        c = c.child(Button::new(label).variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(move |s: &mut App| again(s, &k)).build(kit()).key(format!("earlier-more-{key}")));
     }
     c
 }
@@ -277,18 +286,22 @@ pub(crate) fn rereads(s: &App, key: &str) -> bool {
 }
 
 #[cfg(test)]
-pub(crate) fn answer_reread(s: &mut App, key: &str, sessions: Vec<Session>) {
+pub(crate) fn answer_reread(s: &mut App, key: &str, sessions: Option<Vec<Session>>) {
     s.earlier.seq += 1;
     let seq = s.earlier.seq;
     if let Some(shown) = s.earlier.projects.get_mut(key) {
-        shown.reread = false;
         shown.asked = Some(seq);
     }
-    let _ = s.earlier.tx.send((key.to_string(), seq, true, Ok(Page { sessions, next: None })));
+    let _ = s.earlier.tx.send((key.to_string(), seq, true, sessions.ok_or_else(|| "offline".to_string()).map(|sessions| Page { sessions, next: None })));
     poll(s);
 }
 
 #[cfg(test)]
 pub(crate) fn status(s: &App, key: &str, id: &str) -> Option<String> {
     s.earlier.projects.get(key)?.sessions.iter().find(|x| x.id == id).map(|x| x.status.clone())
+}
+
+#[cfg(test)]
+pub(crate) fn error(s: &App, key: &str) -> Option<String> {
+    s.earlier.projects.get(key)?.error.clone()
 }
