@@ -188,7 +188,17 @@ pub fn turn_label(service_tier: &str, schema: &str) -> String {
     if parts.is_empty() { "Turn options".into() } else { parts.join(" · ") }
 }
 
-pub const REDELIVER_FOR: i64 = 60 * 60;
+pub const REDELIVER_FOR: i64 = 60 * 60 * 1000;
+
+pub fn now_ms() -> i64 {
+    (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
+}
+
+pub fn send_stamp(now: i64) -> i64 {
+    static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+    let before = LAST.fetch_update(std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed, |last| Some(now.max(last + 1))).unwrap_or_default();
+    now.max(before + 1)
+}
 pub const REDELIVER_MAX_WAIT: f64 = 20.0;
 
 pub fn redelivers(error: &crate::catalog::RespondError) -> bool {
@@ -585,6 +595,14 @@ mod tests {
         list.rekey(&HashMap::from([("old".to_string(), "new".to_string())]));
         assert_eq!(list.list("new").iter().map(|u| u.key.as_str()).collect::<Vec<_>>(), ["a", "b", "c"]);
         assert!(list.list("old").is_empty());
+    }
+
+    #[test]
+    fn send_stamps_always_move_forward_within_a_millisecond() {
+        let a = send_stamp(5_000);
+        let b = send_stamp(5_000);
+        let c = send_stamp(1);
+        assert!(a < b && b < c, "{a} {b} {c}");
     }
 
     #[test]

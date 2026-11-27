@@ -751,7 +751,7 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
         }
         _ => busy,
     };
-    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let now = feed::composer::now_ms();
     let flying = s.in_flight.get(id).into_iter().flatten().any(|u| u.same(&message, &attachments));
     if flying || s.unsent.list(id).iter().any(|u| u.redelivering(now) && u.reuses_key() && u.same(&message, &attachments)) {
         s.ov.notice = Some("That message is already on its way; it won't send twice.".into());
@@ -787,7 +787,7 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
 }
 
 fn waiting_earlier(s: &App, id: &str) -> bool {
-    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let now = feed::composer::now_ms();
     s.unsent.list(id).iter().any(|u| u.redelivering(now))
 }
 
@@ -811,7 +811,7 @@ pub fn can_retry(s: &App, id: &str) -> bool {
 }
 
 pub fn retry(s: &mut App, id: &str, tx: &mut Tx) {
-    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let now = feed::composer::now_ms();
     let oldest = s.unsent.list(id).iter().find(|u| u.redelivering(now)).or(s.unsent.latest(id)).map(|u| (u.key.clone(), u.redelivering(now)));
     if let Some((key, auto)) = oldest {
         retry_key(s, id, &key, auto, tx);
@@ -842,7 +842,7 @@ fn retry_key(s: &mut App, id: &str, key: &str, auto: bool, tx: &mut Tx) {
 }
 
 fn redeliver(s: &mut App, tx: &mut Tx) {
-    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let now = feed::composer::now_ms();
     let expired: Vec<(String, Unsent)> = s.unsent.iter().filter(|(_, u)| u.unanswered && u.sent_at > 0 && !u.redelivering(now)).map(|(id, u)| (id.clone(), u.clone())).collect();
     for (id, unsent) in expired {
         let stopped = Unsent { unanswered: false, ..unsent };
@@ -982,7 +982,7 @@ fn fresh(s: &App, id: &str, text: String, attachments: Vec<feed::attach::Upload>
         pin: feed::holders::pins().get(id),
         draft: None,
         turn: None,
-        sent_at: OffsetDateTime::now_utc().unix_timestamp(),
+        sent_at: feed::composer::send_stamp(feed::composer::now_ms()),
         unanswered: true,
     }
 }
@@ -1078,7 +1078,7 @@ pub fn composer_note(s: &App, id: &str) -> Option<String> {
     {
         parts.push(latest.quoted());
     }
-    let now = OffsetDateTime::now_utc().unix_timestamp();
+    let now = feed::composer::now_ms();
     let waiting: Vec<&Unsent> = s.unsent.list(id).iter().filter(|u| u.redelivering(now)).collect();
     match waiting.as_slice() {
         [] => parts.extend(s.unsent.note(id)),
@@ -1144,7 +1144,7 @@ fn take_sent(s: &mut App, id: String, pending: Unsent, retry: bool, result: Resu
     match failure {
         Some((maybe_delivered, answered, error, again)) => {
             let failed = Unsent { unanswered: again, ..pending.failed(retry, maybe_delivered, answered, error) };
-            if failed.redelivering(OffsetDateTime::now_utc().unix_timestamp()) {
+            if failed.redelivering(feed::composer::now_ms()) {
                 s.redeliver.entry(id.clone()).or_insert_with(|| feed::composer::Backoff::starting(clock)).failed(clock);
                 s.unsent.add_first(&id, failed);
             } else {
