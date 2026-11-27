@@ -227,7 +227,7 @@ fn toolbar<'a>(s: &'a App, strip: bool, k: &'a Kit) -> ui::Bar<'a> {
     } else {
         Part::row("now-leading", (), move || ui::crumb(&[("Now", true)], k))
     };
-    let center = crate::ui::tabs::strip(s, k, false).map(|tabs| Part::always("now-tabs", move || row().max_w(560.0).child(tabs)));
+    let center = crate::ui::tabs::strip_part(s, k, false).map(|tabs| Part::group("now-tabs", crate::over::rows::version((), [&tabs]), move || row().max_w(560.0).child(tabs.el(k))));
     let needs = s.ov.needs.len();
     let brief = s.ov.now_brief;
     let trailing = Part::row("now-trailing", (needs, brief), move || row().gap(10.0).items_center().child(talk_button(k)).child(ui::new_session_button(None, k)).child(variant(brief, k)).child(ui::needs_button(s, k)));

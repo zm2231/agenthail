@@ -6,6 +6,7 @@ use rune_kit::{Kit, Menu, MenuItem};
 
 use super::window::{self, MAIN};
 use crate::theme::{META, accent, muted};
+use crate::over::rows::Part;
 use crate::{App, Screen};
 
 pub const REOPEN_SECS: f64 = 6.0;
@@ -185,45 +186,82 @@ pub fn expire(s: &mut App) -> bool {
 }
 
 pub fn strip(s: &App, k: &Kit, sizes: bool) -> Option<El> {
+    strip_part(s, k, sizes).map(|p| p.el(k))
+}
+
+#[derive(Hash)]
+struct Shown {
+    id: String,
+    title: String,
+    project: String,
+    status: u8,
+    marked: bool,
+}
+
+pub fn strip_part<'a>(s: &'a App, k: &'a Kit, sizes: bool) -> Option<Part<'a>> {
     if !in_main(s) || !on() {
         return None;
     }
+    let closed = s.tabs.closed.as_ref().map(|(_, t, _)| t.clone());
+    let archived = s.tabs.archived.as_ref().map(|a| (a.title.clone(), stuck(s, a), a.unarchiving));
     if s.tabs.tabs.tabs().is_empty() {
-        return notice(s, k);
+        if closed.is_none() && archived.is_none() {
+            return None;
+        }
+        return Some(Part::row("tab-strip", crate::over::rows::hash(&(&closed, &archived)), move || notice(s, k).unwrap_or_else(row)));
     }
     let label = crate::look::tabs().label;
-    let items = s.tabs.tabs.tabs().iter().map(|t| {
-        let x = crate::session(s, &t.id);
-        let status = if needs_you(s, &t.id) {
-            Some(TabItemStatus::Attention)
-        } else if s.ov.d.session(&t.id).is_some_and(feed::derive::sessions::busy) {
-            Some(TabItemStatus::Busy)
-        } else {
-            None
-        };
-        let project = x.map(|x| x.project_name()).unwrap_or_default();
-        let id = t.id.clone();
-        TabItem::new(t.id.clone(), title(s, &t.id, &label))
-            .avatar(crate::over::ui::avatar(&project, 16.0))
-            .status(status)
-            .marked(s.tabs.menu.as_ref().is_some_and(|(m, _)| *m == t.id))
-            .decorate(move |el, _| el.on_secondary_press(move |s: &mut App, at, _: &mut Tx| s.tabs.menu = Some((id.clone(), at))))
-    });
-    let strip = TabStrip::<App>::new("session-tabs", TabOrientation::Horizontal)
-        .tabs(items)
-        .active(s.tabs.tabs.active().filter(|_| s.screen == Screen::Session))
-        .label("Sessions")
-        .on_select(|s: &mut App, id, _| activate(s, id))
-        .on_close(|s: &mut App, id, _| close(s, id))
-        .build(k)
-        .grow(1.0)
-        .min_w(0.0);
-    let strip = if sizes { strip.on_layout(|s: &mut App, r: [f32; 4]| set_width(s, r[2])) } else { strip };
-    let mut bar = row().w_full().items_center().gap(8.0).child(strip);
-    if let Some(n) = notice(s, k) {
-        bar = bar.child(n);
-    }
-    Some(bar)
+    let shown: Vec<Shown> = s
+        .tabs
+        .tabs
+        .tabs()
+        .iter()
+        .map(|t| Shown {
+            id: t.id.clone(),
+            title: title(s, &t.id, &label),
+            project: crate::session(s, &t.id).map(|x| x.project_name()).unwrap_or_default(),
+            status: if needs_you(s, &t.id) {
+                2
+            } else if s.ov.d.session(&t.id).is_some_and(feed::derive::sessions::busy) {
+                1
+            } else {
+                0
+            },
+            marked: s.tabs.menu.as_ref().is_some_and(|(m, _)| *m == t.id),
+        })
+        .collect();
+    let active = s.tabs.tabs.active().filter(|_| s.screen == Screen::Session).map(str::to_string);
+    let v = crate::over::rows::hash(&(sizes, &shown, &active, &closed, &archived));
+    Some(Part::row("tab-strip", v, move || {
+        let items = shown.into_iter().map(|t| {
+            let status = match t.status {
+                2 => Some(TabItemStatus::Attention),
+                1 => Some(TabItemStatus::Busy),
+                _ => None,
+            };
+            let id = t.id.clone();
+            TabItem::new(t.id, t.title)
+                .avatar(crate::over::ui::avatar(&t.project, 16.0))
+                .status(status)
+                .marked(t.marked)
+                .decorate(move |el, _| el.on_secondary_press(move |s: &mut App, at, _: &mut Tx| s.tabs.menu = Some((id.clone(), at))))
+        });
+        let strip = TabStrip::<App>::new("session-tabs", TabOrientation::Horizontal)
+            .tabs(items)
+            .active(active.as_deref())
+            .label("Sessions")
+            .on_select(|s: &mut App, id, _| activate(s, id))
+            .on_close(|s: &mut App, id, _| close(s, id))
+            .build(k)
+            .grow(1.0)
+            .min_w(0.0);
+        let strip = if sizes { strip.on_layout(|s: &mut App, r: [f32; 4]| set_width(s, r[2])) } else { strip };
+        let mut bar = row().w_full().items_center().gap(8.0).child(strip);
+        if let Some(n) = notice(s, k) {
+            bar = bar.child(n);
+        }
+        bar
+    }))
 }
 
 fn notice(s: &App, k: &Kit) -> Option<El> {
