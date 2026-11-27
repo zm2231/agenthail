@@ -578,7 +578,7 @@ pub fn view(s: &App, id: &str, k: &Kit) -> El {
                 (Kind::Image(_) | Kind::File(_) | Kind::Files(_), _) => s.attach.rev as usize,
                 _ => 0,
             };
-            memo(&block.id, (pane.revs[i], open, last, gap.to_bits(), images, crate::theme::paint_key()), || block_el(&cx, block, open, gap, last, &row_kit))
+            memo(&block.id, (pane.revs[i], open, last, gap.to_bits(), images, crate::theme::paint_key(), row_kit.text_scale.to_bits()), || block_el(&cx, block, open, gap, last, &row_kit))
         },
     );
     let watch = id.to_string();

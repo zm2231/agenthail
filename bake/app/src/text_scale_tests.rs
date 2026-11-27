@@ -53,6 +53,22 @@ fn a_larger_text_size_grows_the_text_and_keeps_the_window_layout_at_1440_by_900(
     }
 }
 
+#[test]
+fn changing_the_text_size_in_an_open_window_grows_the_transcript_rows_already_shown() {
+    if !isolated("text_scale::changing_the_text_size_in_an_open_window_grows_the_transcript_rows_already_shown") {
+        return;
+    }
+    let dir = Dir::new("text-scale-live");
+    let mut rt = laid_out(1.0, "session", &dir);
+    let before = rect(&rt, "item:a1");
+    crate::look::hold_text_scale(Some(1.3));
+    rt.frame(DT);
+    rt.settle_all();
+    rt.frame(DT);
+    let after = rect(&rt, "item:a1");
+    assert!(after[3] > before[3] * 1.15, "the shown reply grows with the text: {before:?} -> {after:?}");
+}
+
 fn render<S: 'static>(rt: &mut Runtime<S>, size: (f32, f32), path: &std::path::Path) {
     let gpu = rune::render::Gpu::headless();
     let mut renderer = rune::render::Renderer::new(&gpu.device, rune::render::OFFSCREEN_FORMAT);
