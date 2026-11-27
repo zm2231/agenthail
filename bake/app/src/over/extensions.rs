@@ -221,9 +221,20 @@ pub fn drain(s: &mut App) -> bool {
         s.ov.ext.again = false;
         refresh(s);
     }
-    let due = s.ov.ext.hosts_error.is_some() || s.ov.ext.catalogs.iter().any(|c| !c.host.is_local() || c.error.is_some());
-    if s.ov.ext.fetched_at.is_none_or(|at| due && at.elapsed() >= PAIRED_EVERY) {
-        refresh(s);
+    let failed = s.ov.ext.hosts_error.is_some() || s.ov.ext.catalogs.iter().any(|c| c.error.is_some());
+    let paired = s.ov.ext.catalogs.iter().any(|c| !c.host.is_local());
+    match s.ov.ext.fetched_at {
+        None => refresh(s),
+        Some(at) if at.elapsed() < PAIRED_EVERY => {}
+        Some(_) if failed => refresh(s),
+        Some(_) if paired => {
+            s.ov.ext.fetched_at = Some(Instant::now());
+            let hosts: Vec<Host> = s.ov.ext.catalogs.iter().filter(|c| !c.host.is_local() && c.host.available()).map(|c| c.host.clone()).collect();
+            for host in hosts {
+                list(s, &host);
+            }
+        }
+        Some(_) => {}
     }
     let ages: Vec<String> = s.ov.ext.catalogs.iter().filter_map(|c| Some(feed::extensions::age(c.fetched?.elapsed().as_secs(), s.ov.ext.listing.contains(&c.key())))).collect();
     if ages != s.ov.ext.ages {

@@ -393,3 +393,18 @@ fn a_project_opened_outside_the_overview_hears_its_ledger_change_by_key() {
     known.read("old", opened, &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new() }));
     assert_eq!(known.changed("project:old", Instant::now()), Change::Read("old".into()));
 }
+
+#[test]
+fn a_failed_read_of_an_opened_project_is_tried_again_on_its_own_timer() {
+    let mut known = super::live::Known::default();
+    known.learn(&fetched("2026-11-24T12:00:00Z", Vec::new(), vec![("p", Ok(Vec::new()))]));
+    let at = Instant::now();
+    known.read("old", at, &Err("daemon down".into()));
+    let due = known.next_retry().expect("a retry is scheduled");
+    assert!(due > at);
+    assert!(known.retries_due(at).is_empty());
+    assert_eq!(known.retries_due(due), ["old".to_string()]);
+    assert_eq!(known.changed("old", Instant::now()), Change::Read("old".into()), "a change to a failed one tries at once");
+    known.read("old", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new() }));
+    assert_eq!(known.next_retry(), None);
+}

@@ -214,7 +214,8 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
                     return;
                 }
             }
-            let wait = if due { Duration::ZERO } else { feed::watch::OVERVIEW_EVERY.saturating_sub(last.map(|at| at.elapsed()).unwrap_or_default()) };
+            let retry = known.next_retry().map(|at| at.saturating_duration_since(std::time::Instant::now()));
+            let wait = if due { Duration::ZERO } else { feed::watch::OVERVIEW_EVERY.saturating_sub(last.map(|at| at.elapsed()).unwrap_or_default()).min(retry.unwrap_or(Duration::MAX)) };
             let mut reads = Vec::new();
             let mut take = |ask: Ask| match ask {
                 Ask::Refresh => due = true,
@@ -228,12 +229,14 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
             };
             match poke.recv_timeout(wait) {
                 Ok(ask) => take(ask),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) if retry.is_some_and(|r| r <= wait) => {}
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => take(Ask::Refresh),
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
             }
             while let Ok(ask) = poke.try_recv() {
                 take(ask);
             }
+            reads.extend(known.retries_due(std::time::Instant::now()));
             reads.sort();
             reads.dedup();
             for id in reads {

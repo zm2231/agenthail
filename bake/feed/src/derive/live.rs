@@ -101,9 +101,21 @@ impl Known {
         }
         match self.ledgers.get(&id) {
             None => Change::Overview,
-            Some(h) if h.retry.is_none() && h.read_at < at => Change::Read(id),
+            Some(h) if h.retry.is_some() || h.read_at < at => Change::Read(id),
             Some(_) => Change::Nothing,
         }
+    }
+
+    fn opened_retries(&self) -> impl Iterator<Item = (&String, Instant)> {
+        self.opened.iter().filter(|id| !self.wanted.contains(*id)).filter_map(|id| Some((id, self.ledgers.get(id)?.retry?)))
+    }
+
+    pub fn next_retry(&self) -> Option<Instant> {
+        self.opened_retries().map(|(_, at)| at).min()
+    }
+
+    pub fn retries_due(&self, now: Instant) -> Vec<String> {
+        self.opened_retries().filter(|(_, at)| *at <= now).map(|(id, _)| id.clone()).collect()
     }
 
     pub fn sessions(&self) -> &[Session] {
