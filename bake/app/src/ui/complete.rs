@@ -168,7 +168,7 @@ fn line_end(t: &str, caret: usize) -> bool {
 
 pub fn browse_origin(s: &App, id: &str) -> Option<String> {
     let h = s.complete.history.get(id)?;
-    (h.current()? == super::paste::draft(s)).then(|| h.origin().map(str::to_string)).flatten()
+    (super::paste::expand(h.current()?) == super::paste::expand(&super::paste::draft(s))).then(|| h.origin().map(str::to_string)).flatten()
 }
 
 pub(super) fn replace_composer(s: &mut App, text: &str) {
@@ -551,12 +551,13 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
     }
     let Some(x) = session(s, id).cloned() else { return false };
     let draft = super::paste::draft(s);
-    let input = Input::parse(&super::paste::expand(&draft), &Slash::available(&x.capabilities, can(s, &x)));
+    let input = Input::parse(&draft, &Slash::available(&x.capabilities, can(s, &x)));
     if let Some(problem) = input.problem() {
         crate::note(s, id, problem);
         return true;
     }
-    let Input::Command(command, argument) = input else { return false };
+    let Input::Command(command, typed_argument) = input else { return false };
+    let argument = super::paste::expand(&typed_argument);
     if command == Slash::Name
         && let Some(problem) = feed::menu::rename_problem(&argument, super::session_menu::current_alias(s, id).as_deref())
     {
@@ -607,7 +608,7 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         Slash::Name => super::session_menu::rename_to(s, id, &argument),
         Slash::Compact => super::session_menu::compact(s, id),
         Slash::Stop => crate::stop(s, id),
-        Slash::Steer => crate::steer_text(s, id, argument, tx),
+        Slash::Steer => crate::steer_text(s, id, typed_argument, tx),
         Slash::Model => pick_model(s, id, &argument),
         Slash::Goal => {}
     }
