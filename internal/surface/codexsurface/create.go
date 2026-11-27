@@ -52,7 +52,7 @@ func (c *Codex) prepareManagedTerminalSession(ctx context.Context, client codexC
 	if model != "" {
 		params["model"] = model
 	}
-	response, err := c.codexThreadRequest(ctx, client, codexThreadStart, nil, params, 10*time.Second)
+	response, err := c.codexThreadRequest(ctx, client, codexThreadStart, nil, params)
 	if err != nil {
 		return nil, fmt.Errorf("thread/start managed terminal: %w", err)
 	}
@@ -103,7 +103,7 @@ func (c *Codex) startSessionOnTransport(ctx context.Context, client codexClient,
 	if options.ApprovalPolicy != "" {
 		params["approvalPolicy"] = options.ApprovalPolicy
 	}
-	response, err := c.codexThreadRequest(ctx, client, codexThreadStart, nil, params, 10*time.Second)
+	response, err := c.codexThreadRequest(ctx, client, codexThreadStart, nil, params)
 	if err != nil {
 		return nil, nil, fmt.Errorf("thread/start: %w", err)
 	}

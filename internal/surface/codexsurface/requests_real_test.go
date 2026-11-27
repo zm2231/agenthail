@@ -56,7 +56,7 @@ func TestACodexApprovalAnotherClientLeftOpenIsAnsweredThroughAgenthail(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := owner.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir(), "approvalPolicy": "untrusted", "sandbox": "read-only"}, 10*time.Second)
+	started, err := owner.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir(), "approvalPolicy": "untrusted", "sandbox": "read-only"}, codexThreadLoadWait)
 	if err != nil {
 		t.Fatal(err)
 	}

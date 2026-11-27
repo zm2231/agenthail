@@ -44,7 +44,7 @@ func (c *Codex) createVoiceOperator(ctx context.Context, client codexClient, cwd
 	response, err := c.codexThreadRequest(ctx, client, codexThreadStart, nil, map[string]any{
 		"cwd": cwd, "developerInstructions": instructions, "ephemeral": false,
 		"threadSource": "agenthail", "serviceName": "agenthail-voice", "dynamicTools": voice.DynamicTools(),
-	}, 15*time.Second)
+	})
 	if err != nil {
 		return nil, codexOperationOutcome(err)
 	}

@@ -135,7 +135,7 @@ func TestATurnAnotherClientStartsSurvivesAgenthailFollowingItWithItsOverrides(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := owner.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir()}, 30*time.Second)
+	started, err := owner.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir()}, codexThreadLoadWait)
 	if err != nil {
 		t.Fatal(err)
 	}

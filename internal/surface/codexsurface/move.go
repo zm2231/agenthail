@@ -588,7 +588,7 @@ func (c *Codex) ReceiveMove(ctx context.Context, in surface.MoveIn, archive io.R
 		return nil, err
 	}
 	moved := &surface.Session{ID: in.Conversation, Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexAppServer, Cwd: in.Cwd}
-	_, err = c.codexThreadRequest(ctx, client, codexThreadResume, moved, map[string]any{"threadId": in.Conversation, "cwd": in.Cwd}, 2*codexMoveWait)
+	_, err = c.codexThreadRequest(ctx, client, codexThreadResume, moved, map[string]any{"threadId": in.Conversation, "cwd": in.Cwd})
 	if err != nil {
 		if isCodexTimeout(err) || surface.IsDeliveryOutcomeUnknown(err) {
 			return nil, fmt.Errorf("%w: thread/resume: %v", surface.ErrMoveInPlaced, err)

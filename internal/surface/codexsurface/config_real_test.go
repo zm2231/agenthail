@@ -80,7 +80,7 @@ func TestARealCodexThreadTakesItsCompactWindowWhileAgenthailFollowsIt(t *testing
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { owner.Close() })
-	started, err := owner.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir()}, 30*time.Second)
+	started, err := owner.Request(ctx, "thread/start", map[string]any{"cwd": t.TempDir()}, codexThreadLoadWait)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestARealCodexThreadTakesItsCompactWindowWhileAgenthailFollowsIt(t *testing
 	if got := rolloutCompactions(t, threadID); got != 0 {
 		t.Fatalf("a limit of 100000 compacted a 9000-token context %d times", got)
 	}
-	if _, err := codex.codexThreadRequest(ctx, follower, codexThreadResume, session, map[string]any{"threadId": threadID}, 30*time.Second); err != nil {
+	if _, err := codex.codexThreadRequest(ctx, follower, codexThreadResume, session, map[string]any{"threadId": threadID}); err != nil {
 		t.Fatal(err)
 	}
 	store := codex.codexConfigStore()

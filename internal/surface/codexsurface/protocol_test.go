@@ -3,6 +3,7 @@ package codexsurface
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -253,7 +254,7 @@ func TestTheVoiceOperatorThreadStartsWithEveryAgenthailVoiceTool(t *testing.T) {
 	}
 	program := bridge.Request("thread/start")
 	_, params, _ := strings.Cut(program, `request("thread/start",`)
-	params, _, _ = strings.Cut(params, ",15000))")
+	params, _, _ = strings.Cut(params, fmt.Sprintf(",%d))", codexThreadLoadWait.Milliseconds()))
 	var request struct {
 		DynamicTools []struct {
 			Name  string `json:"name"`

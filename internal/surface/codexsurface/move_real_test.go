@@ -97,7 +97,7 @@ func TestARealCodexThreadMovesBetweenTwoAdaptersInOneProcessAndBack(t *testing.T
 	ctx := context.Background()
 
 	owner := source.client(t)
-	started, err := owner.Request(ctx, "thread/start", map[string]any{"cwd": source.cwd}, 30*time.Second)
+	started, err := owner.Request(ctx, "thread/start", map[string]any{"cwd": source.cwd}, codexThreadLoadWait)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,13 +129,15 @@ func TestARealCodexThreadMovesBetweenTwoAdaptersInOneProcessAndBack(t *testing.T
 		t.Fatal(err)
 	}
 	held.Release()
-	if _, err := owner.Request(ctx, "thread/resume", map[string]any{"threadId": threadID}, 30*time.Second); err == nil {
+	if _, err := owner.Request(ctx, "thread/resume", map[string]any{"threadId": threadID}, codexThreadLoadWait); err == nil {
 		t.Fatal("the source resumed a thread its move archived")
 	}
 	if err := source.codex.RestoreMove(threadID, restoredMove); err != nil {
 		t.Fatal(err)
 	}
-	mustRequest(t, owner, "thread/resume", map[string]any{"threadId": threadID})
+	if _, err := owner.Request(ctx, "thread/resume", map[string]any{"threadId": threadID}, codexThreadLoadWait); err != nil {
+		t.Fatalf("thread/resume: %v", err)
+	}
 	realTurn(t, owner, threadID, "after the restored move")
 
 	out, moveID, archive := source.moveOut(t, threadID)
