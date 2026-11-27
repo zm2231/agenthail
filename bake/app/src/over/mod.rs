@@ -10,6 +10,7 @@ mod need_acts;
 mod now;
 mod project;
 pub mod projects;
+mod revisions;
 pub mod rows;
 pub mod search;
 pub mod sessions;

@@ -65,12 +65,13 @@ pub struct State {
     reply_keys: HashMap<String, (String, String)>,
     pub reply_unknown: HashSet<String>,
     answered: HashMap<String, String>,
+    pub drawn: std::cell::RefCell<crate::over::revisions::Revisions<Decision>>,
 }
 
 impl Default for State {
     fn default() -> Self {
         let (tx, rx) = channel();
-        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, reads: 0, review_old: HashMap::new(), note: None, daemon: None, newest: None, rev: None, ask: None, open: None, replies: HashMap::new(), replying: HashSet::new(), replied: HashMap::new(), reply_keys: HashMap::new(), reply_unknown: HashSet::new(), answered: HashMap::new() }
+        State { tx, rx, inbox: None, history: Vec::new(), acting: HashSet::new(), unconfirmed: HashSet::new(), notes: HashMap::new(), briefs: HashMap::new(), version: None, reads: 0, review_old: HashMap::new(), note: None, daemon: None, newest: None, rev: None, ask: None, open: None, replies: HashMap::new(), replying: HashSet::new(), replied: HashMap::new(), reply_keys: HashMap::new(), reply_unknown: HashSet::new(), answered: HashMap::new(), drawn: Default::default() }
     }
 }
 

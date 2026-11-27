@@ -256,3 +256,42 @@ fn a_review_need_rebuilds_when_its_buttons_change_and_acts_on_the_review_listed_
     let acted = rt.state.ov.inbox.notes.get(&id).map(|(hold, _)| hold.clone());
     assert_eq!(acted, Some(review("2026-11-27T09:45:00Z").hold_key()), "approve acts on the review listed when it is pressed");
 }
+
+#[test]
+fn a_decision_change_rebuilds_only_its_line_on_now() {
+    if !isolated("rows_memo_lines::a_decision_change_rebuilds_only_its_line_on_now") {
+        return;
+    }
+    use feed::decisions::{Decision, Inbox, LeadHandled};
+    let dir = Dir::new("rows-decisions");
+    let mut rt = world(&dir);
+    let review = |item: &str| Decision { group: "review".into(), key: format!("review:p1:{item}"), work_item: item.into(), ledger_key: "p1".into(), session_id: "a".into(), project_id: "p1".into(), since: "2026-11-27T09:00:00Z".into(), ..Default::default() };
+    let waiting = Decision { group: "waiting".into(), kind: "turn".into(), session_id: "c".into(), project_id: "p1".into(), reason: "Which branch?".into(), since: "2026-11-27T09:10:00Z".into(), ..Default::default() };
+    let lead = |item: &str| LeadHandled { session_id: "b".into(), held_by: "a".into(), reason: "Checking it first".into(), work_item: item.into(), ledger_key: "p1".into(), ..Default::default() };
+    rt.update(|s, _| s.ov.inbox.inbox = Some(Inbox { decisions: vec![review("W1"), review("W2"), waiting.clone()], lead_handling: vec![lead("W3"), lead("W4")], ..Default::default() }));
+    now(&mut rt, false);
+    let [w1, w2, wait] = [review("W1").id(), review("W2").id(), waiting.id()].map(|id| format!("decision-{id}"));
+    for key in [&w1, &w2, &wait] {
+        shown(&rt, key);
+    }
+    let built = |rt: &mut Runtime<App>, change: &dyn Fn(&mut App)| {
+        rebuilt(rt, "", change).into_iter().filter(|id| id.starts_with("decision-") || id.starts_with("lead-handled-")).collect::<Vec<_>>()
+    };
+    assert_eq!(built(&mut rt, &|_| {}), Vec::<String>::new(), "nothing changed");
+    assert_eq!(built(&mut rt, &|s| s.ov.inbox.inbox.as_mut().unwrap().decisions[1].work_title = "Check the import again".into()), [w2.clone()], "its title");
+    assert_eq!(built(&mut rt, &|s| s.ov.inbox.inbox.as_mut().unwrap().decisions[2].reason = "Which branch, again?".into()), [wait.clone()], "its reason");
+    assert_eq!(built(&mut rt, &|s| { s.ov.inbox.acting.insert(review("W1").id()); }), [w1.clone()], "sending");
+    assert_eq!(built(&mut rt, &|s| { let hold = s.ov.inbox.inbox.as_ref().unwrap().decisions[2].hold_key(); s.ov.inbox.unconfirmed.insert(hold); }), [wait.clone()], "not confirmed");
+    assert_eq!(built(&mut rt, &|s| { s.ov.inbox.notes.insert(review("W2").id(), (review("W2").hold_key(), "Not sent".into())); }), [w2.clone()], "a note on it");
+    let renamed = |s: &mut App| {
+        let mut all = people();
+        all[2].name = "Charlie renamed".into();
+        s.outbox.send(Bg::Snapshot("2026-11-27T10:00:00Z".into(), EPOCH.into(), 2, all, None)).unwrap();
+    };
+    assert_eq!(built(&mut rt, &renamed), [wait.clone()], "who it waits on");
+    assert_eq!(built(&mut rt, &|s| s.ov.d.projects.iter_mut().for_each(|p| p.name = "Renamed".into())), [wait.clone(), w1.clone(), w2.clone()], "its project");
+    let w0 = format!("decision-{}", review("W0").id());
+    assert_eq!(built(&mut rt, &|s| s.ov.inbox.inbox.as_mut().unwrap().decisions.insert(0, review("W0"))), [w0], "a decision arriving above the others builds only itself");
+    let lead3 = "lead-handled-p1|W3|b".to_string();
+    assert_eq!(built(&mut rt, &|s| s.ov.inbox.inbox.as_mut().unwrap().lead_handling[0].reason = "Still checking".into()), [lead3], "a lead's reason");
+}
