@@ -195,8 +195,8 @@ fn settled(s: &mut App, done: Done) {
                 let line = match &result {
                     Ok(r) if act == LifecycleAct::Status => Some(r.line()).filter(|l| !l.is_empty()),
                     Ok(r) if act == LifecycleAct::Resume && r.unchanged == Some(true) => Some(inspect::RESUME_UNCHANGED.to_string()),
+                    Ok(_) => act.done().map(str::to_string),
                     Err(error) => Some(format!("{} didn't work: {}", act.label(), failure(error))),
-                    _ => None,
                 };
                 if let Some(line) = line {
                     s.ov.notice = Some(match &elsewhere {

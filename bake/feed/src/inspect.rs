@@ -307,7 +307,7 @@ pub struct GoalControls {
 }
 
 pub fn goal_controls(x: &Session) -> GoalControls {
-    let editable = !x.read_only && !x.archived && x.capabilities.goal_set;
+    let editable = !x.read_only && x.capabilities.goal_set;
     GoalControls { editable, controllable: editable && x.capabilities.goal }
 }
 
@@ -344,7 +344,7 @@ pub fn moves_goal(events: &[crate::wire::Event]) -> bool {
 }
 
 pub fn lifecycle(x: &Session) -> Lifecycle {
-    if x.read_only || x.archived { Lifecycle::default() } else { x.capabilities.lifecycle }
+    if x.read_only { Lifecycle::default() } else { x.capabilities.lifecycle }
 }
 
 pub fn lifecycle_any(l: Lifecycle) -> bool {
@@ -403,6 +403,14 @@ impl LifecycleAct {
 
     pub fn changes(self) -> bool {
         matches!(self, LifecycleAct::Stop | LifecycleAct::Resume)
+    }
+
+    pub fn done(self) -> Option<&'static str> {
+        match self {
+            LifecycleAct::Stop => Some("Stopped."),
+            LifecycleAct::Resume => Some("Resumed."),
+            _ => None,
+        }
     }
 }
 
@@ -495,6 +503,8 @@ mod tests {
         assert_eq!(labels(Some(&active), &claude), ["Edit", "Clear"]);
         assert_eq!(labels(Some(&active), &codex), ["Edit", "Pause", "Set budget", "Clear"]);
         assert_eq!(labels(Some(&paused), &codex), ["Edit", "Resume", "Budget", "Clear"]);
+        let archived = session(json!({"id": "x", "archived": true, "capabilities": {"send": true, "goalSet": true, "goal": true}}));
+        assert_eq!(labels(Some(&active), &archived), ["Edit", "Pause", "Set budget", "Clear"], "archiving files a session away without closing it");
         let closed = session(json!({"id": "x", "readOnly": true, "capabilities": {"goalSet": true, "goal": true}}));
         assert!(labels(Some(&active), &closed).is_empty() && labels(None, &closed).is_empty());
         let none = session(json!({"id": "n", "capabilities": {"send": true}}));
@@ -602,6 +612,9 @@ mod tests {
         assert!(LifecycleAct::Stop.offered(lifecycle(&bg)) && !LifecycleAct::Logs.offered(lifecycle(&bg)));
         let closed = session(json!({"id": "b", "readOnly": true, "capabilities": {"lifecycle": {"stop": true, "resume": true}}}));
         assert!(!lifecycle_any(lifecycle(&closed)));
+        let archived = session(json!({"id": "b", "archived": true, "capabilities": {"lifecycle": {"stop": true}}}));
+        assert!(LifecycleAct::Stop.offered(lifecycle(&archived)));
+        assert_eq!((LifecycleAct::Stop.done(), LifecycleAct::Status.done()), (Some("Stopped."), None));
         let adopt_only = session(json!({"id": "a", "capabilities": {"lifecycle": {"adopt": true}}}));
         assert!(!lifecycle_any(lifecycle(&adopt_only)));
     }
