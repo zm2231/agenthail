@@ -76,6 +76,7 @@ pub struct Prefs {
     pub wake: crate::wake::Wake,
     stream_down: Option<String>,
     pub tab: usize,
+    pub general_page: usize,
     pub base: Option<Result<Base, Failure>>,
     pub settings: Option<Result<Settings, Failure>>,
     pub remote: Option<Result<RemoteControl, Failure>>,
@@ -212,6 +213,7 @@ fn init() -> Prefs {
         stream_down: None,
         external: false,
         tab: 0,
+        general_page: 0,
         base: None,
         settings: None,
         remote: None,
@@ -631,7 +633,22 @@ fn unfollowed(s: &Prefs) -> Option<El> {
     Some(col().w_full().items_center().pb(8.0).child(parts::failure(s, &note).w(parts::WIDTH)))
 }
 
-pub const TABS: [&str; 8] = ["General", "Claude", "Notifications", "Devices", "Handoffs", "Appearance", "Agents", "Keyboard"];
+pub const TABS: [&str; 6] = ["General", "Claude", "Devices", "Handoffs", "Appearance", "Agents"];
+pub const GENERAL: [&str; 3] = ["General", "Notifications", "Keyboard"];
+
+fn general_pages(s: &Prefs, layer: &mut Vec<El>, k: &rune_kit::Kit) -> El {
+    let pages = SegmentedControl::new(&GENERAL, Some(s.general_page)).label("General").fit().on_pick(|s: &mut Prefs, i, _| {
+        s.general_page = i;
+        s.open_select = None;
+        keyboard::opened(s);
+    });
+    let page = match s.general_page {
+        1 => notify::page(s, k),
+        keyboard::PAGE => keyboard::page(s, k),
+        _ => general::page(s, layer, k),
+    };
+    col().w_full().gap(14.0).child(rune::row().w_full().justify_center().child(pages.build(k).key("settings-general-page"))).child(page)
+}
 
 pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     let themes = crate::look::frame(cx, false, false, false);
@@ -652,13 +669,11 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     });
     let page = match s.tab {
         1 => claude::page(s, &mut layer, &k),
-        2 => notify::page(s, &k),
-        3 => devices::page(s, &mut layer, &k),
+        2 => devices::page(s, &mut layer, &k),
         handoffs::TAB => handoffs::page(s, &mut layer, &k),
         appearance::TAB => appearance::page(s, &k),
         agents::TAB => agents::page(s, &mut layer, &k),
-        keyboard::TAB => keyboard::page(s, &k),
-        _ => general::page(s, &mut layer, &k),
+        _ => general_pages(s, &mut layer, &k),
     };
     let body = col()
         .w_full()

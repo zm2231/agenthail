@@ -9,7 +9,7 @@ use super::parts::{self, line, section};
 use super::{Done, Prefs};
 use crate::theme::{self, BODY, META, accent, failed, faint, muted};
 
-pub const TAB: usize = 6;
+pub const TAB: usize = 5;
 
 pub enum Got {
     Read(u64, Result<Loaded, Failure>),
@@ -71,9 +71,12 @@ pub fn opened(s: &mut Prefs) {
 }
 
 pub fn reload(s: &mut Prefs) {
-    if s.tab != TAB {
-        return;
+    if s.tab == TAB {
+        read(s);
     }
+}
+
+fn read(s: &mut Prefs) {
     let Some(client) = s.client.clone() else {
         s.agents.read = Some(Err(super::unread(s)));
         return;
@@ -126,7 +129,8 @@ pub fn take(s: &mut Prefs, got: Got) {
                     match after {
                         After::Saved(name) | After::Removed(name) => {
                             s.agents.kept.remove(&name);
-                            if let Some(role) = roles(s).and_then(|r| r.role(&name)).cloned() {
+                            let shown = s.agents.selected.as_deref() == Some(name.as_str());
+                            if let Some(role) = roles(s).and_then(|r| r.role(&name)).cloned().filter(|_| shown) {
                                 set_draft(s, Draft::of(&role));
                             }
                         }
@@ -150,7 +154,7 @@ pub fn take(s: &mut Prefs, got: Got) {
                     let unsure = f.uncertain;
                     s.agents.save_error = Some(f);
                     if unsure {
-                        reload(s);
+                        read(s);
                     }
                 }
             }
@@ -162,8 +166,10 @@ fn settle(s: &mut Prefs) {
     let Some(r) = roles(s) else { return };
     let names: Vec<String> = r.roles.iter().map(|x| x.name.clone()).collect();
     if s.agents.selected.as_ref().is_none_or(|n| !names.contains(n)) {
+        if let Some(d) = s.agents.draft.take().filter(Draft::changed) {
+            s.agents.kept.insert(d.name.clone(), d);
+        }
         s.agents.selected = names.first().cloned();
-        s.agents.draft = None;
     }
     let Some(role) = s.agents.selected.as_ref().and_then(|n| roles(s)?.role(n)).cloned() else { return };
     match &mut s.agents.draft {

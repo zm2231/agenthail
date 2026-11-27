@@ -17,7 +17,7 @@ use super::parts;
 use super::{Prefs, Read, Section, WINDOW, busy, explain, fetch, token_verified, write};
 use crate::theme::{META, failed, muted};
 
-pub const TAB: usize = 4;
+pub const TAB: usize = 3;
 
 const REREAD: &[Read] = &[Read::Base];
 

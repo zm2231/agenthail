@@ -501,7 +501,7 @@ impl Client {
 
     pub fn change_agent_role(&self, request: &Request) -> Result<Roles, Change> {
         match socket_call("POST", "/api/v1/agents", Some(&request.body())) {
-            Ok(value) => roles_reply(value).map_err(Change::Failed),
+            Ok(value) => roles_reply(value).map_err(|f| Change::Failed(Failure { uncertain: true, ..f })),
             Err(SocketError::Missing) => Err(Change::ReadOnly),
             Err(SocketError::Failed(f)) => Err(Change::Failed(f)),
         }

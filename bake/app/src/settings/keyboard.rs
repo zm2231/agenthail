@@ -13,10 +13,10 @@ pub struct Form {
     rows: HashMap<&'static str, ShortcutRecorderState>,
 }
 
-pub const TAB: usize = 7;
+pub const PAGE: usize = 2;
 
 pub fn opened(s: &mut Prefs) {
-    if s.tab != TAB {
+    if s.tab != 0 || s.general_page != PAGE {
         return;
     }
     bindings::refresh();
