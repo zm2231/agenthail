@@ -283,7 +283,7 @@ func TestThePersonsChannelPostReachesAnotherHostAsThePersonWithTheirName(t *test
 	}
 }
 
-func TestAProjectPostReachesLiveConversationsAndSkipsOnesItCannotReach(t *testing.T) {
+func TestAProjectPostReachesLiveConversationsEvenWithoutTheirFolderAndSkipsOnesItCannotReach(t *testing.T) {
 	local, _, _ := widgetOnTwoHosts(t)
 	repo := local.fake.sessions["local-a"].Cwd
 	removed := widgetRepo(t, "https://github.com/example/widget.git")
@@ -357,7 +357,7 @@ func TestAProjectPostReachesLiveConversationsAndSkipsOnesItCannotReach(t *testin
 		return response, members, len(local.fake.delivered()) - before
 	}
 	response, members, delivered := post()
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"skipped":5`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"skipped":4`) {
 		t.Fatalf("a post every reachable member got: status=%d body=%s", response.Code, response.Body)
 	}
 	want := map[string]broadcast.Recipient{
@@ -366,7 +366,7 @@ func TestAProjectPostReachesLiveConversationsAndSkipsOnesItCannotReach(t *testin
 		"ended-pinned": {SessionID: "ended-pinned", Outcome: broadcast.OutcomeSkipped, Detail: "ended"},
 		"archived":     {SessionID: "archived", Outcome: broadcast.OutcomeSkipped, Detail: "archived"},
 		"unloaded":     {SessionID: "unloaded", Outcome: broadcast.OutcomeSkipped, Detail: "ended"},
-		"folder-gone":  {SessionID: "folder-gone", Outcome: broadcast.OutcomeSkipped, Detail: "its folder " + removed + " is gone"},
+		"folder-gone":  {SessionID: "folder-gone", Outcome: broadcast.OutcomeSent, Detail: members["folder-gone"].Detail},
 	}
 	if len(members) != len(want) {
 		t.Fatalf("this host's members %+v, want %+v", members, want)
@@ -376,8 +376,8 @@ func TestAProjectPostReachesLiveConversationsAndSkipsOnesItCannotReach(t *testin
 			t.Fatalf("member %s = %+v, want %+v", id, members[id], recipient)
 		}
 	}
-	if delivered != 2 {
-		t.Fatalf("this host delivered %d messages, want its coordinator and the live member only", delivered)
+	if delivered != 3 {
+		t.Fatalf("this host delivered %d messages, want its coordinator and the two live members only", delivered)
 	}
 	if err := local.reg.SyncDeliveryAsks(time.Now()); err != nil {
 		t.Fatal(err)
@@ -428,8 +428,8 @@ func TestAProjectPostReachesLiveConversationsAndSkipsOnesItCannotReach(t *testin
 	if outcome := got["lead"].Outcome; outcome == broadcast.OutcomeSkipped || outcome == broadcast.OutcomeFailed {
 		t.Fatalf("an ended coordinator in the channel was not reached: %+v", got["lead"])
 	}
-	if len(got) != 6 || len(local.fake.delivered())-before != 2 {
-		t.Fatalf("the channel post reached %+v and delivered %d, want the live member and the coordinator delivered", crewAnswer.Recipients, len(local.fake.delivered())-before)
+	if len(got) != 6 || len(local.fake.delivered())-before != 3 {
+		t.Fatalf("the channel post reached %+v and delivered %d, want the two live members and the coordinator delivered", crewAnswer.Recipients, len(local.fake.delivered())-before)
 	}
 	retired := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#retired", "message": "handoff"})
 	if retired.Code != http.StatusBadRequest || !strings.Contains(retired.Body.String(), "#retired has no reachable members other than the sender; skipped ") {
@@ -466,11 +466,11 @@ func TestAProjectPostWhoseOnlyMembersAnotherHostSkippedIsRefused(t *testing.T) {
 		}
 		return false
 	})
-	if err := os.RemoveAll(repo); err != nil {
+	if err := remote.reg.ArchiveSession("gadget-worker", time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	response := local.request(t, http.MethodPost, "/api/v1/actions", map[string]any{"action": "channel-send", "channel": "#gadget", "message": "release notes"})
-	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "#gadget has no reachable members other than the sender; skipped ") || !strings.Contains(response.Body.String(), repo+" is gone") {
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "#gadget has no reachable members other than the sender; skipped ") || !strings.Contains(response.Body.String(), "archived") {
 		t.Fatalf("a post every member of which was skipped: status=%d body=%s", response.Code, response.Body)
 	}
 	if delivered := remote.fake.delivered(); len(delivered) != 0 {

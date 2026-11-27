@@ -28,37 +28,51 @@ type claudeConversation struct {
 	job       *claudeBackground
 }
 
+type reached struct {
+	started bool
+	moved   *surface.FolderMove
+}
+
+func (r reached) notice(result *surface.SendResult) *surface.SendResult {
+	if r.moved != nil && result != nil && result.Notice == "" {
+		result.Notice = r.moved.Notice()
+	}
+	return result
+}
+
 // reach points sess at a live process of its conversation that can take a
 // message, resuming the conversation in the Claude host when no process holds
-// it. A conversation held by a process that cannot take messages yet returns
-// a held delivery, and a resume whose result is uncertain returns an unknown
-// outcome. It reports whether it started a process.
-func (c *Claude) reach(ctx context.Context, sess *surface.Session) (bool, error) {
+// it. A conversation whose folder is gone resumes in the folder
+// surface.FallbackFolder names, or is refused. A conversation held by a
+// process that cannot take messages yet returns a held delivery, and a resume
+// whose result is uncertain returns an unknown outcome. It reports whether it
+// started a process and the folder it moved to.
+func (c *Claude) reach(ctx context.Context, sess *surface.Session) (reached, error) {
 	if c.reachableAsIs(ctx, sess) {
-		return false, nil
+		return reached{}, nil
 	}
 	conversation := sess.ID
 	if conversation == "" || strings.ContainsAny(conversation, `/\`) || strings.HasPrefix(conversation, ".") {
-		return false, surface.DeliveryTerminal(fmt.Errorf("Claude session %q is not a conversation id", sess.ID), surface.DeliveryTargetMissing)
+		return reached{}, surface.DeliveryTerminal(fmt.Errorf("Claude session %q is not a conversation id", sess.ID), surface.DeliveryTargetMissing)
 	}
 	unlock, err := c.lockToDeliver(ctx, conversation)
 	if err != nil {
-		return false, deliveryError(err)
+		return reached{}, deliveryError(err)
 	}
 	defer unlock()
 	if c.movedAway(conversation) {
-		return false, surface.DeliveryUnavailable(fmt.Errorf("%w: Claude conversation %s moved to another host", surface.ErrDeliveryHeld, conversation))
+		return reached{}, surface.DeliveryUnavailable(fmt.Errorf("%w: Claude conversation %s moved to another host", surface.ErrDeliveryHeld, conversation))
 	}
 	state, err := c.conversation(ctx, conversation, sessionPin(sess))
 	if err != nil {
-		return false, deliveryError(err)
+		return reached{}, deliveryError(err)
 	}
 	if state.reachable != nil {
 		adoptClaudeProcess(sess, state.reachable)
-		return false, nil
+		return reached{}, nil
 	}
 	if state.alive {
-		return false, surface.DeliveryUnavailable(fmt.Errorf("%w: a process holds Claude conversation %s without a messaging socket or Remote Control", surface.ErrDeliveryHeld, conversation))
+		return reached{}, surface.DeliveryUnavailable(fmt.Errorf("%w: a process holds Claude conversation %s without a messaging socket or Remote Control", surface.ErrDeliveryHeld, conversation))
 	}
 	cwd := sess.Cwd
 	if state.job != nil && state.job.Cwd != "" {
@@ -68,17 +82,43 @@ func (c *Claude) reach(ctx context.Context, sess *surface.Session) (bool, error)
 		cwd = claudeTranscriptCwd(sess.Transcript)
 	}
 	if cwd == "" {
-		return false, surface.DeliveryTerminal(fmt.Errorf("Claude conversation %s has no known working directory to resume in", conversation), surface.DeliveryTargetMissing)
+		return reached{}, surface.DeliveryTerminal(fmt.Errorf("Claude conversation %s has no known working directory to resume in", conversation), surface.DeliveryTargetMissing)
 	}
 	if err := c.recordedRootGone(sess); err != nil {
-		return false, err
+		return reached{}, err
 	}
-	resumed, err := c.resume(ctx, conversation, cwd, "no running process holds it")
+	var out reached
+	why, options := "no running process holds it", claudehost.OpenRequest{}
+	if surface.FolderGone(cwd) {
+		move, err := c.fallbackFolder(conversation, cwd)
+		if err != nil {
+			return reached{}, err
+		}
+		cwd, out.moved = move.Into, &move
+		why, options.Preface = "no running process holds it and its folder "+move.Gone+" is gone", move.Line()
+	}
+	resumed, err := c.resumeAs(ctx, conversation, cwd, why, options)
 	if err != nil {
-		return false, err
+		return reached{}, err
 	}
 	adoptClaudeProcess(sess, resumed)
-	return true, nil
+	out.started = true
+	return out, nil
+}
+
+func (c *Claude) fallbackFolder(conversation, cwd string) (surface.FolderMove, error) {
+	var roots []string
+	if c.folderBounds != nil {
+		var err error
+		if roots, err = c.folderBounds(conversation); err != nil {
+			return surface.FolderMove{}, surface.DeliveryUnavailable(fmt.Errorf("read the folders Claude conversation %s may work in: %w", conversation, err))
+		}
+	}
+	move, err := surface.FallbackFolder(cwd, c.home, roots)
+	if err != nil {
+		return surface.FolderMove{}, surface.DeliveryTerminal(err, surface.DeliveryTargetMissing)
+	}
+	return move, nil
 }
 
 // recordedRootGone refuses to start a stopped conversation whose transcript
@@ -291,7 +331,7 @@ func (c *Claude) resumeAs(ctx context.Context, conversation, cwd, why string, op
 	if unreadable := c.unreadableRecords(); len(unreadable) > 0 {
 		return nil, refuseUnknownHolders(conversation, unreadable)
 	}
-	opened, err := c.hostOpen(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd, ConfigDir: root, Name: options.Name, Model: options.Model, PermissionMode: options.PermissionMode})
+	opened, err := c.hostOpen(ctx, claudehost.OpenRequest{Resume: conversation, Cwd: cwd, ConfigDir: root, Name: options.Name, Model: options.Model, PermissionMode: options.PermissionMode, Preface: options.Preface})
 	if err != nil {
 		return nil, claudeHostResumeError(conversation, err)
 	}

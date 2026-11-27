@@ -41,6 +41,7 @@ type Claude struct {
 	goneBridges  map[string]bool
 	refusedMu    sync.Mutex
 	refused      map[string]time.Time
+	folderBounds surface.FolderBounds
 	surface.MCPAttachment
 }
 
@@ -55,6 +56,11 @@ func NewClaudeWithRequest(signins signin.Resolver, home string, request ClaudeRe
 		home, _ = os.UserHomeDir()
 	}
 	return &Claude{signins: signins, home: home, cookieBridge: browsercookie.ConfiguredBridge(), subagents: newClaudeSubagentObserver(), request: request, transcripts: newClaudeTranscriptIndex(), entrypoints: newClaudeEntrypoints(), host: newClaudeHost(home), prompts: newClaudePrompts(), webAccounts: claudeWebAccounts{byProfile: map[string]claudeWebAccountEntry{}}}
+}
+
+// BoundFolders is set before any send; without it every session is unbounded.
+func (c *Claude) BoundFolders(bounds surface.FolderBounds) {
+	c.folderBounds = bounds
 }
 
 func (c *Claude) Name() surface.SurfaceKind { return surface.KindClaude }

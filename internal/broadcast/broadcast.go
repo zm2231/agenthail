@@ -3,10 +3,7 @@ package broadcast
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -286,8 +283,9 @@ func (b Broadcaster) Send(ctx context.Context, target Target, message, label, so
 // project resolves and delivers to its own. A member is a live or idle
 // session, pinned or used within the active window; the rest are counted as
 // older, not listed. A post does not start sessions: one in that window whose
-// process ended, that is archived, or whose folder is gone is skipped with the
-// reason. Coordinators are reached even when idle past the window or ended,
+// process ended or that is archived is skipped with the reason. One whose
+// folder is gone is reached like any other, and a resumed coordinator runs in
+// the folder its surface falls back to. Coordinators are reached even when idle past the window or ended,
 // since a send starts or resumes one. A task child is a member like any
 // session; a delegated run (a Codex exec run or a sub-agent) in that window is
 // skipped with that reason. A stored channel's own members are skipped by the
@@ -398,11 +396,6 @@ func left(record registry.CatalogSessionState, item Project, archive registry.Ar
 func unreachable(record registry.CatalogSessionState, item Project, archive registry.ArchiveState) string {
 	if archived(record, item, archive) {
 		return "archived"
-	}
-	if cwd := record.Session.Cwd; cwd != "" {
-		if info, err := os.Stat(cwd); errors.Is(err, fs.ErrNotExist) || err == nil && !info.IsDir() {
-			return fmt.Sprintf("its folder %s is gone", cwd)
-		}
 	}
 	if record.Session.Ended || record.Session.Status == surface.StatusOffline {
 		return "ended"

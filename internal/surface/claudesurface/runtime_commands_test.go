@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -50,6 +51,27 @@ func TestASessionAPersonReachesOutsideTheHostOffersWhatClaudeListsForItsFolder(t
 	}
 	if got := surfacetest.CommandInserts(commands); !slices.Contains(got, "/l5-probe") || commands.Unavailable != "" {
 		t.Fatalf("commands = %v (unavailable %q), want the folder's listing", got, commands.Unavailable)
+	}
+}
+
+func TestASessionWhoseFolderIsGoneOffersWhatClaudeListsWhereItWouldResume(t *testing.T) {
+	c, fixture := hostedClaude(t)
+	fixture.Start(t)
+	worktree := filepath.Join(fixture.Cwd, ".worktrees", "task")
+	sess := &surface.Session{ID: uuid.NewString(), Surface: surface.KindClaude, Transport: "uds", Cwd: worktree}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	commands, err := c.Commands(ctx, sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := surfacetest.CommandInserts(commands); !slices.Contains(got, "/l5-probe") || commands.Unavailable != "" {
+		t.Fatalf("commands = %v (unavailable %q), want the checkout's listing", got, commands.Unavailable)
+	}
+	c.BoundFolders(func(string) ([]string, error) { return []string{t.TempDir()}, nil })
+	commands, err = c.Commands(ctx, sess)
+	if err != nil || len(commands.Commands) != 0 || !strings.Contains(commands.Unavailable, "its folder "+worktree+" is gone") {
+		t.Fatalf("commands = %+v err=%v, want none and why", commands, err)
 	}
 }
 

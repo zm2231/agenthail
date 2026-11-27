@@ -343,7 +343,7 @@ func (c *Claude) SessionAction(ctx context.Context, session *surface.Session, ac
 			if err != nil {
 				return nil, err
 			}
-			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "unchanged": !resumed, "state": string(session.Status)}, nil
+			return map[string]any{"id": record.ID, "sessionId": record.SessionID, "action": action, "unchanged": !resumed.started, "state": string(session.Status)}, nil
 		}
 		output, err := c.backgroundCommand(ctx, root, "", action, record.ID)
 		if err != nil {
@@ -424,7 +424,7 @@ func (c *Claude) hostSessionAction(ctx context.Context, session *surface.Session
 		if err != nil {
 			return nil, err
 		}
-		return map[string]any{"sessionId": session.ID, "action": action, "unchanged": !resumed, "state": string(session.Status)}, nil
+		return map[string]any{"sessionId": session.ID, "action": action, "unchanged": !resumed.started, "state": string(session.Status)}, nil
 	case "logs":
 		logs, err := c.host.client.Logs(ctx, session.ID)
 		if claudehost.IsCode(err, "not_open") {

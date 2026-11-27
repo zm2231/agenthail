@@ -31,7 +31,15 @@ func (c *Claude) Commands(ctx context.Context, sess *surface.Session) (*surface.
 	if err != nil {
 		return nil, err
 	}
-	listing, err := c.host.client.ListCommands(ctx, sess.Cwd, configDir)
+	cwd := sess.Cwd
+	if surface.FolderGone(cwd) {
+		move, err := c.fallbackFolder(sess.ID, cwd)
+		if err != nil {
+			return &surface.RuntimeCommands{Commands: []surface.RuntimeCommand{}, Unavailable: err.Error()}, nil
+		}
+		cwd = move.Into
+	}
+	listing, err := c.host.client.ListCommands(ctx, cwd, configDir)
 	if err != nil {
 		return nil, err
 	}
