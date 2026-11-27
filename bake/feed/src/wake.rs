@@ -109,6 +109,18 @@ pub fn next_minute(at: time::OffsetDateTime) -> time::OffsetDateTime {
     minute_of(at) + time::Duration::MINUTE
 }
 
+pub fn turn(now: time::OffsetDateTime, at: time::OffsetDateTime, deadlines: &[time::OffsetDateTime]) -> Option<time::OffsetDateTime> {
+    let minute = minute_of(now);
+    let passed = deadlines.iter().copied().filter(|d| *d > at && *d <= now).max();
+    let base = if minute == minute_of(at) { at } else { minute };
+    let next = if minute < minute_of(at) { minute } else { passed.map_or(base, |d| d.max(base)) };
+    (next != at).then_some(next)
+}
+
+pub fn next_turn(now: time::OffsetDateTime, deadlines: &[time::OffsetDateTime]) -> time::OffsetDateTime {
+    deadlines.iter().copied().filter(|d| *d > now).fold(next_minute(now), time::OffsetDateTime::min)
+}
+
 #[cfg(test)]
 #[path = "wake_tests.rs"]
 mod tests;

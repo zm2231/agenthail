@@ -145,6 +145,11 @@ impl ConfigRoot {
         self.full_until = usage.full_until;
     }
 
+    pub fn deadlines(&self) -> impl Iterator<Item = time::OffsetDateTime> + '_ {
+        let limits = self.usage.iter().flat_map(|u| u.limits.iter()).filter_map(|l| l.resets_at.as_deref());
+        self.full_until.as_deref().into_iter().chain(limits).filter_map(crate::catalog::parse_time)
+    }
+
     pub fn spent(&self, now: time::OffsetDateTime) -> bool {
         let at_limit = |l: &Limit| l.percent >= 100.0 && l.resets_at.as_deref().and_then(crate::catalog::parse_time).is_some_and(|at| at > now);
         self.full_now(now) || self.usage.as_ref().is_some_and(|u| u.limits.iter().any(at_limit))
