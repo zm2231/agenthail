@@ -115,7 +115,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
     let brief_rows = [
         ("What was asked", plain(w.acceptance.split(": ").next().unwrap_or(&w.acceptance))),
         ("What was built", crate::data::clip_words(&plain(&first_result), 150)),
-        ("Before you approve", format!("{passed} of {} checks have a recorded pass. {} raised after it was submitted.", steps.len(), if unchecked.is_empty() { "Nothing was".to_string() } else { format!("{} thing{} {}", unchecked.len(), if unchecked.len() == 1 { "" } else { "s" }, if unchecked.len() == 1 { "was" } else { "were" }) })),
+        ("Before you approve", if w.submitted_at().is_empty() { format!("{passed} of {} checks have a recorded pass. It hasn't been submitted yet.", steps.len()) } else { format!("{passed} of {} checks have a recorded pass. {} raised after it was submitted.", steps.len(), if unchecked.is_empty() { "Nothing was".to_string() } else { format!("{} thing{} {}", unchecked.len(), if unchecked.len() == 1 { "" } else { "s" }, if unchecked.len() == 1 { "was" } else { "were" }) }) }),
     ];
     let mut brief = col().w_full().gap(2.0).padding(8.0);
     for (i, (t, b)) in brief_rows.iter().enumerate() {
