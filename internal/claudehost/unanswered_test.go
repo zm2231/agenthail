@@ -17,16 +17,15 @@ import (
 	"github.com/zm2231/agenthail/internal/testkit"
 )
 
-// stallingManager starts hosts that, once marker holds their pid, block their
-// event loop for block ms out of every block+gap ms.
-func stallingManager(t *testing.T, f *claudehosttest.Fixture, block, gap int) (*claudehost.Manager, string) {
+// slowManager starts hosts that, once marker holds their pid, take up each new
+// connection only after delay ms.
+func slowManager(t *testing.T, f *claudehosttest.Fixture, delay int) (*claudehost.Manager, string) {
 	t.Helper()
-	marker := filepath.Join(t.TempDir(), "stall")
-	return preloadedManager(t, f, "const fs = require('fs');\n"+
-		"setInterval(() => {\n  let target = '';\n"+
-		"  try { target = fs.readFileSync("+strconv.Quote(marker)+", 'utf8'); } catch {}\n"+
-		"  if (target !== String(process.pid)) return;\n"+
-		"  const end = Date.now() + "+strconv.Itoa(block)+";\n  while (Date.now() < end) {}\n}, "+strconv.Itoa(gap)+").unref();\n"), marker
+	marker := filepath.Join(t.TempDir(), "slow")
+	return preloadedManager(t, f, "const fs = require('fs');\nconst net = require('net');\n"+
+		"const slow = () => { try { return fs.readFileSync("+strconv.Quote(marker)+", 'utf8') === String(process.pid); } catch { return false; } };\n"+
+		"const createServer = net.createServer;\n"+
+		"net.createServer = (listener) => createServer((socket) => { if (slow()) setTimeout(() => listener(socket), "+strconv.Itoa(delay)+"); else listener(socket); });\n"), marker
 }
 
 // silentManager starts hosts that, once marker holds their pid, leave every
@@ -52,7 +51,9 @@ func preloadedManager(t *testing.T, f *claudehosttest.Fixture, source string) *c
 }
 
 func TestEnsureRetiresAHostThatStoppedAnsweringAndKeepsItsSession(t *testing.T) {
-	t.Cleanup(claudehost.SetUnansweredWaits(2*time.Second, 10*time.Second))
+	// Over half of Ensure's 15 s start timeout: a silent host must be judged
+	// within one window, as the production 10 s window is.
+	t.Cleanup(claudehost.SetUnansweredWaits(8*time.Second, 10*time.Second))
 	f := claudehosttest.New(t, "")
 	ctx := testContext(t)
 	manager, marker := silentManager(t, f)
@@ -140,10 +141,10 @@ func TestEnsureKillsAHostThatCannotRetireAndKeepsItsClaudeRunning(t *testing.T) 
 }
 
 func TestEnsureKeepsASlowHostThatStillAnswers(t *testing.T) {
-	t.Cleanup(claudehost.SetUnansweredWaits(2*time.Second, 2*time.Second))
+	t.Cleanup(claudehost.SetUnansweredWaits(3*time.Second, 3*time.Second))
 	f := claudehosttest.New(t, "")
 	ctx := testContext(t)
-	manager, marker := stallingManager(t, f, 500, 300)
+	manager, marker := slowManager(t, f, 1500)
 	client, err := manager.Ensure(ctx)
 	if err != nil {
 		t.Fatal(err)
