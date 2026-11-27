@@ -903,15 +903,19 @@ struct TranscriptFollowTest {
             }
         }
         CFRunLoopAddObserver(CFRunLoopGetMain(), shown, .commonModes)
+        var unseen: [Int] = []
         for index in 0..<40 {
+            let framesBefore = frames
             feed.rows += rows("Rs\(index)-", 1)
             if index % 8 == 0 { feed.rows[above] = Row(id: feed.rows[above].id, lines: feed.rows[above].lines + 1) }
             spin(0.05)
+            waitUntil { frames > framesBefore }
+            if frames == framesBefore { unseen.append(index) }
             worst = max(worst, abs(place(anchor) - placed))
             shifted = max(shifted, abs((readerTops.top(anchor) ?? contentTop) - contentTop))
         }
         CFRunLoopRemoveObserver(CFRunLoopGetMain(), shown, .commonModes)
-        expect(frames >= 40, "each update reached a frame, \(frames) frames")
+        expect(unseen.isEmpty, "each update reached a frame the reader is shown, none after updates \(unseen)")
         spin(0.4)
         expect(shifted >= 10, "a row above the reader that grows while the stream runs moves the reader's row in the content, so there is something to hold, moved \(shifted)")
         expect(abs(place(anchor) - placed) < 1 && worst < 2, "the reader's row stays put while the stream grows below it and a row above it grows, \(anchor) at \(placed) moved to \(place(anchor)), at most \(worst)")
