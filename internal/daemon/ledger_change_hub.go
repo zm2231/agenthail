@@ -10,7 +10,8 @@ import (
 // ledgerChangeHub publishes one change per project at most once per wait, so replaying thousands of events sends a handful.
 // A subscriber keeps only the newest version per project, so one that reads slowly gets the current versions and is never dropped.
 // Publishes of one project can overlap when reading its version takes longer than the wait; only the one that started last
-// delivers, so a slow earlier read never replaces a newer version.
+// delivers, so a slow earlier read never replaces a newer version. A failed read is retried after the wait, so a committed
+// change reaches the stream without waiting for another write.
 type ledgerChangeHub struct {
 	mu          sync.Mutex
 	wait        time.Duration
@@ -40,7 +41,13 @@ func newLedgerChangeHub(wait time.Duration, version func(string) (string, error)
 func (h *ledgerChangeHub) changed(key string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.pending[key] || len(h.subscribers) == 0 {
+	if len(h.subscribers) > 0 {
+		h.schedule(key)
+	}
+}
+
+func (h *ledgerChangeHub) schedule(key string) {
+	if h.pending[key] {
 		return
 	}
 	h.pending[key] = true
@@ -62,13 +69,14 @@ func (h *ledgerChangeHub) publish(key string) {
 		return
 	}
 	version, err := h.version(key)
-	if err != nil {
-		h.logf("ledger events: version of %s: %s", key, err)
-		return
-	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.latest[key] != publish {
+		return
+	}
+	if err != nil {
+		h.logf("ledger events: version of %s: %s; retrying", key, err)
+		h.schedule(key)
 		return
 	}
 	for _, sub := range h.subscribers {

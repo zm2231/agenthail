@@ -223,7 +223,8 @@ func (d *Daemon) apiLedgerEventsHandler(w http.ResponseWriter, r *http.Request) 
 	for _, key := range keys {
 		version, err := d.ledgerVersion(key)
 		if err != nil {
-			d.log.Printf("ledger events: version of %s: %s", key, err)
+			d.log.Printf("ledger events: version of %s: %s; retrying", key, err)
+			hub.changed(key)
 			continue
 		}
 		writeLedgerChange(w, ledgerChange{ProjectKey: key, Version: version})

@@ -326,6 +326,27 @@ func TestASlowEarlierPublishDoesNotReplaceANewerVersion(t *testing.T) {
 	}
 }
 
+func TestAChangeWhoseVersionReadFailsOnceStillReachesTheStream(t *testing.T) {
+	var reads atomic.Int32
+	hub := newLedgerChangeHub(time.Millisecond, func(string) (string, error) {
+		if reads.Add(1) == 1 {
+			return "", errors.New("database is locked")
+		}
+		return "v1", nil
+	}, t.Logf)
+	id, wake, cancel := hub.subscribe("")
+	defer cancel()
+	hub.changed("proj")
+	select {
+	case <-wake:
+	case <-time.After(time.Minute):
+		t.Fatal("the change never reached the stream after a failed version read")
+	}
+	if changes := hub.take(id); len(changes) != 1 || changes[0].Version != "v1" {
+		t.Fatalf("took %+v", changes)
+	}
+}
+
 func TestTheWorkPageIsServedOnItsOwnPortAndNotListedAsAnApp(t *testing.T) {
 	d, _, handler, base := ledgerPageDaemon(t)
 	dir := filepath.Join(extension.Workspace(d.extensions.home), extension.Ledger)
