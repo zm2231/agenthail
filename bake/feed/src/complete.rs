@@ -393,6 +393,10 @@ impl History {
         true
     }
 
+    pub fn sent_again(&mut self, text: &str) {
+        self.cleared.retain(|t| t != text);
+    }
+
     fn rebuild(&mut self) {
         let mut seen = std::collections::HashSet::new();
         self.entries = self.cleared.iter().chain(&self.sent).filter(|t| !t.trim().is_empty() && seen.insert(t.as_str())).cloned().collect();
@@ -775,6 +779,11 @@ mod tests {
         assert_eq!(h.older("").as_deref(), Some("half a thought"));
         assert_eq!(h.older("").as_deref(), Some("newer sent"));
         assert_eq!(h.older(""), None);
+        h.stop();
+        h.sent_again("sent");
+        h.replace(vec!["sent".into(), "newer sent".into()]);
+        assert_eq!(h.older("").as_deref(), Some("half a thought"), "a cleared draft stays ahead of what was sent, as in the Mac app");
+        assert_eq!(h.older("").as_deref(), Some("sent"), "sending a cleared draft takes it out of the cleared list");
     }
 
     #[test]

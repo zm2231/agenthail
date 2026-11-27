@@ -397,6 +397,7 @@ pub fn delivered(s: &mut App, id: &str, text: &str) {
     let local = s.complete.local.entry(id.to_string()).or_default();
     local.retain(|(t, _)| t != text);
     local.insert(0, (text.to_string(), time::OffsetDateTime::now_utc()));
+    s.complete.history.entry(id.to_string()).or_default().sent_again(text);
     rebuild(s, id);
 }
 
