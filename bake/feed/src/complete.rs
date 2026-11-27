@@ -373,6 +373,10 @@ impl History {
         self.position.is_some()
     }
 
+    pub fn origin(&self) -> Option<&str> {
+        self.position.map(|_| self.draft.as_str())
+    }
+
     pub fn replace(&mut self, texts: Vec<String>) {
         if self.browsing() {
             self.waiting = Some(texts);
@@ -724,8 +728,10 @@ mod tests {
         let mut h = History::default();
         assert_eq!(h.older("draft"), None);
         h.replace(sent_texts(&[("just sent".into(), OffsetDateTime::now_utc())], &[prompt("second", Some("t2")), prompt("first", None), prompt("second", None), prompt(" ", None)]));
+        assert_eq!(h.origin(), None);
         assert_eq!(h.older("half typed").as_deref(), Some("just sent"));
         assert!(h.browsing());
+        assert_eq!(h.origin(), Some("half typed"));
         assert_eq!(h.older("ignored").as_deref(), Some("second"));
         assert_eq!(h.older("ignored").as_deref(), Some("first"));
         assert_eq!(h.older("ignored"), None);

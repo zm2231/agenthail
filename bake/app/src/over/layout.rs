@@ -86,12 +86,23 @@ fn unsent(s: &App) -> Value {
     all.to_json()
 }
 
-fn pasted(s: &App) -> Value {
+fn drafts(s: &App) -> feed::composer::Drafts {
+    let mut drafts = s.drafts.clone();
+    if let Some(id) = &s.composer_for
+        && let Some(origin) = crate::ui::complete::browse_origin(s, id)
+    {
+        drafts.set(id, &origin);
+    }
+    drafts
+}
+
+fn pasted(s: &App, drafts: &feed::composer::Drafts) -> Value {
     let unsent: Vec<&str> = s.unsent.iter().map(|(_, u)| u).chain(s.in_flight.values().flatten()).filter_map(|u| u.draft.as_deref()).collect();
-    Value::Object(feed::paste::shared().saved(s.drafts.texts().chain(s.complete.keys.texts()).chain(unsent)))
+    Value::Object(feed::paste::shared().saved(drafts.texts().chain(s.complete.keys.texts()).chain(unsent)))
 }
 
 fn encode(s: &App) -> String {
+    let drafts = drafts(s);
     let boards: serde_json::Map<String, Value> = s.ov.boards.iter().map(|(k, v)| (k.clone(), Value::Bool(*v))).collect();
     json!({
         "brief": s.ov.now_brief,
@@ -99,8 +110,8 @@ fn encode(s: &App) -> String {
         "focus": s.ov.now_focus.map(|(i, before)| json!({ "pane": i, "before": before })),
         "boards": boards,
         "looked": { "now": s.ov.looked_now, "projects": s.ov.looked },
-        "drafts": s.drafts.to_json(),
-        "pasted": pasted(s),
+        "drafts": drafts.to_json(),
+        "pasted": pasted(s, &drafts),
         "attachments": crate::ui::attach::saved(s),
         "stashes": s.complete.keys.to_json(),
         "stashedAttachments": crate::ui::attach::stashed_saved(s),

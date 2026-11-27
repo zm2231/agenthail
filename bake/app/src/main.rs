@@ -1000,6 +1000,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 s.ov.live.refresh(*fetched);
                 s.sessions = s.ov.live.sessions().to_vec();
                 s.notify.sessions_moved = true;
+                feed::holders::pins().prune(&s.sessions);
                 fetch_tails(s);
                 arrived = true;
             }

@@ -166,6 +166,11 @@ fn line_end(t: &str, caret: usize) -> bool {
     !t[caret.min(t.len())..].contains('\n')
 }
 
+pub fn browse_origin(s: &App, id: &str) -> Option<String> {
+    let h = s.complete.history.get(id)?;
+    (h.current()? == super::paste::draft(s)).then(|| h.origin().map(str::to_string)).flatten()
+}
+
 pub(super) fn replace_composer(s: &mut App, text: &str) {
     super::paste::set_composer(s, text);
 }
