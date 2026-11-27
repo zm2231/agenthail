@@ -369,3 +369,47 @@ fn a_refused_send_does_not_pass_its_retry_wait_to_the_next_message() {
     crate::take_sent(&mut s, "a".into(), next, false, Err(refused(false)));
     assert_eq!(s.redeliver["a"].due, 101.0, "the next message retries a second later");
 }
+
+#[test]
+fn earlier_keeps_a_session_dropped_from_the_list_and_blocks_one_removed() {
+    if !isolated("earlier_keeps_a_session_dropped_from_the_list_and_blocks_one_removed") {
+        return;
+    }
+    let dir = Dir::new("earlier");
+    let mut s = app(sessions(&["kept", "gone", "moved"]), &dir);
+    let removal = |id: &str, unlisted| feed::watch::Removal { id: id.into(), unlisted };
+    let seq = crate::over::earlier::asking(&mut s, "p1");
+    crate::over::earlier::removed(&mut s, &[removal("kept", true), removal("gone", false), removal("moved", false)]);
+    assert_eq!(crate::over::earlier::fetched(&s, "p1"), vec!["kept".to_string()], "a session dropped from the list keeps its last row");
+    crate::over::earlier::answer(&mut s, "p1", seq, sessions(&["kept", "gone", "moved"]));
+    assert_eq!(crate::over::earlier::fetched(&s, "p1"), vec!["kept".to_string()], "a page already asked for doesn't bring back a removed or rekeyed session");
+}
+
+#[test]
+fn a_moved_ledger_key_drops_the_ready_count_and_its_old_read_and_follows_the_new_key() {
+    if !isolated("a_moved_ledger_key_drops_the_ready_count_and_its_old_read_and_follows_the_new_key") {
+        return;
+    }
+    let dir = Dir::new("ready-moved");
+    let mut rt = unframed(app(sessions(&["a"]), &dir));
+    let ready = |key: &str, count| feed::activity::Ready { ledger_key: key.into(), count };
+    let first = crate::ui::ready::asking(&mut rt.state, "p1");
+    crate::ui::ready::answer(&mut rt.state, "p1", first, ready("old", 3));
+    assert_eq!(crate::ui::ready::count(&rt.state, "p1"), 3);
+    let before = crate::ui::ready::asking(&mut rt.state, "p1");
+
+    let mut moved = Fetched { recorded: recorded(2, sessions(&["a"])), ledgers: HashMap::new(), held: Vec::new(), asked: Vec::new(), started: std::time::Instant::now(), usage: None, moved: vec!["p1".into()] };
+    moved.recorded.projects[0].ledger_key = "new".into();
+    send(&rt, Bg::Overview(Box::new(moved)));
+    rt.frame(DT);
+    assert_eq!(crate::ui::ready::count(&rt.state, "p1"), 0, "a moved ledger key drops the old count");
+    let after = crate::ui::ready::asking(&mut rt.state, "p1");
+    crate::ui::ready::answer(&mut rt.state, "p1", before, ready("old", 5));
+    assert_eq!(crate::ui::ready::count(&rt.state, "p1"), 0, "a read asked before the move doesn't come back");
+    crate::ui::ready::answer(&mut rt.state, "p1", after, ready("new", 7));
+    assert_eq!(crate::ui::ready::count(&rt.state, "p1"), 7);
+    crate::ui::ready::ledger_changed(&mut rt.state, "old");
+    assert_eq!(crate::ui::ready::count(&rt.state, "p1"), 7, "the old key's events no longer touch it");
+    crate::ui::ready::ledger_changed(&mut rt.state, "new");
+    assert_eq!(crate::ui::ready::count(&rt.state, "p1"), 0, "the new key's events refresh it");
+}

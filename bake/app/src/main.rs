@@ -43,7 +43,7 @@ pub enum Bg {
     LedgerChanged(String, std::time::Instant),
     LedgersReopened,
     SessionNews,
-    Removed(Vec<String>),
+    Removed(Vec<feed::watch::Removal>),
     Item(String, WorkItem),
     Overview(Box<Fetched>),
     Ledger(String, std::time::Instant, Result<Ledger, String>),
@@ -1340,12 +1340,13 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 ask_overview(s, Ask::Reopened);
             }
             Bg::SessionNews => ask_overview(s, Ask::Refresh),
-            Bg::Removed(ids) => over::earlier::removed(s, &ids),
+            Bg::Removed(gone) => over::earlier::removed(s, &gone),
             Bg::Item(id, item) => {
                 s.items.insert(id, item);
             }
             Bg::Overview(fetched) => {
                 s.earlier.activity_missing = fetched.recorded.activity_missing;
+                ui::ready::moved(s, &fetched.moved);
                 s.ov.live.refresh(*fetched);
                 s.sessions = s.ov.live.sessions().to_vec();
                 s.notify.sessions_moved = true;

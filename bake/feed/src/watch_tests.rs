@@ -64,11 +64,24 @@ fn session_changes_apply_in_place_without_a_reread() {
 
     let out = c.apply(vec![upsert(12, "c", "idle"), CatalogEvent { seq: 13, kind: "session.removed".into(), data: json!({"sessionId": "b"}) }]);
     assert!(out.changed && out.news && !out.reread);
-    assert_eq!(out.removed, vec!["b".to_string()]);
+    assert_eq!(out.removed, vec![Removal { id: "b".into(), unlisted: false }]);
     let out = c.apply(vec![CatalogEvent { seq: 14, kind: "session.removed".into(), data: json!({"sessionId": "older"}) }]);
-    assert!(!out.changed && out.removed == vec!["older".to_string()]);
+    assert!(!out.changed && out.removed == vec![Removal { id: "older".into(), unlisted: false }]);
     assert_eq!(statuses(&c), vec![("a".into(), "working".into()), ("c".into(), "idle".into())]);
     assert_eq!(c.seq(), 14);
+}
+
+#[test]
+fn a_session_dropped_from_the_list_is_told_apart_from_one_removed_or_rekeyed() {
+    let mut c = Catalog::default();
+    c.adopt(vec![row("a", "idle"), row("b", "idle"), row("c", "idle")], "e", 1);
+    let out = c.apply(vec![
+        CatalogEvent { seq: 2, kind: "session.removed".into(), data: json!({"sessionId": "a", "reason": "unlisted"}) },
+        CatalogEvent { seq: 3, kind: "session.removed".into(), data: json!({"sessionId": "b", "reason": "omitted_from_successful_discovery"}) },
+        CatalogEvent { seq: 4, kind: "session.removed".into(), data: json!({"sessionId": "c", "rekeyedTo": "c2"}) },
+    ]);
+    assert!(c.sessions().is_empty());
+    assert_eq!(out.removed, vec![Removal { id: "a".into(), unlisted: true }, Removal { id: "b".into(), unlisted: false }, Removal { id: "c".into(), unlisted: false }]);
 }
 
 #[test]

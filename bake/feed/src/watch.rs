@@ -106,7 +106,13 @@ pub struct Applied {
     pub rev: Option<String>,
     pub touched: Vec<String>,
     pub restart: bool,
-    pub removed: Vec<String>,
+    pub removed: Vec<Removal>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Removal {
+    pub id: String,
+    pub unlisted: bool,
 }
 
 #[derive(Default)]
@@ -213,7 +219,7 @@ impl Catalog {
                 out.changed |= self.sessions.len() != before;
                 out.news = true;
                 out.reread |= d["rekeyedTo"].as_str().is_some_and(|r| !r.is_empty());
-                out.removed.push(id.clone());
+                out.removed.push(Removal { id: id.clone(), unlisted: d["reason"] == "unlisted" });
                 out.touched.push(id);
             }
             "decisions.changed" => out.rev = d["rev"].as_str().map(String::from).or(out.rev.take()),

@@ -17,18 +17,20 @@ struct Count {
     again: bool,
     stale: bool,
     retry_at: Option<Instant>,
+    seq: u64,
 }
 
 pub struct Readies {
     counts: HashMap<String, Count>,
-    tx: Sender<(String, Result<Ready, String>)>,
-    rx: Receiver<(String, Result<Ready, String>)>,
+    seq: u64,
+    tx: Sender<(String, u64, Result<Ready, String>)>,
+    rx: Receiver<(String, u64, Result<Ready, String>)>,
 }
 
 impl Default for Readies {
     fn default() -> Self {
         let (tx, rx) = channel();
-        Readies { counts: HashMap::new(), tx, rx }
+        Readies { counts: HashMap::new(), seq: 0, tx, rx }
     }
 }
 
@@ -47,6 +49,8 @@ fn wanted(s: &App) -> Option<String> {
 
 fn read(s: &mut App, project: &str) {
     let Some(client) = s.client.clone() else { return };
+    s.readies.seq += 1;
+    let seq = s.readies.seq;
     let count = s.readies.counts.entry(project.to_string()).or_default();
     if count.asked {
         count.again = true;
@@ -56,16 +60,23 @@ fn read(s: &mut App, project: &str) {
     count.again = false;
     count.stale = false;
     count.retry_at = None;
+    count.seq = seq;
     let (tx, project) = (s.readies.tx.clone(), project.to_string());
     std::thread::spawn(move || {
         let got = client.ready(&project);
-        let _ = tx.send((project, got));
+        let _ = tx.send((project, seq, got));
     });
 }
 
 pub fn ledger_changed(s: &mut App, key: &str) {
     let hit: Vec<String> = s.readies.counts.iter().filter(|(project, c)| project.as_str() == key || c.ready.as_ref().is_some_and(|r| r.ledger_key == key) || (c.asked && c.ready.is_none())).map(|(p, _)| p.clone()).collect();
     refresh(s, hit);
+}
+
+pub fn moved(s: &mut App, projects: &[String]) {
+    for project in projects {
+        s.readies.counts.remove(project);
+    }
 }
 
 pub fn reopened(s: &mut App) {
@@ -90,9 +101,9 @@ fn refresh(s: &mut App, projects: Vec<String>) {
 
 pub fn poll(s: &mut App) -> bool {
     let mut changed = false;
-    while let Ok((project, got)) = s.readies.rx.try_recv() {
+    while let Ok((project, seq, got)) = s.readies.rx.try_recv() {
         let stale = {
-            let count = s.readies.counts.entry(project.clone()).or_default();
+            let Some(count) = s.readies.counts.get_mut(&project).filter(|c| c.asked && c.seq == seq) else { continue };
             count.asked = false;
             std::mem::take(&mut count.stale)
         };
@@ -150,4 +161,19 @@ pub fn link(s: &App, project: &str) -> Option<El> {
             })
             .child(text(label).font(META_BOLD).color(accent())),
     )
+}
+
+#[cfg(test)]
+pub(crate) fn asking(s: &mut App, project: &str) -> u64 {
+    s.readies.seq += 1;
+    let count = s.readies.counts.entry(project.to_string()).or_default();
+    count.asked = true;
+    count.seq = s.readies.seq;
+    s.readies.seq
+}
+
+#[cfg(test)]
+pub(crate) fn answer(s: &mut App, project: &str, seq: u64, ready: Ready) {
+    let _ = s.readies.tx.send((project.to_string(), seq, Ok(ready)));
+    poll(s);
 }

@@ -3,6 +3,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use feed::activity::{Page, earlier};
 use feed::catalog::Session;
+use feed::watch::Removal;
 use rune::{El, col, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize};
 
@@ -58,10 +59,20 @@ fn show(s: &mut App, key: &str) {
     more(s, key);
 }
 
-pub fn removed(s: &mut App, ids: &[String]) {
-    for shown in s.earlier.projects.values_mut() {
-        shown.sessions.retain(|x| !ids.contains(&x.id));
-        shown.removed.extend(ids.iter().cloned());
+pub fn removed(s: &mut App, gone: &[Removal]) {
+    for x in gone {
+        let listed = s.ov.d.session(&x.id).cloned();
+        for (key, shown) in s.earlier.projects.iter_mut() {
+            if !x.unlisted {
+                shown.sessions.retain(|o| o.id != x.id);
+                shown.removed.push(x.id.clone());
+                continue;
+            }
+            shown.removed.retain(|o| *o != x.id);
+            if let Some(row) = listed.as_ref().filter(|r| r.project_key() == *key && !shown.sessions.iter().any(|o| o.id == r.id)) {
+                shown.sessions.push(row.clone());
+            }
+        }
     }
 }
 
@@ -190,4 +201,22 @@ pub fn folders(s: &App, key: &str) -> Option<El> {
         );
     }
     Some(c)
+}
+
+#[cfg(test)]
+pub(crate) fn asking(s: &mut App, key: &str) -> u64 {
+    s.earlier.seq += 1;
+    s.earlier.projects.insert(key.to_string(), Shown { open: true, asked: Some(s.earlier.seq), ..Shown::default() });
+    s.earlier.seq
+}
+
+#[cfg(test)]
+pub(crate) fn answer(s: &mut App, key: &str, seq: u64, sessions: Vec<Session>) {
+    let _ = s.earlier.tx.send((key.to_string(), seq, Ok(Page { sessions, next: None })));
+    poll(s);
+}
+
+#[cfg(test)]
+pub(crate) fn fetched(s: &App, key: &str) -> Vec<String> {
+    s.earlier.projects.get(key).map(|x| x.sessions.iter().map(|o| o.id.clone()).collect()).unwrap_or_default()
 }
