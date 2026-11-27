@@ -204,6 +204,7 @@ final class WorkflowParityTests: XCTestCase {
         let cases: [(reply: (Int, String), error: String, sameKey: Bool)] = [
             ((502, #"{"error":{"code":"create_unknown","message":"no answer"}}"#), unknown, true),
             ((504, #"{"error":{"code":"host_outcome_unknown","message":"the paired host never answered"}}"#), unknown, true),
+            ((409, #"{"error":{"code":"action_outcome_unknown","message":"This request was interrupted before its outcome was recorded, so it may have happened."}}"#), unknown, true),
             ((502, #"{"error":{"code":"create_failed","message":"launcher refused"}}"#), "launcher refused", false),
             ((502, #"{"error":{"code":"initial_turn_failed","message":"first turn rejected"},"session":{"id":"s1","surface":"codex","name":"","status":"idle","lastActive":"2026-10-23T00:00:00Z"}}"#), "first turn rejected", true),
         ]

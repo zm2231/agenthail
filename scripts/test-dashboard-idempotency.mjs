@@ -83,6 +83,13 @@ assert.equal(context.creationFailureMessage(silent), "Agenthail can't tell wheth
 await context.logicalAction("session-create", "session-create", { surface: "codex", message: "far", host: "studio" });
 assert.equal(calls[16].key, calls[17].key, "a create a paired host never answered must keep its key");
 
+const interrupted = () => ({ ok: false, status: 409, text: async () => JSON.stringify({ error: { code: "action_outcome_unknown", message: "This request was interrupted before its outcome was recorded, so it may have happened." } }) });
+responses.push(interrupted(), ok());
+const cut = await context.logicalAction("send", "send", { message: "maybe sent" }).catch((error) => error);
+assert.equal(cut.unknown, true, "an interrupted request is unknown, not refused");
+await context.logicalAction("send", "send", { message: "maybe sent" });
+assert.equal(calls[18].key, calls[19].key, "an interrupted send must keep its key");
+
 const lostName = { ok: true, status: "submitted", accepted: true, retryable: false, launcher: "cmux", warning: "Submitted to cmux. Its name @builder wasn't kept; name it once it appears in the sidebar." };
 assert.equal(context.creationNotice(lostName, { surface: "claude", alias: "builder" }), lostName.warning, "an accepted launch shows its warning");
 assert.equal(context.creationNotice({ ok: true, session: { id: "s1", surface: "codex" } }, { surface: "codex", alias: "made" }), "Sent to codex:s1.");

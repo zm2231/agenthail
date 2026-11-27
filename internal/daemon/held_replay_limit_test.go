@@ -52,6 +52,16 @@ func TestAHeldMessageSentLongerAgoThanHostsKeepReceiptsIsNotSentAgain(t *testing
 	if err != nil || len(queue) != 1 || queue[0].Status != "dead" || !strings.Contains(queue[0].LastError, "unknown") {
 		t.Fatalf("queue after the drain=%+v err=%v, want it dead with its outcome unknown", queue, err)
 	}
+	asks, err := local.reg.OpenAsks()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ask := range asks {
+		if ask.Origin == registry.AskOriginDelivery {
+			return
+		}
+	}
+	t.Fatalf("the person was not asked about the expired message: asks=%+v", asks)
 }
 
 func TestAHeldHostActionSentLongerAgoThanHostsKeepReceiptsIsNotSentAgain(t *testing.T) {

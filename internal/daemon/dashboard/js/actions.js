@@ -87,7 +87,7 @@ export async function postAction(wire, idempotencyKey) {
         failure.message = typed;
         failure.code = body.code || "";
       }
-      failure.unknown = body.unknown === true || ["host_outcome_unknown", "session_operation_unknown", "session_adopt_unknown", "move_outcome_unknown", "create_unknown"].includes(failure.code);
+      failure.unknown = body.unknown === true || ["host_outcome_unknown", "action_outcome_unknown", "session_operation_unknown", "session_adopt_unknown", "move_outcome_unknown", "create_unknown"].includes(failure.code);
     } catch {}
     throw failure;
   }

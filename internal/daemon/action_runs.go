@@ -27,25 +27,43 @@ func (a *actionRuns) claim(r *registry.Registry, principal, key, requestHash str
 	if err != nil {
 		return reservation, err
 	}
-	id := actionRunID(principal, key)
 	if reservation.Acquired {
 		if a.running == nil {
 			a.running = map[string]bool{}
 		}
-		a.running[id] = true
+		a.running[actionRunID(principal, key)] = true
 		return reservation, nil
 	}
-	if reservation.Receipt.Status != registry.ActionReceiptPending || reservation.Receipt.RequestHash != requestHash || a.running[id] {
-		return reservation, nil
+	reservation.Receipt, err = a.settleIfInterrupted(r, principal, key, requestHash, canonical, reservation.Receipt)
+	return reservation, err
+}
+
+// The caller holds a.mu.
+func (a *actionRuns) settleIfInterrupted(r *registry.Registry, principal, key, requestHash string, canonical []byte, receipt registry.ActionReceipt) (registry.ActionReceipt, error) {
+	if receipt.Status != registry.ActionReceiptPending || receipt.RequestHash != requestHash || a.running[actionRunID(principal, key)] {
+		return receipt, nil
 	}
-	interrupted, err := encodeActionReplay(interruptedActionReply(canonical, reservation.Receipt.CreatedAt))
+	interrupted, err := encodeActionReplay(interruptedActionReply(canonical, receipt.CreatedAt))
 	if err != nil {
-		return reservation, err
+		return receipt, err
 	}
 	// A failed write still answers with the outcome unknown; the next resend tries the write again.
 	_ = r.CompleteActionReceipt(principal, key, requestHash, interrupted, time.Now().UTC())
-	reservation.Receipt.Status, reservation.Receipt.Receipt = registry.ActionReceiptCompleted, interrupted
-	return reservation, nil
+	receipt.Status, receipt.Receipt = registry.ActionReceiptCompleted, interrupted
+	return receipt, nil
+}
+
+// current reads a receipt as claim would see it, settling one whose run ended
+// without an outcome, but never reserves it.
+func (a *actionRuns) current(r *registry.Registry, principal, key, requestHash string, canonical []byte) (registry.ActionReceipt, bool, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	receipt, found, err := r.ActionReceipt(principal, key)
+	if err != nil || !found {
+		return receipt, found, err
+	}
+	receipt, err = a.settleIfInterrupted(r, principal, key, requestHash, canonical, receipt)
+	return receipt, true, err
 }
 
 func (a *actionRuns) done(principal, key string) {

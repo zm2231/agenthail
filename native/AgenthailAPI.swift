@@ -1103,7 +1103,7 @@ final class AgenthailAPI: @unchecked Sendable {
                 if let error = object["error"] as? [String: String], let detail = error["message"] {
                     message = detail
                 }
-                if let error = object["error"] as? [String: Any], ["create_unknown", "session_operation_unknown", "session_adopt_unknown", "move_outcome_unknown"].contains(error["code"] as? String ?? "") {
+                if let error = object["error"] as? [String: Any], ["create_unknown", "action_outcome_unknown", "session_operation_unknown", "session_adopt_unknown", "move_outcome_unknown"].contains(error["code"] as? String ?? "") {
                     throw AgenthailAPIError.outcomeUnknown(message)
                 }
                 if let error = object["error"] as? [String: Any], error["code"] as? String == "control_failed",

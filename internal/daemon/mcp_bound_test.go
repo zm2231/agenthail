@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"log"
 	"os"
 	"path/filepath"
@@ -187,4 +188,35 @@ func TestWorkThatFinishesWithinItsBoundAlwaysReturnsItsResult(t *testing.T) {
 		t.Errorf("work that finished at once came back as %v, %v", got, err)
 		return true
 	})
+}
+
+func TestAWriteInterruptedBeforeItsOutcomeWasRecordedIsUnknownAndNotRetryable(t *testing.T) {
+	d, _, _, _, _, _ := questionDaemon(t)
+	worker, _ := d.Registry.Session("s1")
+	session := mcpSession(t, mcpServer(t, d), issueMCPToken(t, d, *worker))
+	write := func() (map[string]any, bool) {
+		return callMCP(t, session, "agenthail_ledger_write", map[string]any{"op": "work", "clientRequestId": "cut-add", "request": map[string]any{"action": "add", "text": "fix the flag", "fields": map[string]any{"type": "bug", "priority": "P1"}}})
+	}
+	if out, refused := write(); refused {
+		t.Fatalf("first write refused: %v", out)
+	}
+	db, err := sql.Open("sqlite", d.Registry.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`PRAGMA busy_timeout=10000`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE action_receipts SET status='pending', receipt=x''`); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		out, refused := write()
+		detail, _ := out["detail"].(map[string]any)
+		if !refused || out["code"] != "busy" || out["retryable"] != false || detail["outcome"] != "unknown" {
+			t.Fatalf("retry of an interrupted write = %v (refused %v), want a busy refusal with an unknown outcome that is not retryable", out, refused)
+		}
+	}
 }
