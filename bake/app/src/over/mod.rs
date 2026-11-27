@@ -1,4 +1,5 @@
 pub mod decisions;
+pub mod extension_sheets;
 pub mod extensions;
 pub mod inbox;
 mod jump;
@@ -260,9 +261,13 @@ pub fn overlays(s: &App, layer: &mut Vec<El>) {
     }
     decisions::note_dialog(s, layer);
     projects::overlays(s, layer);
+    extension_sheets::overlays(s, layer);
 }
 
 pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
+    if s.ov.ext.sheets.is_open() {
+        return matches!(ev.key, Key::Escape) && extension_sheets::escape(s);
+    }
     if projects::open(s) {
         if matches!(ev.key, Key::Escape) {
             projects::close_top(s);

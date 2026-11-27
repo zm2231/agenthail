@@ -939,6 +939,14 @@ impl Client {
             Err(ureq::Error::Transport(error)) => Err(RespondError::from_transport(&error)),
         }
     }
+
+    pub(crate) fn post_json_keyed(&self, path: &str, name: &str, body: Value, key: &str) -> std::result::Result<Value, RespondError> {
+        match self.agent.post(&format!("{}{path}", self.base)).set("Authorization", &format!("Bearer {}", self.token)).set("Accept", "application/json").set("Idempotency-Key", key).send_json(body) {
+            Ok(response) => response.into_json().map_err(|e| RespondError { message: format!("the daemon's reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: Value::Null, status: 0 }),
+            Err(ureq::Error::Status(code, response)) => Err(RespondError::from_status(name, code, &response.into_string().unwrap_or_default())),
+            Err(ureq::Error::Transport(error)) => Err(RespondError::from_transport(&error)),
+        }
+    }
 }
 
 pub fn confirmed(reply: Value) -> std::result::Result<Value, RespondError> {

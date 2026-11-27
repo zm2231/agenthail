@@ -19,6 +19,7 @@ pub mod composer;
 pub mod derive;
 pub mod devices;
 pub mod edits;
+pub mod extension_changes;
 pub mod extensions;
 pub mod focus;
 pub mod gone;

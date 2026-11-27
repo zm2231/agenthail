@@ -555,6 +555,18 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>) -
         .build(k)
         .key("apps");
     let mut sb = Sidebar::new().label("Navigation").inset(0.0).header_gap(2.0).header_padding(0.0, 12.0).row_gap(2.0).header(home).header(search).header(all).header(apps);
+    for entry in crate::over::extensions::pinned(s) {
+        let (id, badge) = (entry.id(), entry.badge.clone());
+        let mut pin = SidebarRow::new(entry.label.clone())
+            .icon(crate::over::extensions::entry_icon(&entry))
+            .height(32.0)
+            .selected(matches!(&s.screen, Screen::Extension(open) if *open == id))
+            .on_select(move |s: &mut App, _| crate::over::extensions::open(s, &entry));
+        if let Some(badge) = badge {
+            pin = pin.detail(badge);
+        }
+        sb = sb.header(pin.build(k).key(format!("pin-{id}")));
+    }
     let mut needs = SidebarSection::new("Needs you").key("sec-needs").count(s.ov.needs.len());
     for (si, slot) in need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), 4).into_iter().enumerate() {
         let (i, n) = match slot {

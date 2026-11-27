@@ -309,6 +309,25 @@ pub fn entries(list: &List, host_id: &str, host_name: &str, origin: &str) -> Vec
     out
 }
 
+pub fn pinned(entries: Vec<Entry>, pins: &std::collections::BTreeSet<String>) -> Vec<Entry> {
+    let mut out: Vec<Entry> = entries.into_iter().filter(|e| pins.contains(&e.id())).collect();
+    out.sort_by_key(|e| (e.order, e.label.to_lowercase(), e.id()));
+    out
+}
+
+pub fn pins_host(pins: &std::collections::BTreeSet<String>, host: &str) -> bool {
+    let prefix = format!("{host}/");
+    pins.iter().any(|id| id.starts_with(&prefix))
+}
+
+pub fn pin_help(pinned: bool, offered: bool) -> &'static str {
+    match (pinned, offered) {
+        (true, _) => "Unpin from the sidebar",
+        (false, true) => "This extension asks for a sidebar entry. Pin it.",
+        (false, false) => "Pin to the sidebar",
+    }
+}
+
 fn asking_session(ext: &Extension) -> Option<String> {
     ext.approval_ask.as_ref().and_then(|a| shown(&a.session_id))
 }
