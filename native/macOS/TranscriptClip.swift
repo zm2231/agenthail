@@ -44,6 +44,15 @@ final class TranscriptClip {
         return document.frame.height + clip.contentInsets.bottom - clip.bounds.maxY
     }
 
+    // A layout pass is committed to the screen before a queued scroll runs, so a correction made here lands in the same frame.
+    func scroll(to offset: CGFloat) {
+        guard let scroll else { return }
+        let clip = scroll.contentView
+        guard abs(clip.bounds.minY - offset) >= 0.5 else { return }
+        clip.scroll(to: NSPoint(x: clip.bounds.minX, y: offset))
+        scroll.reflectScrolledClipView(clip)
+    }
+
     func scrollToEnd() {
         guard let scroll, let document = scroll.documentView else { return }
         let clip = scroll.contentView

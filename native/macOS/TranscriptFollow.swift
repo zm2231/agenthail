@@ -217,6 +217,7 @@ struct TranscriptFollow<ID: Equatable>: ViewModifier {
         case .cancel: layout.dropRestore(); return false
         case .scroll(let target):
             let id = layout.anchor.id
+            layout.clip.scroll(to: target)
             settleHold { position in
                 guard !following, layout.anchor.id == id else { return }
                 position.scrollTo(y: Self.scrollY(target, in: geometry))
