@@ -5,6 +5,7 @@ mod jump;
 pub mod layout;
 mod now;
 mod project;
+pub mod projects;
 pub mod search;
 mod sessions;
 pub mod ui;
@@ -51,6 +52,7 @@ pub struct Over {
     pub inbox: inbox::State,
     pub ext: extensions::State,
     pub search: search::State,
+    pub projects: projects::State,
 }
 
 impl Over {
@@ -87,6 +89,7 @@ impl Over {
             inbox: inbox::State::default(),
             ext: extensions::State::new(),
             search: search::State::default(),
+            projects: projects::State::default(),
         }
     }
 
@@ -255,9 +258,17 @@ pub fn overlays(s: &App, layer: &mut Vec<El>) {
         layer.push(ui::notice(n));
     }
     decisions::note_dialog(s, layer);
+    projects::overlays(s, layer);
 }
 
 pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
+    if projects::open(s) {
+        if matches!(ev.key, Key::Escape) {
+            projects::close_top(s);
+            return true;
+        }
+        return false;
+    }
     if s.ov.inbox.note.is_some() {
         if matches!(ev.key, Key::Escape) {
             s.ov.inbox.note = None;

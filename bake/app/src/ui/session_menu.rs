@@ -240,6 +240,7 @@ fn verb(act: &Act) -> &'static str {
         Act::Move => "Moving",
         Act::Snooze(_) => "Snoozing",
         Act::Wake => "Waking",
+        Act::MakeLead => "Making it the project's lead",
     }
 }
 
@@ -257,6 +258,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
         Act::PrUnlink(url) => super::pr_link::change(s, id, feed::action::PrOp::Unlink, &url),
         Act::Adopt => super::session_ops::open_adopt(s, id),
         Act::Move => super::session_ops::open_move(s, id),
+        Act::MakeLead => crate::over::projects::make_lead(s, id),
         Act::Call => {
             let name = super::gone::shown(s, id).map(|x| x.title()).unwrap_or_default();
             crate::voice::open(id, &name);
@@ -285,7 +287,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
                     Act::Archive(on) => c.session_archive(&id, *on).map(|_| Some(Patch::Archived(*on))),
                     Act::Snooze(_) => c.session_snooze(&id, until).map(|snooze| Some(Patch::Snoozed(snooze))),
                     Act::Wake => c.session_wake(&id).map(|_| Some(Patch::Snoozed(None))),
-                    Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink | Act::Call | Act::Adopt | Act::Move => Ok(None),
+                    Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink | Act::Call | Act::Adopt | Act::Move | Act::MakeLead => Ok(None),
                 };
                 Some(Done::Acted(id, act, result))
             });

@@ -268,7 +268,11 @@ fn host_of(x: &feed::catalog::Session) -> String {
 pub fn project_prefill(s: &App, key: &str) -> Prefill {
     let mut members: Vec<&feed::catalog::Session> = s.sessions.iter().filter(|x| x.project_key() == key && x.project.as_ref().is_some_and(|p| !p.root_path.is_empty())).collect();
     members.sort_by_key(|x| !host_of(x).is_empty());
-    members.first().map(|x| Prefill { host: host_of(x), folder: x.project.as_ref().map(|p| p.root_path.clone()).unwrap_or_default() }).unwrap_or_default()
+    members
+        .first()
+        .map(|x| Prefill { host: host_of(x), folder: x.project.as_ref().map(|p| p.root_path.clone()).unwrap_or_default() })
+        .or_else(|| s.ov.d.record(key)?.start_place().map(|c| Prefill { host: c.host.target().to_string(), folder: c.root_path.clone() }))
+        .unwrap_or_default()
 }
 
 pub fn open(s: &mut App, prefill: Prefill, tx: &mut Tx) {

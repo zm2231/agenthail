@@ -17,6 +17,7 @@ pub enum Act {
     Move,
     Snooze(crate::snooze::For),
     Wake,
+    MakeLead,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -205,6 +206,11 @@ fn snooze(x: &Session, now: time::OffsetDateTime) -> Entry {
     let mut entry = Entry::on(Act::Snooze(crate::snooze::For::Hour), "Snooze");
     entry.sub = crate::snooze::choices(x).into_iter().map(|c| Entry::on(Act::Snooze(c), c.label())).collect();
     entry
+}
+
+pub fn make_lead(x: &Session, leads_it: bool) -> Option<Entry> {
+    let able = x.project.is_some() && x.subagent.is_none() && x.callable() && !leads_it && !x.read_only;
+    able.then(|| Entry::on(Act::MakeLead, "Make Project Lead"))
 }
 
 fn pull_requests(x: &Session) -> Vec<Entry> {
@@ -416,6 +422,21 @@ mod tests {
         patch.restore(&mut x, &session());
         assert_eq!(x.snooze, None);
         assert!(Patch::Snoozed(None).shown(&x));
+    }
+
+    #[test]
+    fn only_a_claude_or_codex_conversation_in_a_project_can_be_made_its_lead() {
+        let mut x = session();
+        x.surface = "claude".into();
+        assert_eq!(make_lead(&x, false), None, "a session outside any project");
+        x.project = Some(Named { name: "app".into(), ..Default::default() });
+        assert_eq!(make_lead(&x, false), Some(Entry::on(Act::MakeLead, "Make Project Lead")));
+        assert_eq!(make_lead(&x, true), None, "it already leads the project");
+        x.subagent = Some(serde_json::json!({"parentId": "s0"}));
+        assert_eq!(make_lead(&x, false), None);
+        x.subagent = None;
+        x.surface = "notion".into();
+        assert_eq!(make_lead(&x, false), None);
     }
 
     #[test]

@@ -59,6 +59,7 @@ fn act_icon(act: &Act) -> &'static rune::Icon {
         Act::Adopt => &icons::ARROW_RIGHT,
         Act::Move => &icons::SERVER,
         Act::Snooze(_) | Act::Wake => &icons::CLOCK,
+        Act::MakeLead => &icons::CORNER,
     }
 }
 
@@ -78,7 +79,11 @@ fn session_menu(s: &App, open: &Open, layer: &mut Vec<El>) {
         }
         item.on_select(move |s: &mut App| run(s, &id, act.clone()))
     };
-    for (i, group) in menu::offered(x, crate::ui::session_ops::offer(s, &x.id)).into_iter().enumerate() {
+    let mut groups = menu::offered(x, crate::ui::session_ops::offer(s, &x.id));
+    if let Some(lead) = menu::make_lead(x, crate::over::projects::leads(s, &x.id)) {
+        groups[0].push(lead);
+    }
+    for (i, group) in groups.into_iter().enumerate() {
         if i > 0 {
             m = m.separator();
         }

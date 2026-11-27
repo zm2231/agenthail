@@ -208,6 +208,8 @@ pub struct Session {
     pub activity: Option<crate::snooze::Activity>,
     #[serde(default, rename = "move")]
     pub moving: Option<crate::moves::Move>,
+    #[serde(default)]
+    pub worktree: Option<crate::projects::Worktree>,
 }
 
 #[derive(Deserialize, Clone, Copy, Debug, PartialEq)]

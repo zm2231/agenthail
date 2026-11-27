@@ -88,6 +88,10 @@ pub struct Coordinator {
     pub name: String,
     #[serde(default)]
     pub session_id: Option<String>,
+    #[serde(default)]
+    pub surface: String,
+    #[serde(default)]
+    pub host: Option<crate::projects::Place>,
 }
 
 #[derive(Deserialize, Clone, Default, Debug)]
@@ -100,6 +104,12 @@ pub struct ProjectRecord {
     pub coordinators: Vec<Coordinator>,
     #[serde(default)]
     pub archived: bool,
+    #[serde(default)]
+    pub checkouts: Vec<crate::projects::Checkout>,
+    #[serde(default)]
+    pub mcp: Option<String>,
+    #[serde(default)]
+    pub last_active: String,
 }
 
 #[derive(Deserialize, Clone, Default, Debug)]
@@ -133,6 +143,8 @@ pub struct Recorded {
     pub hosts: Vec<Host>,
     #[serde(default)]
     pub actors: HashMap<String, Actor>,
+    #[serde(default)]
+    pub tile_order: Option<crate::projects::TileOrder>,
 }
 
 #[derive(Clone, Debug)]
@@ -141,6 +153,7 @@ pub struct Project {
     pub name: String,
     pub lead: Option<String>,
     pub lead_name: String,
+    pub lead_pending: Option<(String, &'static str)>,
     pub sessions: Vec<String>,
     pub last_active: String,
 }
@@ -174,6 +187,8 @@ pub struct World {
     pub usage: Vec<Meter>,
     pub hosts: Vec<Host>,
     pub rows: HashMap<String, Rows>,
+    pub records: Vec<ProjectRecord>,
+    pub tile_order: Option<crate::projects::TileOrder>,
     pub(crate) names: HashMap<String, String>,
 }
 
@@ -195,7 +210,22 @@ impl World {
         }
         let names = crate::derive::names::build(&raw.sessions, &raw.actors, &work);
         let projects = projects(&raw.projects, &raw.sessions);
-        World { now, sessions: raw.sessions, projects, work, transcripts: raw.transcripts, prompted_before: raw.prompted_before, started_by, helpers, usage: raw.usage, hosts: raw.hosts, rows: HashMap::new(), names }
+        World {
+            now,
+            sessions: raw.sessions,
+            projects,
+            work,
+            transcripts: raw.transcripts,
+            prompted_before: raw.prompted_before,
+            started_by,
+            helpers,
+            usage: raw.usage,
+            hosts: raw.hosts,
+            rows: HashMap::new(),
+            records: raw.projects,
+            tile_order: raw.tile_order,
+            names,
+        }
     }
 
     pub fn session(&self, id: &str) -> Option<&Session> {
@@ -204,6 +234,10 @@ impl World {
 
     pub fn project(&self, key: &str) -> Option<&Project> {
         self.projects.iter().find(|p| p.key == key)
+    }
+
+    pub fn record(&self, key: &str) -> Option<&ProjectRecord> {
+        self.records.iter().find(|p| p.id == key)
     }
 
     pub fn hours(&self, at: &str) -> f64 {
@@ -229,18 +263,21 @@ fn projects(records: &[ProjectRecord], sessions: &[Session]) -> Vec<Project> {
     let mut out = Vec::new();
     for p in records.iter().filter(|p| !p.archived) {
         let mut mine: Vec<&Session> = sessions.iter().filter(|s| !s.archived && s.project_key() == p.id).collect();
-        if mine.is_empty() {
+        if mine.is_empty() && !p.checkouts.iter().any(|c| c.added) && p.coordinators.is_empty() {
             continue;
         }
         mine.sort_by(|a, b| b.last_active.cmp(&a.last_active));
+        let latest = mine.first().map(|s| s.last_active.clone()).unwrap_or_default().max(p.last_active.clone());
         let coord = p.coordinators.first();
-        let lead = coord.and_then(|c| c.session_id.clone()).filter(|id| sessions.iter().any(|s| &s.id == id));
+        let lead = coord.and_then(crate::projects::lead_session_id).filter(|id| sessions.iter().any(|s| &s.id == id));
+        let lead_pending = coord.filter(|_| lead.is_none()).map(|c| (crate::projects::surface_label(&c.surface), crate::projects::lead_note(c)));
         out.push(Project {
             key: p.id.clone(),
             name: p.display_name.clone(),
             lead_name: coord.map(|c| format!("@{}", c.name)).unwrap_or_else(|| "no lead".into()),
             lead,
-            last_active: mine[0].last_active.clone(),
+            lead_pending,
+            last_active: latest,
             sessions: mine.iter().map(|s| s.id.clone()).collect(),
         });
     }

@@ -519,7 +519,7 @@ impl Client {
     }
 }
 
-fn capitalized(id: &str) -> String {
+pub(crate) fn capitalized(id: &str) -> String {
     let mut chars = id.chars();
     chars.next().map(|c| c.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }

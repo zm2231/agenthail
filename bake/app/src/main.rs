@@ -1170,6 +1170,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s);
     changed |= ui::attach::pump(s);
     changed |= over::extensions::drain(s);
+    changed |= over::projects::drain(s);
     changed |= ui::complete::pump(s);
     changed |= look::poll(look::Window::Main, tx);
     ui::paste::settle(s);
@@ -1193,7 +1194,7 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         settings::open();
         return true;
     }
-    ui::new_session::on_key(s, ev, tx) || over::on_key(s, ev, tx)
+    (!over::projects::open(s) && ui::new_session::on_key(s, ev, tx)) || over::on_key(s, ev, tx)
 }
 
 fn on_quit(s: &mut App, _: &mut Tx) {
