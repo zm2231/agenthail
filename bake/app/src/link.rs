@@ -20,11 +20,16 @@ pub struct Found {
 struct Waiting {
     listed: bool,
     reference: Option<String>,
-    asked: Option<(String, Screen, Option<String>)>,
+    asked: Option<String>,
+    at: Option<(Screen, Option<String>)>,
 }
 
 thread_local! {
     static WAITING: RefCell<Waiting> = RefCell::new(Waiting::default());
+}
+
+fn place(s: &App) -> (Screen, Option<String>) {
+    (s.screen.clone(), s.selected.clone())
 }
 
 pub fn on_open_url(s: &mut App, url: &str, tx: &mut Tx) {
@@ -40,14 +45,27 @@ pub fn on_open_url(s: &mut App, url: &str, tx: &mut Tx) {
     match link {
         Link::Open => {}
         Link::NewSession => crate::over::search::run(s, Command::NewSession, tx),
-        Link::Session(reference) if !listed && s.fixtures.is_none() => WAITING.with_borrow_mut(|w| w.reference = Some(reference)),
+        Link::Session(reference) if !listed && s.fixtures.is_none() => {
+            let at = place(s);
+            WAITING.with_borrow_mut(|w| (w.reference, w.at) = (Some(reference), Some(at)));
+        }
         Link::Session(reference) => open(s, &reference),
     }
 }
 
+pub fn watch(s: &App) {
+    WAITING.with_borrow_mut(|w| {
+        if w.at.as_ref().is_some_and(|at| *at != place(s)) {
+            (w.reference, w.asked, w.at) = (None, None, None);
+        }
+    });
+}
+
 pub fn listed(s: &mut App) {
+    watch(s);
     let waiting = WAITING.with_borrow_mut(|w| {
         w.listed = true;
+        w.at = None;
         w.reference.take()
     });
     if let Some(reference) = waiting {
@@ -66,8 +84,8 @@ fn open(s: &mut App, reference: &str) {
         crate::over::open_session(s, &reference);
         return;
     };
-    let at = (reference.clone(), s.screen.clone(), s.selected.clone());
-    WAITING.with_borrow_mut(|w| w.asked = Some(at));
+    let at = place(s);
+    WAITING.with_borrow_mut(|w| (w.asked, w.at) = (Some(reference.clone()), Some(at)));
     let tx = s.outbox.clone();
     std::thread::spawn(move || {
         let result = client.session_for_link(&reference);
@@ -76,15 +94,21 @@ fn open(s: &mut App, reference: &str) {
 }
 
 pub fn found(s: &mut App, found: Found) {
-    let asked = WAITING.with_borrow_mut(|w| w.asked.take_if(|(r, ..)| *r == found.reference));
-    let Some((_, screen, selected)) = asked else { return };
-    if s.screen != screen || s.selected != selected {
+    watch(s);
+    let asked = WAITING.with_borrow_mut(|w| {
+        let asked = w.asked.take_if(|r| *r == found.reference);
+        if asked.is_some() {
+            w.at = None;
+        }
+        asked
+    });
+    if asked.is_none() {
         return;
     }
     match found.result {
         Ok(row) => match link::resolve(&s.sessions, &row.id).map(str::to_string) {
             Some(id) => crate::over::open_session(s, &id),
-            None => crate::over::search::open_pinned(s, row),
+            None => crate::over::search::open_read(s, row),
         },
         Err(message) => s.ov.notice = Some(message),
     }

@@ -43,6 +43,12 @@ pub fn open_pinned(s: &mut App, row: Session) {
     crate::over::open_session(s, &id);
 }
 
+pub fn open_read(s: &mut App, row: Session) {
+    let id = row.id.clone();
+    s.ov.search.pins.pin_read(row);
+    crate::over::open_session(s, &id);
+}
+
 pub fn activity_view(s: &App, layer: &mut Vec<El>) {
     activity::view(s, layer);
 }

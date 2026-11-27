@@ -12,6 +12,7 @@ const RECHECK: Duration = Duration::from_secs(20);
 pub struct Pins {
     rows: Vec<Session>,
     verified: HashSet<String>,
+    read: HashSet<String>,
     revision: HashMap<String, u64>,
     checking: HashMap<String, u64>,
     checked: HashMap<String, Instant>,
@@ -23,7 +24,7 @@ pub struct Pins {
 impl Default for Pins {
     fn default() -> Pins {
         let (tx, rx) = channel();
-        Pins { rows: Vec::new(), verified: HashSet::new(), revision: HashMap::new(), checking: HashMap::new(), checked: HashMap::new(), requests: 0, tx, rx }
+        Pins { rows: Vec::new(), verified: HashSet::new(), read: HashSet::new(), revision: HashMap::new(), checking: HashMap::new(), checked: HashMap::new(), requests: 0, tx, rx }
     }
 }
 
@@ -45,7 +46,16 @@ impl Pins {
         self.rows.retain(|x| x.id != id);
         self.rows.push(row);
         self.verified.remove(&id);
+        self.read.remove(&id);
         self.touch(&id);
+    }
+
+    pub fn pin_read(&mut self, row: Session) {
+        let id = row.id.clone();
+        self.pin(row);
+        self.verified.insert(id.clone());
+        self.read.insert(id.clone());
+        self.checked.insert(id, Instant::now());
     }
 
     pub fn patch(&mut self, id: &str, patch: &feed::menu::Patch) {
@@ -63,6 +73,7 @@ impl Pins {
     fn unpin(&mut self, id: &str) {
         self.rows.retain(|x| x.id != id);
         self.verified.remove(id);
+        self.read.remove(id);
         self.revision.remove(id);
         self.checked.remove(id);
     }
@@ -88,7 +99,9 @@ impl Pins {
                 return Some(id);
             }
             Recheck::Unknown(_) => {
-                self.verified.remove(&id);
+                if !self.read.contains(&id) {
+                    self.verified.remove(&id);
+                }
                 self.checked.insert(id, Instant::now());
             }
         }
@@ -167,5 +180,22 @@ mod tests {
         p.pin(row);
         check(&mut p, "c1", Recheck::Fresh(Box::new(Session { id: "c1".into(), ..Session::default() })));
         assert_eq!(verdict(&p, "c1"), "verified");
+    }
+
+    #[test]
+    fn a_pin_read_from_the_session_itself_shows_until_it_is_gone() {
+        let row = Session { id: "c1".into(), ..Session::default() };
+        let mut p = Pins::default();
+        p.pin_read(row.clone());
+        assert_eq!(verdict(&p, "c1"), "verified");
+        check(&mut p, "c1", Recheck::Unknown("Agenthail's session list hides this kind of session".into()));
+        assert_eq!(verdict(&p, "c1"), "verified");
+        p.pin(row.clone());
+        assert_eq!(verdict(&p, "c1"), "withheld", "a search pin of the same session is checked again");
+        check(&mut p, "c1", Recheck::Unknown("offline".into()));
+        assert_eq!(verdict(&p, "c1"), "withheld");
+        p.pin_read(row);
+        assert_eq!(check(&mut p, "c1", Recheck::Gone), Some("c1".to_string()));
+        assert_eq!(verdict(&p, "c1"), "unpinned");
     }
 }
