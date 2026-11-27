@@ -282,10 +282,21 @@ impl Shortcuts {
         Ok(())
     }
 
-    pub fn reset_all(&mut self) {
+    pub fn reset_all(&mut self) -> Vec<(&'static str, &'static str)> {
+        let before = self.overrides.clone();
         for c in COMMANDS {
             self.overrides.remove(c.id);
         }
+        loop {
+            let blocked: Vec<&str> = COMMANDS.iter().filter(|c| !self.customized(c.id) && before.contains_key(c.id) && self.default_blocker(c.id).is_some()).map(|c| c.id).collect();
+            if blocked.is_empty() {
+                break;
+            }
+            for id in blocked {
+                self.overrides.insert(id.into(), before[id]);
+            }
+        }
+        COMMANDS.iter().filter(|c| self.customized(c.id)).filter_map(|c| Some((c.title, self.default_blocker(c.id)?))).collect()
     }
 }
 
@@ -398,6 +409,24 @@ mod tests {
         assert_eq!(moved.set("stop", Some(s("ctrl+mod+enter"))), Err("Send"));
         assert_eq!(moved.set("stop", Some(s("ctrl+mod+s"))), Ok(()), "the Mac app cleared its sidebar shortcut");
         assert_eq!(sc.set("refresh", Some(s("mod+t"))), Err("New tab"));
+    }
+
+    #[test]
+    fn restoring_defaults_keeps_a_shortcut_whose_default_the_mac_app_took() {
+        let native = br#"{"goToSession":{"carbonKeyCode":5,"carbonModifiers":256},"rename":{"carbonKeyCode":40,"carbonModifiers":256},"refresh":{"carbonKeyCode":15,"carbonModifiers":768}}"#;
+        let mut sc = Shortcuts::load(Some(native), None);
+        assert_eq!(sc.reset_all(), vec![("Go to session", "Rename session")]);
+        assert_eq!(sc.spec("goToSession").as_deref(), Some("mod+g"));
+        assert_eq!(sc.spec("refresh").as_deref(), Some("mod+r"));
+        let mut chained = Shortcuts::load(Some(br#"{"goToSession":{"carbonKeyCode":15,"carbonModifiers":256},"refresh":{"carbonKeyCode":5,"carbonModifiers":256},"rename":{"carbonKeyCode":40,"carbonModifiers":256}}"#), None);
+        chained.reset_all();
+        assert_eq!(chained.spec("goToSession").as_deref(), Some("mod+r"), "kept, its default is Rename's");
+        assert_eq!(chained.spec("refresh").as_deref(), Some("mod+g"), "kept, its default is Go to session's kept shortcut");
+        for c in COMMANDS {
+            if let Some(mine) = chained.get(c.id) {
+                assert_eq!(chained.owner(mine, c.id), None, "{} clashes after restoring", c.id);
+            }
+        }
     }
 
     #[test]

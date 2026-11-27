@@ -101,10 +101,13 @@ fn session_choices(sessions: &[feed::catalog::Session]) -> Vec<(String, String)>
     let mut out: Vec<(String, String)> = sessions.iter().filter(|x| !x.archived).map(|x| (x.id.clone(), x.alias.as_ref().filter(|a| !a.is_empty()).map_or_else(|| x.name.clone(), |a| format!("@{a}")))).collect();
     out.sort_by_key(|(_, label)| label.to_lowercase());
     let labels: Vec<String> = out.iter().map(|(_, l)| l.clone()).collect();
+    let mut seen = std::collections::HashSet::new();
     for (id, label) in &mut out {
-        if labels.iter().filter(|l| *l == label).count() > 1 {
-            *label = format!("{label} · {id}");
+        let mut shown = if labels.iter().filter(|l| *l == label).count() > 1 { format!("{label} · {id}") } else { label.clone() };
+        while !seen.insert(shown.clone()) || (shown != *label && labels.contains(&shown)) {
+            shown = format!("{shown} · {id}");
         }
+        *label = shown;
     }
     out
 }
@@ -670,5 +673,9 @@ mod tests {
         let labels: Vec<&str> = list.iter().map(|(_, l)| l.as_str()).collect();
         assert_eq!(labels, ["@rev", "Fix tests · host-1::aaaa", "Fix tests · host-1::bbbb"]);
         assert_eq!(list[2].0, "host-1::bbbb");
+        let tricky = session_choices(&[session("x", "A", None), session("y", "A", None), session("z", "A · x", None)]);
+        let labels: Vec<&str> = tricky.iter().map(|(_, l)| l.as_str()).collect();
+        let unique: std::collections::HashSet<&&str> = labels.iter().collect();
+        assert_eq!(unique.len(), 3, "{labels:?}");
     }
 }

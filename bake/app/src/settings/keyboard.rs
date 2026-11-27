@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use feed::shortcuts::{COMMANDS, Group, Shortcuts};
-use rune::{El, Shortcut, ShortcutError, el, row};
+use rune::{El, Shortcut, ShortcutError, el, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, Kit, ShortcutRecorder, ShortcutRecorderState, shortcut_error_message};
 
 use super::Prefs;
@@ -11,6 +11,7 @@ use crate::ui::bindings;
 #[derive(Default)]
 pub struct Form {
     rows: HashMap<&'static str, ShortcutRecorderState>,
+    kept: Vec<(&'static str, &'static str)>,
 }
 
 pub const PAGE: usize = 2;
@@ -67,7 +68,7 @@ fn reset(s: &mut Prefs, id: &'static str) {
 }
 
 fn restore(s: &mut Prefs) {
-    bindings::change(Shortcuts::reset_all);
+    s.keyboard.kept = bindings::change(Shortcuts::reset_all);
     s.keyboard.rows.clear();
     opened(s);
 }
@@ -118,5 +119,8 @@ pub fn page(s: &Prefs, k: &Kit) -> El {
         .on_press(restore)
         .build(k)
         .key("settings-shortcuts-restore");
+    for (title, owner) in &s.keyboard.kept {
+        out = out.child(text(format!("{title} kept its shortcut: its default is used by {owner}.")).font(crate::theme::META).color(crate::theme::muted()).wrap().px(4.0));
+    }
     out.child(row().w_full().child(el().grow(1.0)).child(restore))
 }
