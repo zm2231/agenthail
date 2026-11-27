@@ -214,6 +214,13 @@ fn markdown(body: &str, k: &Kit) -> El {
     Markdown::new(body.to_string()).selectable(true).render(&style).selection_group(false)
 }
 
+fn roles_key(k: &Kit) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    k.roles.hash(&mut h);
+    h.finish()
+}
+
 pub struct Cx<'a> {
     pub session: &'a str,
     pub block: &'a str,
@@ -567,6 +574,7 @@ fn gap_for(blocks: &[Block], ix: usize) -> f32 {
 
 pub fn view(s: &App, id: &str, k: &Kit) -> El {
     let row_kit = Rc::new(k.clone());
+    let roles = roles_key(k);
     let count = s.panes.get(id).map(|p| p.blocks.len()).unwrap_or(0);
     let key = id.to_string();
     let stack = col().key(format!("rows-{id}")).w_full().items_center().growth(GrowthSpec::default()).selection_group(true).pb(s.cover.reserve()).virtual_rows(
@@ -588,7 +596,7 @@ pub fn view(s: &App, id: &str, k: &Kit) -> El {
                 (Kind::Image(_) | Kind::File(_) | Kind::Files(_), _) => s.attach.rev as usize,
                 _ => 0,
             };
-            memo(&block.id, (pane.revs[i], open, last, gap.to_bits(), images, crate::theme::paint_key(), row_kit.text_scale.to_bits()), || block_el(&cx, block, open, gap, last, &row_kit))
+            memo(&block.id, (pane.revs[i], open, last, gap.to_bits(), images, crate::theme::paint_key(), row_kit.text_scale.to_bits(), roles), || block_el(&cx, block, open, gap, last, &row_kit))
         },
     );
     let watch = id.to_string();
