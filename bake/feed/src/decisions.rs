@@ -638,6 +638,7 @@ mod tests {
             ("/api/v1/decisions?host=gone404", 404, r#"{"error":{"code":"host_not_found","message":"No paired host is named \"gone404\"."}}"#),
             ("/api/v1/decisions?host=down404", 502, r#"{"error":{"code":"bad_gateway","message":"404 bytes lost"}}"#),
             ("/api/v1/decisions?host=bad404", 200, "[404]"),
+            ("/api/v1/decisions?host=torn404", 200, "{404"),
         ]);
         let client = Client::new(&base, "t");
         assert!(client.decisions(None).is_ok());
@@ -647,10 +648,8 @@ mod tests {
         assert_eq!(read("gone404"), Some(Unread::Failed), "a computer unpaired since the list");
         assert_eq!(read("down404"), Some(Unread::Failed));
         assert_eq!(read("bad404"), Some(Unread::Failed), "a reply that isn't a page");
-        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = closed.local_addr().unwrap();
-        drop(closed);
-        assert_eq!(Client::new(&format!("http://{address}/404"), "t").decisions(None).err(), Some(Unread::Failed), "nothing listening");
+        assert_eq!(read("torn404"), Some(Unread::Failed), "a reply that isn't JSON");
+        assert_eq!(Client::new("http://127.0.0.1:0/404", "t").decisions(None).err(), Some(Unread::Failed), "nothing listening");
     }
 
     #[test]
