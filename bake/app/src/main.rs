@@ -1605,6 +1605,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
 }
 
 fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
+    if !ui::window::shows_shared(s) {
+        return false;
+    }
     if over::note_open(s) {
         return over::on_key(s, ev, tx);
     }

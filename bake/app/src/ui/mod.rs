@@ -134,18 +134,24 @@ fn window(s: &App, cx: &mut Cx<App>, chrome: &KitTheme, in_session: bool, main: 
         (None, _) => cx.with_kit(chrome, |cx| crate::over::view(s, cx, &mut layer, &k)),
     };
     let c = cx.with_kit(chrome, |cx| cx.kit());
-    crate::over::overlays(s, &mut layer, &c);
+    if main && let Some(n) = &s.ov.notice {
+        layer.push(crate::over::ui::notice(n, &c));
+    }
+    if self::window::shows_shared(s) {
+        crate::over::overlays(s, &mut layer, &c);
+        session_ops::overlays(s, &mut layer, &k);
+        pr_link::overlays(s, &mut layer, &k);
+        turn_options::overlays(s, &mut layer, &k);
+        inspect::overlays(s, &mut layer, &k);
+        native_queue::overlays(s, &mut layer, &k);
+        limit::overlays(s, &mut layer, &k);
+        accounts::overlays(s, &mut layer, &k);
+        new_session::view(s, &mut layer, &k);
+    }
     session_menu::overlays(s, &mut layer, &k);
     attach::overlays(s, &mut layer, &k);
-    pr_link::overlays(s, &mut layer, &k);
-    turn_options::overlays(s, &mut layer, &k);
-    inspect::overlays(s, &mut layer, &k);
-    native_queue::overlays(s, &mut layer, &k);
-    limit::overlays(s, &mut layer, &k);
-    accounts::overlays(s, &mut layer, &k);
     holders::overlays(s, &mut layer, &k);
     tabs::overlays(s, &mut layer, &k);
-    new_session::view(s, &mut layer, &k);
     let root = col()
         .w_full()
         .h_full()
@@ -168,8 +174,27 @@ fn session_body(s: &App, cx: &mut Cx<App>, chrome: &KitTheme, with_sidebar: bool
     })
 }
 
+fn inspector_button(s: &App, c: &Kit) -> El {
+    let open = s.ov.inspector.is_open();
+    let shortcut = bindings::shortcut("toggleInspector").map(|k| crate::hotkey::keycaps(&k));
+    rune_kit::IconButton::new(&crate::icons::PANEL_RIGHT)
+        .label(if open { "Hide inspector" } else { "Show inspector" })
+        .help(match &shortcut {
+            Some(keys) => format!("Inspector ({keys})"),
+            None => "Inspector".into(),
+        })
+        .expanded(open)
+        .on_press(|s: &mut App| s.ov.inspector.toggle())
+        .build(c)
+        .key("inspector-toggle")
+}
+
 fn session_toolbar(s: &App, x: Option<&Session>, c: &Kit) -> rune_kit::shell::Toolbar {
-    let bar = rune_kit::shell::Toolbar::new().trailing(crate::over::ui::needs_button(s, c));
+    let mut trailing = row().gap(6.0).items_center().child(crate::over::ui::needs_button(s, c));
+    if x.is_some() {
+        trailing = trailing.child(inspector_button(s, c));
+    }
+    let bar = rune_kit::shell::Toolbar::new().trailing(trailing);
     if let Some(strip) = tabs::strip(s, c, true) {
         return bar.leading(strip);
     }

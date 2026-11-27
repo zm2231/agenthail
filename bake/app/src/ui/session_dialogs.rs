@@ -185,7 +185,6 @@ pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
     if let Some(open) = &s.menus.open {
         session_menu(s, open, layer, k);
     }
-    crate::ui::session_ops::overlays(s, layer, k);
     if let Some((id, key)) = &s.menus.chip {
         chip_menu(s, id, key, layer, k);
     }

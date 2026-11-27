@@ -24,6 +24,7 @@ pub enum Act {
     NextTab,
     PreviousTab,
     OpenInNewWindow,
+    ToggleInspector,
 }
 
 pub struct Binding {
@@ -32,7 +33,7 @@ pub struct Binding {
     pub menu: Option<(&'static str, &'static str)>,
 }
 
-pub const APP: [Binding; 16] = [
+pub const APP: [Binding; 17] = [
     Binding { act: Act::NewSession, id: "newSession", menu: Some(("File", "New Session")) },
     Binding { act: Act::GoToSession, id: "goToSession", menu: Some(("Session", "Go to Session…")) },
     Binding { act: Act::Stop, id: "stop", menu: Some(("Session", "Stop")) },
@@ -42,6 +43,7 @@ pub const APP: [Binding; 16] = [
     Binding { act: Act::JumpToLatest, id: "jumpToLatest", menu: None },
     Binding { act: Act::Find, id: "findSession", menu: None },
     Binding { act: Act::Talk, id: "talk", menu: Some(("Session", "Talk to Orchestrator…")) },
+    Binding { act: Act::ToggleInspector, id: "toggleInspector", menu: Some(("View", "Show Inspector")) },
     Binding { act: Act::TextBigger, id: "textBigger", menu: Some(("View", "Make Text Bigger")) },
     Binding { act: Act::TextSmaller, id: "textSmaller", menu: Some(("View", "Make Text Smaller")) },
     Binding { act: Act::NewTab, id: "newTab", menu: Some(("File", "New Tab")) },
@@ -134,6 +136,11 @@ pub fn run(s: &mut App, act: Act, tx: &mut Tx) {
                 super::window::show(s, &id);
             }
         }
+        Act::ToggleInspector => {
+            if s.screen == Screen::Session {
+                s.ov.inspector.toggle();
+            }
+        }
     }
 }
 
@@ -168,11 +175,12 @@ fn step(s: &mut App, by: isize) -> bool {
 pub struct MenuState {
     stop: bool,
     focus: bool,
+    inspector: bool,
     keys: u64,
 }
 
 pub fn menu_state(s: &App) -> MenuState {
-    MenuState { stop: search::selected(s).is_some_and(|id| search::can_stop(s, &id)), focus: crate::transcript::focused(), keys: bindings::generation() }
+    MenuState { stop: search::selected(s).is_some_and(|id| search::can_stop(s, &id)), focus: crate::transcript::focused(), inspector: s.screen == Screen::Session && s.ov.inspector.is_open(), keys: bindings::generation() }
 }
 
 pub fn menu_items(state: MenuState) -> Vec<MenuItem<App>> {
@@ -181,6 +189,7 @@ pub fn menu_items(state: MenuState) -> Vec<MenuItem<App>> {
             let (menu, title) = b.menu?;
             let act = b.act;
             let enabled = act != Act::Stop || state.stop;
+            let title = if act == Act::ToggleInspector && state.inspector { "Hide Inspector" } else { title };
             let item = MenuItem::with_action(title, move |s: &mut App, tx| run(s, act, tx)).id(format!("key-{act:?}")).menu(menu).keys_first().enabled(enabled);
             Some(match bindings::shortcut(b.id) {
                 Some(shortcut) => item.key_equivalent(shortcut),
@@ -250,7 +259,7 @@ mod tests {
             }
         }
         let menus: Vec<_> = APP.iter().filter_map(|b| b.menu).collect();
-        assert_eq!(menus, vec![("File", "New Session"), ("Session", "Go to Session…"), ("Session", "Stop"), ("View", "Refresh"), ("Session", "Talk to Orchestrator…"), ("View", "Make Text Bigger"), ("View", "Make Text Smaller"), ("File", "New Tab"), ("Session", "Open in New Window"), ("Session", "Next Tab"), ("Session", "Previous Tab")]);
+        assert_eq!(menus, vec![("File", "New Session"), ("Session", "Go to Session…"), ("Session", "Stop"), ("View", "Refresh"), ("Session", "Talk to Orchestrator…"), ("View", "Show Inspector"), ("View", "Make Text Bigger"), ("View", "Make Text Smaller"), ("File", "New Tab"), ("Session", "Open in New Window"), ("Session", "Next Tab"), ("Session", "Previous Tab")]);
     }
 
     #[test]

@@ -4,28 +4,32 @@ use crate::shortcuts::Stored;
 pub enum Window {
     Main,
     Settings,
+    Session(u64),
 }
 
 #[derive(Debug, Default)]
 pub struct Return {
-    main: bool,
-    settings: bool,
+    focused: Vec<Window>,
     seen: bool,
     away: bool,
 }
 
 impl Return {
     pub fn focus(&mut self, window: Window, focused: bool) -> bool {
-        match window {
-            Window::Main => self.main = focused,
-            Window::Settings => self.settings = focused,
+        self.focused.retain(|w| *w != window);
+        if focused {
+            self.focused.push(window);
         }
         self.seen |= focused;
         focused && std::mem::take(&mut self.away)
     }
 
+    pub fn closed(&mut self, window: Window) {
+        self.focused.retain(|w| *w != window);
+    }
+
     pub fn tick(&mut self) {
-        if self.seen && !self.main && !self.settings {
+        if self.seen && self.focused.is_empty() {
             self.away = true;
         }
     }
@@ -206,6 +210,25 @@ mod tests {
         r.focus(Window::Settings, true);
         r.tick();
         assert!(!r.focus(Window::Main, true), "a slow switch between its own windows never left the app");
+    }
+
+    #[test]
+    fn session_windows_count_as_agenthail() {
+        let mut r = Return::default();
+        r.focus(Window::Main, true);
+        r.focus(Window::Main, false);
+        assert!(!r.focus(Window::Session(1), true), "main to a session window stays in the app");
+        r.tick();
+        r.focus(Window::Session(1), false);
+        assert!(!r.focus(Window::Session(2), true), "one session window to another");
+        r.focus(Window::Session(2), false);
+        r.tick();
+        assert!(r.focus(Window::Session(2), true), "another app back to a session window is a return");
+        r.focus(Window::Main, true);
+        r.closed(Window::Session(2));
+        r.focus(Window::Main, false);
+        r.tick();
+        assert!(r.focus(Window::Main, true), "a closed window that had focus doesn't hold the app");
     }
 
     #[test]

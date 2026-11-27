@@ -132,11 +132,66 @@ fn a_window_saves_where_it_is_and_a_maximized_one_its_normal_frame() {
 }
 
 fn turn(s: &mut App, rt: &mut rune::Runtime<App>, key: &str) {
+    turn_with(s, rt, key, |_, _| {});
+}
+
+fn turn_with(s: &mut App, rt: &mut rune::Runtime<App>, key: &str, f: impl FnOnce(&mut App, &mut rune::Tx) + 'static) {
     std::mem::swap(s, &mut rt.state);
     on_enter(&mut rt.state, key);
+    rt.update(f);
     rt.frame(1.0 / 60.0);
     on_leave(&mut rt.state, key);
     std::mem::swap(s, &mut rt.state);
+}
+
+fn two_windows() -> (App, rune::Runtime<App>, rune::Runtime<App>, Id) {
+    let mut s = app();
+    s.sessions = ["a", "b"].iter().map(|id| serde_json::from_value(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true})).unwrap()).collect();
+    crate::select(&mut s, "a");
+    let w = show(&mut s, "b");
+    let env = rune::Env { system_dark: true, scale: 1.0 };
+    let main = rune::AppSpec::<App> { ..rune::AppSpec::new("Agenthail", (1440.0, 900.0), crate::placeholder, crate::ui::view) };
+    let main = rune::App::new(main).init(crate::placeholder).headless_runtime((1440.0, 900.0), env);
+    let win = rune::App::new(spec()).init(crate::placeholder).headless_runtime((900.0, 820.0), env);
+    (s, main, win, w)
+}
+
+#[test]
+fn the_palette_shows_only_in_the_window_that_opened_it_until_the_shortcut_calls_it_to_main() {
+    let (mut s, mut main, mut win, w) = two_windows();
+    turn_with(&mut s, &mut win, &key(w), |s, tx| crate::over::open_jump(s, tx));
+    turn(&mut s, &mut main, "main");
+    turn(&mut s, &mut win, &key(w));
+    assert_eq!((win.presented("jump-input").is_some(), main.presented("jump-input").is_some(), s.windows.overlay), (true, false, Some(w)));
+    std::mem::swap(&mut s, &mut main.state);
+    on_enter(&mut main.state, "main");
+    let esc = rune::KeyEvent { key: rune::Key::Escape, mods: rune::Mods::default() };
+    assert!(!main.update_if(|s, tx| crate::on_key(s, &esc, tx)), "keys in main don't reach a palette open in another window");
+    on_leave(&mut main.state, "main");
+    std::mem::swap(&mut s, &mut main.state);
+    turn_with(&mut s, &mut main, "main", |s, _| overlays_to_main(s));
+    turn(&mut s, &mut win, &key(w));
+    turn(&mut s, &mut main, "main");
+    assert!(main.presented("jump-input").is_some() && win.presented("jump-input").is_none());
+    turn_with(&mut s, &mut main, "main", |s, _| s.ov.jump = None);
+    assert_eq!(s.windows.overlay, None);
+}
+
+#[test]
+fn a_session_window_opens_with_its_inspector_hidden_and_its_toolbar_shows_it() {
+    let (mut s, mut main, mut win, w) = two_windows();
+    let main_open = s.ov.inspector.is_open();
+    turn(&mut s, &mut main, "main");
+    turn(&mut s, &mut win, &key(w));
+    assert!(win.presented("inspector-toggle").is_some());
+    enter(&mut s, w);
+    assert!(!s.ov.inspector.is_open());
+    enter(&mut s, MAIN);
+    turn_with(&mut s, &mut win, &key(w), |s, tx| crate::ui::keys::run(s, crate::ui::keys::Act::ToggleInspector, tx));
+    enter(&mut s, w);
+    assert!(s.ov.inspector.is_open(), "the inspector command opens it in the window it ran in");
+    enter(&mut s, MAIN);
+    assert_eq!(s.ov.inspector.is_open(), main_open, "the main window's inspector is its own");
 }
 
 #[test]

@@ -277,9 +277,6 @@ pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {
         jump::view(s, layer, k);
     }
     search::activity_view(s, layer, k);
-    if let Some(n) = &s.ov.notice {
-        layer.push(ui::notice(n, k));
-    }
     decisions::note_dialog(s, layer, k);
     work::words_dialog(s, layer, k);
     projects::overlays(s, layer, k);

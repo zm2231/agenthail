@@ -175,6 +175,7 @@ pub fn run(s: &mut App, command: Command, tx: &mut Tx) {
                 crate::ui::window::show(s, &id);
             }
         }
+        Command::Inspector => s.ov.inspector.toggle(),
         Command::Refresh => refresh(s),
         Command::Restart => crate::ui::connect::start_daemon(s),
         Command::Activity => activity::open(s, tx),

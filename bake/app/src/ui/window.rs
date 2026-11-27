@@ -133,6 +133,7 @@ pub struct Windows {
     next: Id,
     to_show: Vec<(Id, bool)>,
     look: u64,
+    overlay: Option<Id>,
 }
 
 impl Windows {
@@ -273,6 +274,7 @@ pub fn close(s: &mut App, id: Id) {
     enter(s, back);
     s.windows.stash.remove(&id);
     s.windows.open.retain(|o| o.id != id);
+    s.windows.overlay.take_if(|w| *w == id);
     s.windows.to_show.retain(|(o, _)| *o != id);
 }
 
@@ -281,7 +283,14 @@ fn closed(s: &mut App, tx: &mut Tx) {
         return;
     }
     if let Some(id) = tx.window().map(id_of) {
+        crate::hotkey::closed(feed::hotkey::Window::Session(id));
         close(s, id);
+    }
+}
+
+fn focused(_: &mut App, focused: bool, tx: &mut Tx) {
+    if let Some(id) = tx.window().map(id_of).filter(|id| *id != MAIN) {
+        crate::hotkey::focus(feed::hotkey::Window::Session(id), focused);
     }
 }
 
@@ -329,6 +338,7 @@ pub fn open_shown(s: &mut App) {
             .chrome(Chrome { full_size_content: true, traffic_lights: Some((20.0, 20.0)), drag_regions: true })
             .srgb_blend(true)
             .on_close(closed)
+            .on_focus(focused)
             .on_quit(crate::on_quit)
             .map_app(crate::menubar::with_menus);
         if restored {
@@ -402,7 +412,49 @@ pub fn on_enter(s: &mut App, key: &str) {
 }
 
 pub fn on_leave(s: &mut App, _: &str) {
+    claim(s);
     enter(s, MAIN);
+}
+
+pub fn shared_open(s: &App) -> bool {
+    let menus = &s.menus;
+    s.ov.jump.is_some()
+        || crate::over::note_open(s)
+        || s.ov.ext.sheets.is_open()
+        || crate::over::projects::covering(s)
+        || super::turn_options::covering(s)
+        || super::native_queue::covering(s)
+        || menus.ops.adopting.is_some()
+        || menus.ops.moving.is_some()
+        || !menus.ops.notices.is_empty()
+        || s.prs.linking.is_some()
+        || s.inspect.editing.is_some()
+        || s.inspect.logs.is_some()
+        || s.limits.picking.is_some()
+        || s.limits.confirm.is_some()
+        || s.limits.consent.is_some()
+        || crate::over::search::activity_open(s)
+        || s.accounts.open
+        || s.accounts.planning.is_some()
+        || s.new_session.is_some()
+}
+
+pub fn shows_shared(s: &App) -> bool {
+    s.windows.overlay.is_none_or(|w| w == s.windows.current)
+}
+
+fn claim(s: &mut App) {
+    if !shared_open(s) {
+        s.windows.overlay = None;
+    } else if s.windows.overlay.is_none() {
+        s.windows.overlay = Some(s.windows.current);
+    }
+}
+
+pub fn overlays_to_main(s: &mut App) {
+    if shared_open(s) {
+        s.windows.overlay = Some(MAIN);
+    }
 }
 
 pub fn poll(s: &mut App, _: f64, tx: &mut rune::Tx) -> bool {
