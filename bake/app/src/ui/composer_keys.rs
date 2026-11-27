@@ -49,7 +49,7 @@ pub struct State {
 
 impl State {
     pub fn to_json(&self) -> Value {
-        json!(self.stash)
+        json!(self.stash.iter().map(|(id, text)| (id, super::paste::expand(text))).collect::<HashMap<_, _>>())
     }
 
     pub fn from_json(value: &Value) -> State {
@@ -107,7 +107,7 @@ fn send_now(s: &mut App, x: &Session, tx: &mut Tx) {
         return;
     }
     if crate::busy_now(s, &x.id) && x.capabilities.steer {
-        let text = s.composer.text.clone();
+        let text = super::paste::draft(&s.composer);
         crate::steer_text(s, &x.id, text, tx);
     } else {
         super::complete::submit(s, &x.id, tx);
@@ -148,7 +148,7 @@ fn stash(s: &mut App, id: &str) -> bool {
     }
     let back = s.complete.keys.stash.remove(id).unwrap_or_default();
     if !s.composer.text.is_empty() {
-        s.complete.keys.stash.insert(id.to_string(), s.composer.text.clone());
+        s.complete.keys.stash.insert(id.to_string(), super::paste::draft(&s.composer));
     }
     super::attach::swap_stash(s, id);
     super::complete::replace_composer(s, &back);

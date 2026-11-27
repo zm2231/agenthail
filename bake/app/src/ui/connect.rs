@@ -44,7 +44,7 @@ fn attach(s: &mut App, client: Client) {
                 }
                 Ok(()) => match c.snapshot() {
                     Ok(snap) => {
-                        if tx.send(Bg::SendSettings(snap.busy_delivery, snap.rekeyed, snap.queue)).is_err() || tx.send(Bg::DecisionsRev(snap.decisions_rev)).is_err() {
+                        if tx.send(Bg::SendSettings(snap.busy_delivery, snap.rekeyed, snap.queue)).is_err() || tx.send(Bg::DecisionsRev(snap.decisions_rev)).is_err() || tx.send(Bg::LeadReplacements(snap.lead_replacements)).is_err() {
                             return;
                         }
                         Bg::Snapshot(snap.updated_at, snap.sessions)

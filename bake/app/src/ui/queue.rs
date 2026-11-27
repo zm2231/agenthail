@@ -1,6 +1,5 @@
 use super::*;
 use feed::queue::{Done, Op, Queued, READ_FAILED, Recovered, Taking, waiting};
-use rune::TextEdit;
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
 use crate::Bg;
@@ -75,7 +74,7 @@ fn run(s: &mut App, id: &str, row: Queued, op: Op) {
     s.queue_note.remove(id);
     if op != Op::Remove {
         if let Some(open) = s.composer_for.clone() {
-            s.drafts.set(&open, &s.composer.text);
+            s.drafts.set(&open, &super::paste::draft(&s.composer));
         }
         s.queue_taking.push(Taking { session: id.to_string(), host: row.host.clone(), id: row.id, text: row.message.clone(), attempt: feed::catalog::request_key(), steer: op == Op::Steer });
         if let Err(error) = crate::over::layout::save_now(s) {
@@ -95,9 +94,9 @@ fn run(s: &mut App, id: &str, row: Queued, op: Op) {
 }
 
 fn hand_back(s: &mut App, id: &str, message: &str) {
-    let merged = feed::composer::put_back(crate::shown_text(s, id), message);
+    let merged = feed::composer::put_back(&crate::shown_text(s, id), message);
     if s.composer_for.as_deref() == Some(id) {
-        s.composer = TextEdit::new(merged.as_str());
+        s.composer = super::paste::edit(&merged);
         s.composer.focused = true;
     }
     s.drafts.set(id, &merged);

@@ -167,9 +167,7 @@ fn line_end(t: &str, caret: usize) -> bool {
 }
 
 pub(super) fn replace_composer(s: &mut App, text: &str) {
-    let focused = s.composer.focused;
-    s.composer = TextEdit::new(text);
-    s.composer.focused = focused;
+    super::paste::set_composer(s, text);
 }
 
 pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
@@ -216,13 +214,14 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         return false;
     }
     let id = x.id.clone();
-    if let Some(h) = s.complete.history.get_mut(&id).filter(|h| h.browsing() && h.current() != Some(s.composer.text.as_str())) {
+    let draft = super::paste::draft(&s.composer);
+    if let Some(h) = s.complete.history.get_mut(&id).filter(|h| h.browsing() && h.current() != Some(draft.as_str())) {
         h.stop();
         return false;
     }
     match ev.key {
         Key::Up if line_start(&s.composer.text, s.composer.focus) => {
-            let current = s.composer.text.clone();
+            let current = draft;
             let history = s.complete.history.entry(id).or_default();
             match history.older(&current) {
                 Some(text) => {
@@ -242,7 +241,7 @@ pub fn key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
 }
 
 pub(super) fn clear_into_history(s: &mut App, id: &str) -> bool {
-    let text = s.composer.text.clone();
+    let text = super::paste::draft(&s.composer);
     if !s.complete.history.entry(id.to_string()).or_default().clear(&text) {
         return false;
     }
@@ -522,7 +521,7 @@ pub fn done(s: &mut App, done: Done) {
             }
             if result.as_ref().is_ok_and(|d| *d != feed::composer::Delivered::Unconfirmed) && !super::attach::has(s, &id) {
                 if s.composer_for.as_deref() == Some(id.as_str()) {
-                    if s.composer.text.trim() == typed {
+                    if super::paste::draft(&s.composer).trim() == typed {
                         replace_composer(s, "");
                     }
                 } else if s.drafts.get(&id).trim() == typed {
@@ -546,7 +545,8 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         return false;
     }
     let Some(x) = session(s, id).cloned() else { return false };
-    let input = Input::parse(&s.composer.text, &Slash::available(&x.capabilities, can(s, &x)));
+    let draft = super::paste::draft(&s.composer);
+    let input = Input::parse(&super::paste::expand(&draft), &Slash::available(&x.capabilities, can(s, &x)));
     if let Some(problem) = input.problem() {
         crate::note(s, id, problem);
         return true;
@@ -571,7 +571,7 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
             crate::note(s, id, "The goal is still being set.".into());
             return true;
         }
-        let typed = s.composer.text.trim().to_string();
+        let typed = draft.trim().to_string();
         let (key, asked) = s.complete.goal_keys.entry((id.to_string(), argument.clone())).or_insert_with(|| (feed::catalog::request_key(), id.to_string())).clone();
         crate::note(s, id, "Setting the goal…".into());
         spawn(s, move |c| {

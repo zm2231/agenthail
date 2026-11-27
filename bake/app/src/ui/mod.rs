@@ -17,10 +17,13 @@ pub mod complete;
 pub mod composer_keys;
 pub mod connect;
 pub mod gone;
+pub(crate) mod holders;
 pub mod keys;
 pub(crate) mod queue;
 pub mod limit;
 pub mod new_session;
+pub(crate) mod notice;
+pub mod paste;
 pub mod pr_link;
 mod rail;
 mod session;
@@ -113,6 +116,7 @@ pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     pr_link::overlays(s, &mut layer);
     limit::overlays(s, &mut layer);
     accounts::overlays(s, &mut layer);
+    holders::overlays(s, &mut layer);
     new_session::view(s, &mut layer);
     let root = col()
         .w_full()

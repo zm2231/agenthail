@@ -349,7 +349,11 @@ impl Drafts {
     }
 
     pub fn to_json(&self) -> Value {
-        Value::Object(self.0.iter().map(|(k, v)| (k.clone(), Value::String(v.clone()))).collect())
+        self.to_json_with(str::to_string)
+    }
+
+    pub fn to_json_with(&self, saved: impl Fn(&str) -> String) -> Value {
+        Value::Object(self.0.iter().map(|(k, v)| (k.clone(), Value::String(saved(v)))).collect())
     }
 
     pub fn from_json(value: &Value) -> Drafts {

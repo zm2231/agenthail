@@ -101,7 +101,7 @@ pub fn sync_keys(s: &mut App) {
         return;
     }
     if let (Some(app), Some((bar, ..))) = (&s.bar.app, &s.bar.shown) {
-        let _ = app.set_menu(dock_items(bar).into_iter().chain(keys::menu_items(state)));
+        let _ = app.set_menu(dock_items(bar).into_iter().chain([crate::trace::menu_item()]).chain(keys::menu_items(state)));
     }
     s.bar.keys = Some(state);
 }
@@ -143,7 +143,7 @@ fn tray_items(bar: &MenuBar, link: Link, note: Option<&str>) -> Vec<TrayItem> {
 }
 
 pub fn with_menus(app: rune::App<App>) -> rune::App<App> {
-    keys::menu_items(MenuState::default()).into_iter().fold(app.menu_item(settings_item()), rune::App::menu_item)
+    keys::menu_items(MenuState::default()).into_iter().fold(app.menu_item(settings_item()).menu_item(crate::trace::menu_item()), rune::App::menu_item)
 }
 
 fn settings_item() -> MenuItem<App> {

@@ -39,14 +39,13 @@ pub(crate) fn header(s: &App, x: &Session) -> El {
 }
 
 pub(crate) fn composer(s: &App, x: &Session) -> El {
-    let input = text_input(&s.composer, BODY)
+    let input = super::paste::field(text_input(&s.composer, BODY)
         .key("composer")
         .w_full()
         .min_h(26.0)
         .color(theme::text())
         .placeholder(format!("Message {}", x.title()), faint())
-        .on_edit(|s: &mut App| &mut s.composer)
-        .on_input_paste(|s: &mut App, content, _: &mut Tx| super::attach::paste(s, content))
+        .on_edit(|s: &mut App| &mut s.composer))
         .on_input_key(super::complete::key)
         .on_submit(|s: &mut App, tx: &mut Tx| send(s, tx));
     let ready = !s.composer.text.trim().is_empty() || super::attach::has(s, &x.id);
@@ -72,7 +71,7 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
         Some(note) => text(note).font(META).color(if unsent { attention() } else { muted() }),
         None => text(crate::send_busy(s, &x.id).map(|b| b.hint()).unwrap_or("Return to send · Shift-Return for a new line")).font(META).color(faint()),
     };
-    let mut controls = row().w_full().px(10.0).pb(10.0).gap(8.0).items_center().children(super::attach::button(s, &x.id)).child(chip(&icons::SPARKLES, x.surface.clone()));
+    let mut controls = row().w_full().px(10.0).pb(10.0).gap(8.0).items_center().children(super::attach::button(s, &x.id)).child(chip(&icons::SPARKLES, x.surface.clone())).children(super::holders::picker(s, x));
     if let Some(choice) = busy {
         let id = x.id.clone();
         controls = controls.child(
@@ -137,15 +136,20 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
                 .shrink()
                 .min_h(0.0)
                 .scroll(ScrollSpec { stick_bottom: false })
+                .children(super::notice::above(s, x))
                 .children(crate::ui::background::dock(s, x))
                 .children(crate::ui::queue::dock(s, x))
                 .children(super::attach::chips(s, &x.id).map(|c| col().w_full().px(12.0).pt(10.0).child(c))),
         )
         .children(super::complete::search(s, x))
         .children(super::complete::menu(s, x))
+        .children(super::paste::editor(s))
         .child(col().w_full().px(16.0).pt(13.0).pb(4.0).child(input))
         .child(controls.child(send_button))
-        .on_layout(|s: &mut App, r: [f32; 4]| s.cover.set_composer(r));
+        .on_layout(|s: &mut App, r: [f32; 4]| {
+            s.cover.set_composer(r);
+            crate::trace::composer(r);
+        });
     let box_el = match s.cover.room(COMPOSER_BELOW) {
         Some(room) => box_el.max_h(room),
         None => box_el,
