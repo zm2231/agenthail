@@ -21,6 +21,7 @@ struct Shown {
     removed: Vec<String>,
     pages: usize,
     reread: bool,
+    replace: bool,
 }
 
 type Got = (String, u64, bool, Result<Page, String>);
@@ -68,6 +69,8 @@ fn reread(s: &mut App, key: &str) {
     let seq = s.earlier.seq;
     shown.asked = Some(seq);
     shown.error = None;
+    shown.reread = false;
+    shown.replace = true;
     let (tx, key, pages) = (s.earlier.tx.clone(), key.to_string(), shown.pages.max(1));
     std::thread::spawn(move || {
         let mut all = Page { sessions: Vec::new(), next: None };
@@ -96,6 +99,7 @@ fn show(s: &mut App, key: &str) {
 }
 
 pub fn removed(s: &mut App, gone: &[Removal]) {
+    let mut due: Vec<String> = Vec::new();
     for x in gone {
         let listed = s.ov.d.session(&x.id).cloned();
         for (key, shown) in s.earlier.projects.iter_mut() {
@@ -105,13 +109,17 @@ pub fn removed(s: &mut App, gone: &[Removal]) {
                 continue;
             }
             shown.removed.retain(|o| *o != x.id);
-            shown.reread |= shown.open && (shown.read || shown.asked.is_some()) && listed.as_ref().is_none_or(|r| r.project_key() == *key);
+            if shown.open && (shown.read || shown.asked.is_some()) && listed.as_ref().is_none_or(|r| r.project_key() == *key) {
+                shown.reread = true;
+                due.push(key.clone());
+            }
             if let Some(row) = listed.as_ref().filter(|r| r.project_key() == *key && !shown.sessions.iter().any(|o| o.id == r.id)) {
                 shown.sessions.push(row.clone());
             }
         }
     }
-    let due: Vec<String> = s.earlier.projects.iter().filter(|(_, x)| x.reread).map(|(k, _)| k.clone()).collect();
+    due.sort();
+    due.dedup();
     for key in due {
         reread(s, &key);
     }
@@ -126,7 +134,7 @@ pub fn reopened(s: &mut App) {
 }
 
 fn again(s: &mut App, key: &str) {
-    if s.earlier.projects.get(key).is_some_and(|x| x.reread) {
+    if s.earlier.projects.get(key).is_some_and(|x| x.reread || x.replace) {
         reread(s, key);
     } else {
         more(s, key);
@@ -151,7 +159,7 @@ pub fn poll(s: &mut App) -> bool {
             Ok(page) if whole => {
                 shown.sessions = page.sessions.into_iter().filter(|x| !shown.removed.contains(&x.id)).collect();
                 shown.pages = shown.pages.max(1);
-                shown.reread = false;
+                shown.replace = false;
                 shown.next = page.next;
             }
             Ok(page) => {
@@ -282,18 +290,29 @@ pub(crate) fn fetched(s: &App, key: &str) -> Vec<String> {
 
 #[cfg(test)]
 pub(crate) fn rereads(s: &App, key: &str) -> bool {
-    s.earlier.projects.get(key).is_some_and(|x| x.reread)
+    s.earlier.projects.get(key).is_some_and(|x| x.reread || x.replace)
 }
 
 #[cfg(test)]
-pub(crate) fn answer_reread(s: &mut App, key: &str, sessions: Option<Vec<Session>>) {
+pub(crate) fn start_reread(s: &mut App, key: &str) -> u64 {
     s.earlier.seq += 1;
-    let seq = s.earlier.seq;
     if let Some(shown) = s.earlier.projects.get_mut(key) {
-        shown.asked = Some(seq);
+        shown.asked = Some(s.earlier.seq);
+        shown.reread = false;
+        shown.replace = true;
     }
+    s.earlier.seq
+}
+
+#[cfg(test)]
+pub(crate) fn answer_reread(s: &mut App, key: &str, seq: u64, sessions: Option<Vec<Session>>) {
     let _ = s.earlier.tx.send((key.to_string(), seq, true, sessions.ok_or_else(|| "offline".to_string()).map(|sessions| Page { sessions, next: None })));
     poll(s);
+}
+
+#[cfg(test)]
+pub(crate) fn asks_again(s: &App, key: &str) -> bool {
+    s.earlier.projects.get(key).is_some_and(|x| x.reread)
 }
 
 #[cfg(test)]

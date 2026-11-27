@@ -399,15 +399,21 @@ fn earlier_reads_its_pages_again_when_a_shown_session_leaves_the_list() {
     assert!(crate::over::earlier::rereads(&s, "p1"), "leaving the list while the first page loads reads it again");
     crate::over::earlier::answer(&mut s, "p1", seq, vec![busy.clone()]);
     assert!(crate::over::earlier::rereads(&s, "p1"), "the page asked before still reads again");
-    crate::over::earlier::answer_reread(&mut s, "p1", None);
+    let first = crate::over::earlier::start_reread(&mut s, "p1");
+    crate::over::earlier::answer_reread(&mut s, "p1", first, None);
     assert!(crate::over::earlier::error(&s, "p1").is_some() && crate::over::earlier::rereads(&s, "p1"), "a failed reread is what Try again does next");
-    crate::over::earlier::answer_reread(&mut s, "p1", Some(vec![session("kept", 0, json!({})), session("other", 1, json!({}))]));
+    let second = crate::over::earlier::start_reread(&mut s, "p1");
+    crate::over::earlier::answer_reread(&mut s, "p1", second, Some(vec![session("kept", 0, json!({})), session("other", 1, json!({}))]));
     assert!(!crate::over::earlier::rereads(&s, "p1"));
     assert_eq!(crate::over::earlier::status(&s, "p1", "kept").as_deref(), Some("idle"), "the reread replaces the last listed row");
     assert_eq!(crate::over::earlier::fetched(&s, "p1"), vec!["kept".to_string(), "other".to_string()]);
 
     crate::over::earlier::removed(&mut s, &unlisted);
     assert!(crate::over::earlier::rereads(&s, "p1"), "a loaded Earlier reads again too");
+    let third = crate::over::earlier::start_reread(&mut s, "p1");
+    crate::over::earlier::removed(&mut s, &unlisted);
+    crate::over::earlier::answer_reread(&mut s, "p1", third, Some(vec![session("kept", 0, json!({}))]));
+    assert!(crate::over::earlier::asks_again(&s, "p1"), "leaving the list during a reread reads once more after it");
 }
 
 #[test]
