@@ -72,7 +72,7 @@ pub(crate) fn rail(s: &App, x: &Session, k: &Kit) -> El {
         let loaded = s.ov.d.work.get(&work.key());
         let state = item.map(|i| i.state.clone()).unwrap_or_else(|| work.state.clone());
         let phase = item.map(|i| i.phase.as_str()).or(loaded.map(|w| w.phase.as_str())).unwrap_or_default();
-        let steps = item.map(|i| i.steps.clone()).unwrap_or_else(|| s.ov.d.steps_of(&work.project_key));
+        let steps = s.ov.d.steps_for(&work.project_key).or(item.map(|i| &i.steps)).cloned().unwrap_or_default();
         let mut tags = row().gap(6.0).items_center().child(row().px(7.0).py(2.0).radius(6.0).fill(wash()).child(text(work.item_id.clone()).font(k.text(META)).color(muted())));
         if let Some(i) = item {
             tags = tags.child(priority(&i.priority, k)).child(text(i.kind.clone()).font(k.text(META)).color(faint()));
