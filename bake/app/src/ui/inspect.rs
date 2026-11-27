@@ -316,15 +316,19 @@ fn goal_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
         return None;
     }
     let busy = s.inspect.goal_busy.contains_key(&x.id);
-    let mut buttons = row().w_full().flex_wrap().gap(6.0).children(inspect::goal_buttons(goal, can).into_iter().map(|(act, label)| {
+    let buttons = row().w_full().flex_wrap().gap(6.0).children(inspect::goal_buttons(goal, can).into_iter().map(|(act, label)| {
         let id = x.id.clone();
         let variant = if act == GoalAct::Clear { ButtonVariant::Ghost } else { ButtonVariant::Neutral };
         small(label, format!("goal-{}", act.action()), variant, busy, move |s: &mut App| press_goal(s, &id, act), k)
     }));
-    for (i, again) in unknown.into_iter().enumerate() {
-        let (id, label, full) = (x.id.clone(), format!("{}: {}", super::complete::GOAL_AS_NEW, feed::derive::text::clip_words(&again, 40)), again.clone());
-        buttons = buttons.child(small(&label, format!("goal-again-as-new-{i}"), ButtonVariant::Neutral, busy, move |s: &mut App| super::complete::goal_as_new(s, &id, &again), k).help(full));
-    }
+    let interrupted: Vec<El> = unknown
+        .into_iter()
+        .enumerate()
+        .map(|(i, again)| {
+            let (id, shown) = (x.id.clone(), again.clone());
+            col().w_full().gap(4.0).key(format!("goal-interrupted-{i}")).child(text(shown).font(k.text(META)).color(theme::text()).wrap().w_full()).child(small(super::complete::GOAL_AS_NEW, format!("goal-again-as-new-{i}"), ButtonVariant::Neutral, busy, move |s: &mut App| super::complete::goal_as_new(s, &id, &again), k))
+        })
+        .collect();
     let mut body = col().w_full().gap(8.0);
     if let Some(goal) = goal {
         let tint = if goal.needs_attention() { attention() } else { muted() };
@@ -351,7 +355,7 @@ fn goal_section(s: &App, x: &Session, k: &Kit) -> Option<El> {
             body = body.child(text(line).font(k.text(META)).color(muted()).wrap());
         }
     }
-    body = body.child(buttons);
+    body = body.children(interrupted).child(buttons);
     if let Some((bad, note)) = s.inspect.goal_note.get(&x.id) {
         body = body.child(text(note.clone()).font(k.text(META)).color(if *bad { failed() } else { muted() }).wrap());
     }

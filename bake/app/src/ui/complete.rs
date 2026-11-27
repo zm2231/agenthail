@@ -1002,5 +1002,15 @@ mod goal_tests {
         goal_as_new(&mut s, "a", "ship it");
         assert_ne!(s.complete.goal_keys[&point].0, key, "only the labeled control takes a fresh key");
         assert!(unknown_goals(&s, "a").is_empty());
+        s.complete.goal_pending.clear();
+        for goal in ["Ship: update docs", "Ship: deploy service"] {
+            send_goal(&mut s, "a", goal.into(), format!("/goal {goal}"));
+            let key = s.complete.goal_keys[&("a".to_string(), goal.to_string())].0.clone();
+            let interrupted = RespondError::from_status("goal-set", 409, r#"{"error":{"code":"action_outcome_unknown","message":"may have happened"}}"#);
+            done(&mut s, Done::Goal("a".into(), format!("/goal {goal}"), goal.into(), key, super::super::window::MAIN, Err(interrupted)));
+        }
+        assert_eq!(unknown_goals(&s, "a"), ["Ship: deploy service", "Ship: update docs"], "each interrupted goal is listed whole");
+        goal_as_new(&mut s, "a", "Ship: update docs");
+        assert_eq!(unknown_goals(&s, "a"), ["Ship: deploy service"], "only the chosen goal goes again");
     }
 }
