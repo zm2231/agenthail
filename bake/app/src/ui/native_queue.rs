@@ -177,6 +177,9 @@ pub fn drain(s: &mut App) -> bool {
 }
 
 fn open_editor(s: &mut App, item: Option<String>, original: String) {
+    if !super::window::may_open(s, super::window::Kind::Queue) {
+        return;
+    }
     let Some(id) = s.native_queue.queue.session.clone() else { return };
     s.native_queue.menu = None;
     let mut text = TextEdit::new(&original);

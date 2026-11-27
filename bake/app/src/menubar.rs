@@ -17,11 +17,16 @@ pub struct Bar {
     shown: Option<(MenuBar, Link, Option<&'static str>)>,
     keys: Option<MenuState>,
     warning: bool,
+    revision: u64,
 }
 
 impl Bar {
     pub fn is_shown(&self) -> bool {
         self.shown.is_some()
+    }
+
+    pub fn revision(&self) -> u64 {
+        self.revision
     }
 }
 
@@ -91,6 +96,7 @@ pub fn refresh(s: &mut App) {
         tray.set_menu(tray_items(&bar, link, note));
     }
     s.bar.shown = Some((bar, link, note));
+    s.bar.revision += 1;
     s.bar.keys = None;
     sync_keys(s);
 }
@@ -100,10 +106,15 @@ pub fn sync_keys(s: &mut App) {
     if s.bar.keys == Some(state) {
         return;
     }
-    if let (Some(app), Some((bar, ..))) = (&s.bar.app, &s.bar.shown) {
-        let _ = app.set_menu(dock_items(bar).into_iter().chain([crate::trace::menu_item()]).chain(keys::menu_items(state)));
+    if let (Some(app), Some(items)) = (&s.bar.app, items(s, state)) {
+        let _ = app.set_menu(items);
     }
     s.bar.keys = Some(state);
+}
+
+pub fn items(s: &App, state: MenuState) -> Option<Vec<MenuItem<App>>> {
+    let (bar, ..) = s.bar.shown.as_ref()?;
+    Some(dock_items(bar).into_iter().chain([crate::trace::menu_item()]).chain(keys::menu_items(state)).collect())
 }
 
 fn show_link(tray: &Tray, link: Link) -> bool {
@@ -171,7 +182,7 @@ fn dock_items(bar: &MenuBar) -> Vec<MenuItem<App>> {
 
 fn open_target(s: &mut App, target: &Target) {
     front(s);
-    crate::over::open_target(s, target);
+    crate::ui::window::within(s, crate::ui::window::MAIN, |s| crate::over::open_target(s, target));
 }
 
 pub fn front(s: &App) {

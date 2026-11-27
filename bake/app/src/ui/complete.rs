@@ -56,6 +56,39 @@ pub struct Complete {
     pub keys: super::composer_keys::State,
 }
 
+#[derive(Default)]
+pub struct Popup {
+    session: Option<String>,
+    highlighted: usize,
+    dismissed: Option<String>,
+    search: Option<Search>,
+    shown_ids: Vec<String>,
+    files: Option<(String, String, Result<SessionFiles, String>)>,
+    files_asked: Option<(u64, String, String)>,
+}
+
+impl Popup {
+    pub fn searching(&self, seq: u64) -> bool {
+        self.search.as_ref().is_some_and(|x| x.seq == seq)
+    }
+
+    pub fn asked_files(&self, seq: u64) -> bool {
+        self.files_asked.as_ref().is_some_and(|(asked, _, _)| *asked == seq)
+    }
+}
+
+impl Complete {
+    pub fn swap_popup(&mut self, p: &mut Popup) {
+        std::mem::swap(&mut self.session, &mut p.session);
+        std::mem::swap(&mut self.highlighted, &mut p.highlighted);
+        std::mem::swap(&mut self.dismissed, &mut p.dismissed);
+        std::mem::swap(&mut self.search, &mut p.search);
+        std::mem::swap(&mut self.shown_ids, &mut p.shown_ids);
+        std::mem::swap(&mut self.files, &mut p.files);
+        std::mem::swap(&mut self.files_asked, &mut p.files_asked);
+    }
+}
+
 fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'static) {
     let Some(client) = s.client.clone() else { return };
     let out = s.outbox.clone();
@@ -474,6 +507,12 @@ pub fn done(s: &mut App, done: Done) {
             s.complete.commands.insert(id, result);
         }
         Done::Files(seq, id, query, result) => {
+            if s.complete.files_asked.as_ref().is_none_or(|(asked, _, _)| *asked != seq)
+                && let Some(w) = super::window::holder(s, |l| l.popup().asked_files(seq))
+            {
+                super::window::within(s, w, |s| crate::ui::complete::done(s, Done::Files(seq, id, query, result)));
+                return;
+            }
             if s.complete.files_asked.as_ref().is_some_and(|(asked, _, _)| *asked == seq) {
                 s.complete.files = Some((id, query, result));
             }
@@ -492,6 +531,12 @@ pub fn done(s: &mut App, done: Done) {
             }
         }
         Done::Found(seq, result) => {
+            if s.complete.search.as_ref().is_none_or(|x| x.seq != seq)
+                && let Some(w) = super::window::holder(s, |l| l.popup().searching(seq))
+            {
+                super::window::within(s, w, |s| crate::ui::complete::done(s, Done::Found(seq, result)));
+                return;
+            }
             if let Some(search) = s.complete.search.as_mut().filter(|x| x.seq == seq) {
                 search.ix = 0;
                 match result {
