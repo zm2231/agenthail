@@ -10,6 +10,7 @@ use feed::watch::{CatalogEvent, Ledgers, Opened, Stream, Wants, backoff, wants};
 use crate::Bg;
 
 pub enum Feed {
+    Reconnected,
     Poke,
     Changed,
     Confirm,
@@ -84,8 +85,11 @@ pub fn ledgers(client: Client, tx: Sender<Bg>, stream: Stream) {
 
 pub fn catalog(client: Client, cursor: Arc<AtomicU64>, resume: Receiver<()>, tx: Sender<Feed>) {
     std::thread::spawn(move || {
-        let mut failures = 0u32;
+        let (mut failures, mut first) = (0u32, true);
         loop {
+            if !std::mem::take(&mut first) && tx.send(Feed::Reconnected).is_err() {
+                return;
+            }
             let mut gone = false;
             let result = client.follow_catalog(cursor.load(Ordering::Acquire), |e| {
                 let Some(event) = CatalogEvent::of(&e) else { return true };

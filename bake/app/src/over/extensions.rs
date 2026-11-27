@@ -221,7 +221,7 @@ pub fn drain(s: &mut App) -> bool {
         s.ov.ext.again = false;
         refresh(s);
     }
-    let failed = s.ov.ext.hosts_error.is_some() || s.ov.ext.catalogs.iter().any(|c| c.error.is_some());
+    let failed = s.ov.ext.hosts_error.is_some() || s.ov.ext.catalogs.iter().any(|c| c.error.is_some() && (c.host.is_local() || c.host.available()));
     let paired = s.ov.ext.catalogs.iter().any(|c| !c.host.is_local());
     match s.ov.ext.fetched_at {
         None => refresh(s),

@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use feed::catalog::Client;
 use feed::connect::{self, Problem};
-use feed::watch::{Catalog, SAFETY};
+use feed::watch::{Applied, Catalog, SAFETY};
 use rune::{Cx, El, col, el, icon, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize};
 
@@ -114,7 +114,8 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                                 due = true;
                                 gap = true;
                             }
-                            Feed::Catalog(event) => batch.push(event),
+                            Feed::Catalog(event) => batch.push(Some(event)),
+                            Feed::Reconnected => batch.push(None),
                         }
                         next = poked.recv_timeout(settle.saturating_duration_since(Instant::now())).ok();
                     }
@@ -126,7 +127,17 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                 }
                 continue;
             }
-            let applied = catalog.apply(batch);
+            let (mut applied, mut run) = (Applied::default(), Vec::new());
+            for item in batch {
+                match item {
+                    Some(event) => run.push(event),
+                    None => {
+                        applied.merge(catalog.apply(std::mem::take(&mut run)));
+                        catalog.reconnected();
+                    }
+                }
+            }
+            applied.merge(catalog.apply(run));
             if gap {
                 catalog.forget();
             }
