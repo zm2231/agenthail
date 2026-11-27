@@ -82,3 +82,11 @@ fn a_reply_without_a_session_starts_nothing_to_open() {
     assert_eq!(Started::default().session_id(), None);
     assert_eq!(serde_json::from_value::<Started>(json!({"session": {"id": " "}})).unwrap().session_id(), None);
 }
+
+#[test]
+fn a_build_the_daemon_has_not_confirmed_is_not_reported_as_started() {
+    let (client, _rx) = daemon(replies(&[(202, r#"{"ok":true,"status":"submitted"}"#)]));
+    let unsure = client.build_extension(None, "a board", "k1").unwrap_err();
+    assert!(unsure.maybe_delivered);
+    assert_eq!(unsure.code, "submitted");
+}

@@ -57,6 +57,7 @@ pub struct State {
     hosts_pending: bool,
     again: bool,
     listing: HashSet<String>,
+    stale: HashSet<String>,
     generation: HashMap<String, u64>,
     tx: Sender<Done>,
     rx: Receiver<Done>,
@@ -65,7 +66,7 @@ pub struct State {
 impl State {
     pub fn new() -> State {
         let (tx, rx) = channel();
-        State { catalogs: Vec::new(), hosts_error: None, settings: false, acting: None, web: Web::new(), sheets: Sheets::new(), pins: BTreeSet::new(), fetched_at: None, ages: Vec::new(), hosts_pending: false, again: false, listing: HashSet::new(), generation: HashMap::new(), tx, rx }
+        State { catalogs: Vec::new(), hosts_error: None, settings: false, acting: None, web: Web::new(), sheets: Sheets::new(), pins: BTreeSet::new(), fetched_at: None, ages: Vec::new(), hosts_pending: false, again: false, listing: HashSet::new(), stale: HashSet::new(), generation: HashMap::new(), tx, rx }
     }
 }
 
@@ -86,7 +87,13 @@ fn wanted(s: &App, host: &Host) -> bool {
 }
 
 pub fn relist(s: &mut App, host: &Host) {
-    list(s, host);
+    let key = host_key(host);
+    if s.ov.ext.listing.contains(&key) {
+        *s.ov.ext.generation.entry(key.clone()).or_default() += 1;
+        s.ov.ext.stale.insert(key);
+    } else {
+        list(s, host);
+    }
 }
 
 pub fn pinned(s: &App) -> Vec<Entry> {
@@ -111,6 +118,10 @@ pub fn refresh(s: &mut App) {
         s.ov.ext.catalogs.insert(0, Catalog { host: local_host(), list: None, error: None, fetched: None });
     }
     list(s, &local_host());
+    read_hosts(s, client);
+}
+
+fn read_hosts(s: &mut App, client: feed::catalog::Client) {
     if s.ov.ext.hosts_pending {
         return;
     }
@@ -170,6 +181,11 @@ fn take(s: &mut App, done: Done) {
         }
         Done::Listed(_, key, _) => {
             s.ov.ext.listing.remove(key);
+            if s.ov.ext.stale.remove(key)
+                && let Some(host) = s.ov.ext.catalogs.iter().find(|c| c.key() == *key).map(|c| c.host.clone())
+            {
+                list(s, &host);
+            }
         }
         _ => {}
     }
@@ -253,10 +269,15 @@ pub fn drain(s: &mut App) -> bool {
     match s.ov.ext.fetched_at {
         None => refresh(s),
         Some(at) if at.elapsed() < PAIRED_EVERY => {}
-        Some(_) if failed => refresh(s),
-        Some(_) if paired => {
+        Some(_) if failed || paired => {
             s.ov.ext.fetched_at = Some(Instant::now());
-            let hosts: Vec<Host> = s.ov.ext.catalogs.iter().filter(|c| !c.host.is_local() && c.host.available() && wanted(s, &c.host)).map(|c| c.host.clone()).collect();
+            if s.ov.ext.hosts_error.is_some()
+                && let Some(client) = s.client.clone()
+            {
+                read_hosts(s, client);
+            }
+            let due = |c: &Catalog| wanted(s, &c.host) && (c.host.is_local() || c.host.available()) && (c.error.is_some() || !c.host.is_local());
+            let hosts: Vec<Host> = s.ov.ext.catalogs.iter().filter(|c| due(c)).map(|c| c.host.clone()).collect();
             for host in hosts {
                 list(s, &host);
             }

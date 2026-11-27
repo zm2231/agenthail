@@ -15,7 +15,7 @@ const HISTORY_LIMIT: usize = 50;
 
 enum Done {
     Changes(u64, Result<Vec<Change>, String>),
-    Patch(String, Result<Shown, String>),
+    Patch(u64, Result<Shown, String>),
     Undone(Result<(), RespondError>),
     Built(Result<Started, RespondError>),
 }
@@ -25,7 +25,7 @@ pub struct History {
     changes: Option<Result<Vec<Change>, String>>,
     failure: Option<String>,
     undoing: Option<String>,
-    patch: Option<(String, Option<Result<bool, String>>)>,
+    patch: Option<(String, u64, Option<Result<bool, String>>)>,
     read: u64,
 }
 
@@ -93,17 +93,19 @@ fn load(s: &mut App) {
 fn toggle_patch(s: &mut App, rev: String) {
     s.ov.ext.sheets.diff.set_files(Vec::new());
     let Some(h) = s.ov.ext.sheets.history.as_mut() else { return };
-    if h.patch.as_ref().is_some_and(|(open, _)| *open == rev) {
+    if h.patch.as_ref().is_some_and(|(open, _, _)| *open == rev) {
         h.patch = None;
         return;
     }
-    h.patch = Some((rev.clone(), None));
     let host = h.host.clone();
     let Some(client) = s.client.clone() else { return };
-    let tx = s.ov.ext.sheets.tx.clone();
+    let (tx, seq) = (s.ov.ext.sheets.tx.clone(), next(s));
+    if let Some(h) = s.ov.ext.sheets.history.as_mut() {
+        h.patch = Some((rev.clone(), seq, None));
+    }
     std::thread::spawn(move || {
         let shown = client.extension_change(on(&host).as_deref(), &rev);
-        let _ = tx.send(Done::Patch(rev, shown));
+        let _ = tx.send(Done::Patch(seq, shown));
     });
 }
 
@@ -174,14 +176,13 @@ fn settle(s: &mut App, done: Done) {
                 h.changes = Some(result);
             }
         }
-        Done::Patch(rev, result) => {
+        Done::Patch(at, result) => {
             let sheets = &mut s.ov.ext.sheets;
-            let Some(h) = sheets.history.as_mut().filter(|h| h.patch.as_ref().is_some_and(|(open, _)| *open == rev)) else { return };
-            let shown = result.map(|shown| {
-                sheets.diff.set_files(parse(&shown.patch));
-                shown.truncated
-            });
-            h.patch = Some((rev, Some(shown)));
+            let Some((_, _, shown)) = sheets.history.as_mut().and_then(|h| h.patch.as_mut()).filter(|(_, asked, _)| *asked == at) else { return };
+            *shown = Some(result.map(|patch| {
+                sheets.diff.set_files(parse(&patch.patch));
+                patch.truncated
+            }));
         }
         Done::Undone(result) => {
             s.ov.ext.sheets.diff.set_files(Vec::new());
@@ -213,7 +214,10 @@ fn settle(s: &mut App, done: Done) {
                     }
                 }
                 Err(e) if e.maybe_delivered => b.failure = Some(format!("It may have started anyway: {}. Check your sessions before trying again.", e.message)),
-                Err(e) => b.failure = Some(e.message),
+                Err(e) => {
+                    b.sent = None;
+                    b.failure = Some(e.message);
+                }
             }
         }
     }
@@ -247,7 +251,7 @@ fn small(label: &str, variant: ButtonVariant) -> Button {
 fn change_row(s: &App, h: &History, change: &Change) -> El {
     let k = kit();
     let busy = h.undoing.is_some();
-    let open = h.patch.as_ref().is_some_and(|(rev, _)| *rev == change.rev);
+    let open = h.patch.as_ref().is_some_and(|(rev, _, _)| *rev == change.rev);
     let offset = |t: time::OffsetDateTime| rune::time::LocalTime::at(t.unix_timestamp() * 1000).offset;
     let mut actions = row().gap(6.0).items_center();
     let rev = change.rev.clone();
@@ -270,7 +274,7 @@ fn change_row(s: &App, h: &History, change: &Change) -> El {
                 .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(text(change.describe()).font(BODY).color(strong()).wrap().w_full()).child(text(change.meta(crate::ui::background::clock(), offset)).font(META).color(weak()).wrap().w_full()))
                 .child(actions),
         );
-    if let Some((_, shown)) = h.patch.as_ref().filter(|_| open) {
+    if let Some((_, _, shown)) = h.patch.as_ref().filter(|_| open) {
         card = card.child(match shown {
             None => row().gap(6.0).items_center().child(Spinner::new().size(11.0).build(k)).child(text("Reading the patch…".to_string()).font(META).color(weak())),
             Some(Err(error)) => text(error.clone()).font(META).color(crate::theme::failed()).wrap().w_full(),

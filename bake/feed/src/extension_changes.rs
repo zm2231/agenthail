@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use time::{OffsetDateTime, UtcOffset};
 
 use crate::background::Clock;
-use crate::catalog::{Client, RespondError, enc, parse_time, request_key};
+use crate::catalog::{Client, RespondError, confirmed, enc, parse_time, request_key};
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -162,7 +162,7 @@ impl Client {
     }
 
     pub fn build_extension(&self, host: Option<&str>, message: &str, key: &str) -> std::result::Result<Started, RespondError> {
-        let reply = self.post_json_keyed(&on_host("/api/v1/extensions/build", host), "build", json!({"message": message}), key)?;
+        let reply = self.post_json_keyed(&on_host("/api/v1/extensions/build", host), "build", json!({"message": message}), key).and_then(confirmed)?;
         serde_json::from_value(reply).map_err(|e| unreadable("builder", e, true))
     }
 }
