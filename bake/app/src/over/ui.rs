@@ -307,7 +307,7 @@ pub fn need_actions(s: &App, n: &Need, compact: bool, k: &Kit) -> El {
     let size = if compact { ControlSize::Small } else { ControlSize::Regular };
     let r = row().gap(6.0).items_center();
     let work = match &t {
-        Target::Work(id) => s.ov.d.work.get(id).map(|w| (w, crate::over::work_review(s, id))),
+        Target::Work(key) => s.ov.d.work.get(key).map(|w| (w, crate::over::work_review(s, key))),
         _ => None,
     };
     let r = match (n.kind, work) {
@@ -570,9 +570,10 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
             Slot::Need(i, n) => (i, n),
         };
         let t = n.target.clone();
-        let sel = match (&n.target, selected) {
-            (Target::Session(id), Some(x)) | (Target::Work(id), Some(x)) => id == x,
-            _ => false,
+        let sel = match &n.target {
+            Target::Session(id) => selected == Some(id.as_str()),
+            Target::Work(key) => matches!(&s.screen, Screen::Work(open) if open == key),
+            Target::Project(_) => false,
         };
         let mut need = SidebarRow::new(short_title(&n.title, 60))
             .height(k.text_size(44.0))

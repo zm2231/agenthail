@@ -135,7 +135,7 @@ fn surface(name: &str) -> String {
 pub fn item_id(target: &Target) -> String {
     match target {
         Target::Session(id) => format!("open-session:{id}"),
-        Target::Work(id) => format!("open-work:{id}"),
+        Target::Work(k) => format!("open-work:{} {}", k.ledger, k.id),
         Target::Project(key) => format!("open-project:{key}"),
     }
 }
@@ -147,7 +147,7 @@ pub fn target_of(item: &str) -> Option<Target> {
     }
     match kind {
         "open-session" => Some(Target::Session(id.to_string())),
-        "open-work" => Some(Target::Work(id.to_string())),
+        "open-work" => id.rsplit_once(' ').filter(|(l, i)| !l.is_empty() && !i.is_empty()).map(|(l, i)| Target::Work(super::WorkKey::new(l, i))),
         "open-project" => Some(Target::Project(id.to_string())),
         _ => None,
     }
@@ -208,7 +208,7 @@ mod tests {
         let sessions = (0..8).map(|i| session(&format!("s{i}"), json!({"status": "busy", "lastActive": format!("2026-11-24T11:0{i}:00Z")}))).collect();
         let w = world(sessions);
         let needs: Vec<Need> = (0..7)
-            .map(|i| Need { kind: super::super::NeedKind::Check, group: super::super::Group::Waiting, project: "P".into(), project_key: "p".into(), title: "Same title".into(), who: "@worker".into(), at: String::new(), target: Target::Work(format!("p-W{i}")), label: Some(format!("W{i}")) })
+            .map(|i| Need { kind: super::super::NeedKind::Check, group: super::super::Group::Waiting, project: "P".into(), project_key: "p".into(), title: "Same title".into(), who: "@worker".into(), at: String::new(), target: Target::Work(super::super::WorkKey::new("p", format!("p-W{i}"))), label: Some(format!("W{i}")) })
             .collect();
         let bar = MenuBar::build(&w, &needs);
         assert_eq!(ids(&bar.working), ["open-session:s7", "open-session:s6", "open-session:s5", "open-session:s4", "open-session:s3"]);
@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn a_menu_pick_names_what_to_open() {
-        for target in [Target::Session("ses_1".into()), Target::Work("p-W2".into()), Target::Project("p".into())] {
+        for target in [Target::Session("ses_1".into()), Target::Work(crate::derive::WorkKey::new("repo:github.com/o/r", "p-W2")), Target::Project("p".into())] {
             assert_eq!(target_of(&item_id(&target)), Some(target));
         }
         assert_eq!(target_of("open-session:"), None);

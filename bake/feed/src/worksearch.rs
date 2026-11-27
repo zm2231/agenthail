@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use crate::catalog::{Client, enc};
 use crate::derive::text::{plain, short_id};
-use crate::derive::world::{Work, World};
+use crate::derive::world::{Work, WorkKey, World};
 use crate::search::{failure, one_line};
 
 pub const LIMIT: usize = 20;
@@ -32,6 +32,12 @@ pub struct Found {
     pub state: String,
     #[serde(default)]
     pub snippet: Option<String>,
+}
+
+impl Found {
+    pub fn key(&self) -> WorkKey {
+        WorkKey::new(&self.project_key, &self.id)
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -75,8 +81,7 @@ pub struct Row {
     pub status: String,
     pub badge: String,
     pub avatar: String,
-    pub ledger: String,
-    pub id: String,
+    pub key: WorkKey,
 }
 
 fn state_word(state: &str) -> String {
@@ -116,7 +121,7 @@ impl World {
                     status.push(f.project_name.clone());
                 }
                 status.extend(self.found_extra(f));
-                Row { title: plain(&f.title), status: status.join(" · "), badge: short_id(&f.id), avatar: f.project_name.clone(), ledger: f.project_key.clone(), id: f.id.clone() }
+                Row { title: plain(&f.title), status: status.join(" · "), badge: short_id(&f.id), avatar: f.project_name.clone(), key: f.key() }
             })
             .collect()
     }
@@ -188,7 +193,7 @@ mod tests {
         let rows = w.found_rows(&search, |f| f.id == "y-W4");
         assert_eq!(w.found_extra(&search.items[1]), ["on build-box", "…drops rows…"]);
         assert!(w.found_extra(&search.items[0]).is_empty());
-        let seen: Vec<(&str, &str, &str)> = rows.iter().map(|r| (r.id.as_str(), r.status.as_str(), r.ledger.as_str())).collect();
+        let seen: Vec<(&str, &str, &str)> = rows.iter().map(|r| (r.key.id.as_str(), r.status.as_str(), r.key.ledger.as_str())).collect();
         assert_eq!(seen, [("y-W1", "Parked · Y", "repo:x/y"), ("y-W2", "Parked · Y · on build-box · …drops rows…", "repo:x/y"), ("y-W3", "Parked · Y · on h9", "repo:x/y")]);
         assert_eq!((rows[0].badge.as_str(), rows[0].avatar.as_str()), (short_id("y-W1").as_str(), "Y"));
         assert_eq!(state_word("in_review"), "In review");

@@ -78,7 +78,7 @@ impl World {
         let mut lines = Vec::new();
         for w in self.work.values().filter(|w| w.project == project.key) {
             for t in w.timeline.iter().filter(|t| self.hours(&t.at) <= window_hours) {
-                let line = |kind, detail| Line { kind, text: plain(&w.text), detail, at: t.at.clone(), target: Target::Work(w.id.clone()) };
+                let line = |kind, detail| Line { kind, text: plain(&w.text), detail, at: t.at.clone(), target: Target::Work(w.key()) };
                 match (t.kind.as_str(), t.state.as_deref()) {
                     ("state", Some("done")) => lines.push(line(Happened::Shipped, String::new())),
                     ("state", Some("in_progress")) => lines.push(line(Happened::Moved, format!("Started by {}", self.name_of(&t.actor)))),
@@ -88,7 +88,7 @@ impl World {
             }
         }
         for w in self.waiting_on_you(&project.key) {
-            lines.push(Line { kind: Happened::Waiting, text: plain(&w.text), detail: "Check the proof".into(), at: w.submitted_at(), target: Target::Work(w.id.clone()) });
+            lines.push(Line { kind: Happened::Waiting, text: plain(&w.text), detail: "Check the proof".into(), at: w.submitted_at(), target: Target::Work(w.key()) });
         }
         for s in project.sessions.iter().filter_map(|id| self.session(id)) {
             if let Some((h, at)) = headline(s).filter(|(_, at)| self.hours(at) <= window_hours) {

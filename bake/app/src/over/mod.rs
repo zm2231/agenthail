@@ -23,7 +23,7 @@ use rune_kit::shell::{self, PaneState};
 
 pub use feed::derive::text::{clip_words, plain, short_id};
 pub use feed::derive::live::Overview;
-pub use feed::derive::{GROUPS, Group, Happened, Line, Need, NeedKind, PHASES, Project, Target, Work, World};
+pub use feed::derive::{GROUPS, Group, Happened, Line, Need, NeedKind, PHASES, Project, Target, Work, WorkKey, World};
 
 use crate::{App, Screen};
 
@@ -177,8 +177,8 @@ pub fn go(s: &mut App, to: Screen) {
 }
 
 fn landed(s: &mut App) {
-    if let Screen::Work(id) = s.screen.clone() {
-        worksearch::reread(s, &id);
+    if let Screen::Work(key) = s.screen.clone() {
+        worksearch::reread(s, &key);
     }
 }
 
@@ -203,7 +203,7 @@ pub fn open_session(s: &mut App, id: &str) {
 pub fn open_target(s: &mut App, t: &Target) {
     match t {
         Target::Session(id) => open_session(s, id),
-        Target::Work(id) => go(s, Screen::Work(id.clone())),
+        Target::Work(key) => go(s, Screen::Work(key.clone())),
         Target::Project(key) => go(s, Screen::Project(key.clone())),
     }
 }
@@ -221,7 +221,7 @@ pub fn next_need(s: &mut App) {
     }
     let current = match (&s.screen, current_session(s)) {
         (_, Some(id)) => s.ov.needs.iter().position(|n| n.target == Target::Session(id.to_string())),
-        (Screen::Work(id), _) => s.ov.needs.iter().position(|n| n.target == Target::Work(id.clone())),
+        (Screen::Work(key), _) => s.ov.needs.iter().position(|n| matches!(&n.target, Target::Work(k) if k == key)),
         _ => None,
     };
     let ix = current.map(|i| (i + 1) % s.ov.needs.len()).unwrap_or(0);
@@ -244,14 +244,14 @@ pub fn note_open(s: &App) -> bool {
     s.ov.inbox.note.is_some() || s.ov.work.words.is_some()
 }
 
-pub fn work_review(s: &App, id: &str) -> Option<feed::decisions::Decision> {
-    let w = s.ov.d.work.get(id)?;
+pub fn work_review(s: &App, key: &WorkKey) -> Option<feed::decisions::Decision> {
+    let w = s.ov.d.work.get(key)?;
     let inbox = s.ov.inbox.inbox.as_ref()?;
     feed::review::of_work(&inbox.decisions, w)
 }
 
-fn review_key(s: &mut App, id: &str, verdict: feed::review::Verdict) {
-    let Some(d) = work_review(s, id) else { return };
+fn review_key(s: &mut App, key: &WorkKey, verdict: feed::review::Verdict) {
+    let Some(d) = work_review(s, key) else { return };
     match verdict {
         feed::review::Verdict::Approve => inbox::review(s, &d, verdict, ""),
         feed::review::Verdict::Reject => inbox::ask_changes(s, &d),
@@ -264,7 +264,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, layer: &mut Vec<El>, main_kit: &Kit) -> E
         Screen::Now => now::panes(s, cx, layer, main_kit),
         Screen::Project(key) if layout::board_for(s, key) => project::board(s, cx, key, layer, main_kit),
         Screen::Project(key) => project::lead(s, cx, key, layer, main_kit),
-        Screen::Work(id) => work::view(s, cx, id, layer, main_kit),
+        Screen::Work(key) => work::view(s, cx, key, layer, main_kit),
         Screen::Sessions => sessions::view(s, cx, layer, main_kit),
         Screen::Extensions => extensions::hub(s, cx, main_kit),
         Screen::Extension(id) => extensions::page(s, cx, id, main_kit),
@@ -432,11 +432,11 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
                 _ => false,
             },
             "a" | "c" if matches!(s.screen, Screen::Work(_)) => {
-                if let Screen::Work(id) = s.screen.clone()
-                    && s.ov.d.work.get(&id).is_some_and(|w| feed::derive::phase(w) == feed::derive::phase::CHECK)
+                if let Screen::Work(key) = s.screen.clone()
+                    && s.ov.d.work.get(&key).is_some_and(|w| feed::derive::phase(w) == feed::derive::phase::CHECK)
                 {
                     let verdict = if t.eq_ignore_ascii_case("a") { feed::review::Verdict::Approve } else { feed::review::Verdict::Reject };
-                    review_key(s, &id, verdict);
+                    review_key(s, &key, verdict);
                 }
                 true
             }

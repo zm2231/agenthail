@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
 
-use feed::derive::world::{Work, World};
+use feed::derive::world::{Work, WorkKey, World};
 use feed::worksearch::{Search, work_query};
 
 use crate::over::go;
@@ -12,7 +12,7 @@ pub const SETTLE: Duration = Duration::from_millis(200);
 
 enum Reply {
     Search(u64, Result<Search, String>),
-    Item(u64, String, String, Box<Result<Work, String>>),
+    Item(u64, WorkKey, Box<Result<Work, String>>),
 }
 
 type Asked = (String, u64, Option<Result<Search, String>>);
@@ -21,11 +21,10 @@ pub struct State {
     asked: Option<Asked>,
     typed: Option<(String, f64)>,
     requests: u64,
-    reads: HashMap<String, u64>,
-    keys: HashMap<String, String>,
-    found: HashMap<String, Work>,
+    reads: HashMap<WorkKey, u64>,
+    found: HashMap<WorkKey, Work>,
     names: HashMap<String, String>,
-    opening: HashMap<String, Option<String>>,
+    opening: HashMap<WorkKey, Option<String>>,
     tx: Sender<Reply>,
     rx: Receiver<Reply>,
 }
@@ -33,16 +32,16 @@ pub struct State {
 impl Default for State {
     fn default() -> State {
         let (tx, rx) = channel();
-        State { asked: None, typed: None, requests: 0, reads: HashMap::new(), keys: HashMap::new(), found: HashMap::new(), names: HashMap::new(), opening: HashMap::new(), tx, rx }
+        State { asked: None, typed: None, requests: 0, reads: HashMap::new(), found: HashMap::new(), names: HashMap::new(), opening: HashMap::new(), tx, rx }
     }
 }
 
 impl State {
     pub fn keep(&mut self, d: &mut World) {
-        self.found.retain(|id, _| !d.work.contains_key(id));
+        self.found.retain(|key, _| !d.work.contains_key(key));
         d.found_names.extend(self.names.iter().map(|(k, v)| (k.clone(), v.clone())));
-        for (id, w) in &self.found {
-            d.work.entry(id.clone()).or_insert_with(|| w.clone());
+        for (key, w) in &self.found {
+            d.work.entry(key.clone()).or_insert_with(|| w.clone());
         }
     }
 }
@@ -133,27 +132,27 @@ pub fn drain(s: &mut App) -> bool {
                     changed = true;
                 }
             }
-            Reply::Item(seq, ledger, id, read) => {
-                if s.ov.worksearch.reads.get(&id) != Some(&seq) {
+            Reply::Item(seq, key, read) => {
+                if s.ov.worksearch.reads.get(&key) != Some(&seq) {
                     continue;
                 }
-                s.ov.worksearch.reads.remove(&id);
+                s.ov.worksearch.reads.remove(&key);
                 changed = true;
-                if loaded(s, &id) {
-                    s.ov.worksearch.opening.remove(&id);
+                if loaded(s, &key) {
+                    s.ov.worksearch.opening.remove(&key);
                     continue;
                 }
                 match *read {
                     Ok(work) => {
-                        let work = s.ov.d.place(work, &ledger);
-                        s.ov.worksearch.opening.remove(&id);
-                        s.ov.worksearch.found.insert(id.clone(), work.clone());
+                        let work = s.ov.d.place(work, &key.ledger);
+                        s.ov.worksearch.opening.remove(&key);
+                        s.ov.worksearch.found.insert(key.clone(), work.clone());
                         super::jump::keep_highlight(s, |s| {
-                            s.ov.d.work.insert(id, work);
+                            s.ov.d.work.insert(key, work);
                         });
                     }
                     Err(e) => {
-                        s.ov.worksearch.opening.insert(id, Some(e));
+                        s.ov.worksearch.opening.insert(key, Some(e));
                     }
                 }
             }
@@ -162,68 +161,47 @@ pub fn drain(s: &mut App) -> bool {
     changed | settle(s)
 }
 
-fn loaded(s: &App, id: &str) -> bool {
-    s.ov.d.work.contains_key(id) && !s.ov.worksearch.found.contains_key(id)
+fn loaded(s: &App, key: &WorkKey) -> bool {
+    s.ov.d.work.contains_key(key) && !s.ov.worksearch.found.contains_key(key)
 }
 
-fn taken(s: &App, ledger: &str, id: &str) -> bool {
-    s.ov.d.work.get(id).is_some_and(|w| w.ledger_key() != ledger)
-}
-
-fn read(s: &mut App, ledger: &str, id: &str) {
+fn read(s: &mut App, key: &WorkKey) {
     let Some(client) = s.client.clone() else {
-        s.ov.worksearch.opening.insert(id.into(), Some("Opening this work item needs a running Agenthail.".into()));
+        s.ov.worksearch.opening.insert(key.clone(), Some("Opening this work item needs a running Agenthail.".into()));
         return;
     };
-    s.ov.worksearch.opening.insert(id.into(), None);
+    s.ov.worksearch.opening.insert(key.clone(), None);
     let st = &mut s.ov.worksearch;
     st.requests += 1;
     let seq = st.requests;
-    st.reads.insert(id.to_string(), seq);
-    st.keys.insert(id.to_string(), ledger.to_string());
-    let (tx, ledger, id) = (st.tx.clone(), ledger.to_string(), id.to_string());
+    st.reads.insert(key.clone(), seq);
+    let (tx, key) = (st.tx.clone(), key.clone());
     std::thread::spawn(move || {
-        let read = client.found_work(&ledger, &id);
-        let _ = tx.send(Reply::Item(seq, ledger, id, Box::new(read)));
+        let read = client.found_work(&key.ledger, &key.id);
+        let _ = tx.send(Reply::Item(seq, key, Box::new(read)));
     });
 }
 
-pub fn open(s: &mut App, ledger: &str, id: &str) {
-    if taken(s, ledger, id) {
-        s.ov.jump = None;
-        s.ov.notice = Some(format!("{id} in {ledger} has the same id as work in another project, so it can't open here."));
-        return;
-    }
-    if !loaded(s, id) {
-        s.ov.worksearch.keys.insert(id.to_string(), ledger.to_string());
-    }
-    go(s, Screen::Work(id.to_string()));
+pub fn open(s: &mut App, key: &WorkKey) {
+    go(s, Screen::Work(key.clone()));
 }
 
-fn ledger_of(s: &App, id: &str) -> Option<String> {
-    if loaded(s, id) {
-        return None;
-    }
-    let st = &s.ov.worksearch;
-    st.found.get(id).map(|w| w.ledger_key().to_string()).or_else(|| st.keys.get(id).cloned())
-}
-
-pub fn reread(s: &mut App, id: &str) {
-    if let Some(ledger) = ledger_of(s, id) {
-        read(s, &ledger, id);
+pub fn reread(s: &mut App, key: &WorkKey) {
+    if !loaded(s, key) {
+        read(s, key);
     }
 }
 
-pub fn ledger_changed(s: &mut App, key: Option<&str>) {
-    let Screen::Work(id) = s.screen.clone() else { return };
-    if let Some(ledger) = ledger_of(s, &id).filter(|l| key.is_none_or(|k| l == k)) {
-        read(s, &ledger, &id);
+pub fn ledger_changed(s: &mut App, ledger: Option<&str>) {
+    let Screen::Work(key) = s.screen.clone() else { return };
+    if ledger.is_none_or(|l| l == key.ledger) {
+        reread(s, &key);
     }
 }
 
-pub fn note(s: &App, id: &str) -> Option<String> {
-    let shown = s.ov.d.work.contains_key(id);
-    match s.ov.worksearch.opening.get(id)? {
+pub fn note(s: &App, key: &WorkKey) -> Option<String> {
+    let shown = s.ov.d.work.contains_key(key);
+    match s.ov.worksearch.opening.get(key)? {
         None if shown => None,
         None => Some("Loading this work item…".into()),
         Some(e) if shown => Some(format!("Couldn't refresh this work item, so it may be out of date: {e}")),

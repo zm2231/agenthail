@@ -62,7 +62,7 @@ fn the_timeline_marks_a_move_back_to_an_earlier_phase() {
         {"at": "2026-11-24T10:00:00Z", "kind": "dep"},
         {"at": "2026-11-24T11:00:00Z", "kind": "state", "state": "in_progress"}
     ]}]}}));
-    let steps = timeline::timeline(&w.work["p-W1"], 10);
+    let steps = timeline::timeline(&w.work[&WorkKey::new("p", "p-W1")], 10);
     let shown: Vec<(&str, bool)> = steps.iter().map(|s| (s.what.as_str(), s.moved_back)).collect();
     assert_eq!(shown, [("Moved back to Build", true), ("Moved to Check", false)]);
 }
@@ -75,7 +75,7 @@ fn a_review_past_the_window_leaves_needs_but_stays_on_the_board() {
         "ledgers": {"p": [review("p-W1", "2026-11-24T09:00:00Z"), review("p-W2", "2026-11-20T09:00:00Z")]}
     }));
     let needs: Vec<Target> = w.needs().into_iter().map(|n| n.target).collect();
-    assert_eq!(needs, [Target::Work("p-W1".into())]);
+    assert_eq!(needs, [Target::Work(WorkKey::new("p", "p-W1"))]);
     let board = w.board("p");
     assert_eq!(board.lanes[0].iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["p-W1"]);
     assert_eq!(board.stale_review.iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["p-W2"]);
@@ -132,10 +132,10 @@ fn needs_hold_up_work_only_when_something_running_waits_on_you() {
             session("stalled", with(asks(at), json!({"turnState": {"state": "waiting_person"}}))),
             session("running", with(asks(at), json!({"status": "busy"}))),
             session("worker", with(asks(at), json!({"startedBy": "lead"}))),
-            session("holder", with(asks(at), json!({"heldWork": [{"itemId": "p-W1", "state": "ready"}]}))),
+            session("holder", with(asks(at), json!({"heldWork": [{"itemId": "p-W1", "projectKey": "p", "state": "ready"}]}))),
             session("queued", with(asks(at), json!({"queueCount": 2}))),
             session("idle", asks(at)),
-            session("parked", with(asks(at), json!({"heldWork": [{"itemId": "p-W3", "state": "in_progress"}]}))),
+            session("parked", with(asks(at), json!({"heldWork": [{"itemId": "p-W3", "projectKey": "p", "state": "in_progress"}]}))),
             session("lead", json!({})),
             session("finished", json!({"turnCompletion": {"headline": "Wrote the migration", "outcome": "finished", "at": "2026-11-24T11:59:00Z"}})),
         ],
@@ -148,7 +148,8 @@ fn needs_hold_up_work_only_when_something_running_waits_on_you() {
     let needs = w.needs();
     let of = |g: Group| -> Vec<String> {
         let mut ids: Vec<String> = needs.iter().filter(|n| n.group == g).map(|n| match &n.target {
-            Target::Session(id) | Target::Work(id) | Target::Project(id) => id.clone(),
+            Target::Session(id) | Target::Project(id) => id.clone(),
+            Target::Work(k) => k.id.clone(),
         }).collect();
         ids.sort();
         ids
@@ -242,7 +243,37 @@ fn work_carries_the_ledger_key_the_daemon_gives_its_project() {
         "projects": [{"id": "p-1", "displayName": "P", "ledgerKey": "shared:x"}, {"id": "repo:github.com/o/r", "displayName": "R"}],
         "ledgers": {"p-1": [{"id": "x-W1", "state": "open"}], "repo:github.com/o/r": [{"id": "r-W1", "state": "open"}]}
     }));
-    assert_eq!(w.work["x-W1"].project, "p-1");
-    assert_eq!(w.work["x-W1"].ledger_key(), "shared:x");
-    assert_eq!(w.work["r-W1"].ledger_key(), "repo:github.com/o/r");
+    assert_eq!(w.work[&WorkKey::new("shared:x", "x-W1")].project, "p-1");
+    assert_eq!(w.work[&WorkKey::new("shared:x", "x-W1")].ledger_key(), "shared:x");
+    assert_eq!(w.work[&WorkKey::new("repo:github.com/o/r", "r-W1")].ledger_key(), "repo:github.com/o/r");
+}
+
+#[test]
+fn two_ledgers_with_the_same_id_keep_both_items_apart() {
+    let at = "2026-11-24T11:00:00Z";
+    let item = |text: &str, state: &str| json!({"id": "widget-W1", "text": text, "state": state, "timeline": [{"at": at, "kind": "state", "state": state}]});
+    let w = world(json!({
+        "projects": [{"id": "a", "displayName": "A", "ledgerKey": "repo:a/widget"}, {"id": "b", "displayName": "B", "ledgerKey": "repo:b/widget"}],
+        "sessions": [
+            session("holds-a", json!({"project": {"id": "a", "name": "A"}, "heldWork": [{"itemId": "widget-W1", "projectKey": "repo:a/widget", "state": "in_progress"}]})),
+            session("holds-b", json!({"project": {"id": "b", "name": "B"}, "heldWork": [{"itemId": "widget-W1", "projectKey": "repo:b/widget", "state": "in_review"}]}))
+        ],
+        "ledgers": {"a": [item("Fix the A widget", "in_progress")], "b": [item("Review the B widget", "in_review")]}
+    }));
+    let (a, b) = (WorkKey::new("repo:a/widget", "widget-W1"), WorkKey::new("repo:b/widget", "widget-W1"));
+    assert_eq!((w.work[&a].text.as_str(), w.work[&a].project.as_str()), ("Fix the A widget", "a"));
+    assert_eq!((w.work[&b].text.as_str(), w.work[&b].project.as_str()), ("Review the B widget", "b"));
+    assert_eq!(w.board("a").lanes[1].iter().map(|x| x.text.as_str()).collect::<Vec<_>>(), ["Fix the A widget"]);
+    assert_eq!(w.board("b").lanes[0].iter().map(|x| x.text.as_str()).collect::<Vec<_>>(), ["Review the B widget"]);
+    assert_eq!(w.needs().into_iter().filter_map(|n| match n.target { Target::Work(k) => Some(k), _ => None }).collect::<Vec<_>>(), [b.clone()]);
+    let mut hits: Vec<Target> = w.jump("widget", &[], &[]).into_iter().filter(|h| h.group == "Work").map(|h| h.target).collect();
+    hits.sort();
+    assert_eq!(hits, [Target::Work(a.clone()), Target::Work(b.clone())]);
+    let held = |id: &str| w.session(id).unwrap().primary_work(None).map(|h| w.work[&h.key()].text.clone());
+    assert_eq!(held("holds-a").as_deref(), Some("Fix the A widget"));
+    assert_eq!(held("holds-b").as_deref(), Some("Review the B widget"));
+    assert_eq!(w.group(NeedKind::Question, w.session("holds-b").unwrap()), Group::Waiting, "B's held item is in review, not A's in progress");
+    for t in [Target::Work(a), Target::Work(b)] {
+        assert_eq!(menubar::target_of(&menubar::item_id(&t)), Some(t));
+    }
 }

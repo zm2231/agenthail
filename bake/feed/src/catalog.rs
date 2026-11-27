@@ -81,6 +81,12 @@ pub struct HeldWork {
     pub log: Option<Value>,
 }
 
+impl HeldWork {
+    pub fn key(&self) -> crate::derive::WorkKey {
+        crate::derive::WorkKey::new(&self.project_key, &self.item_id)
+    }
+}
+
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Plan {
@@ -349,14 +355,14 @@ impl Session {
         self.project.as_ref().map(|p| if p.display_name.is_empty() { p.name.clone() } else { p.display_name.clone() }).unwrap_or_else(|| "No project".into())
     }
 
-    pub fn primary_work(&self, pick: Option<&str>) -> Option<&HeldWork> {
+    pub fn primary_work(&self, pick: Option<&crate::derive::WorkKey>) -> Option<&HeldWork> {
         let rank = |w: &HeldWork| match w.state.as_str() {
             "in_progress" => 0,
             "in_review" => 1,
             "blocked" => 2,
             _ => 3,
         };
-        pick.and_then(|id| self.held_work.iter().find(|w| w.item_id == id)).or_else(|| self.held_work.iter().min_by_key(|w| rank(w)))
+        pick.and_then(|k| self.held_work.iter().find(|w| w.key() == *k)).or_else(|| self.held_work.iter().min_by_key(|w| rank(w)))
     }
 
     pub fn checkout_path(&self) -> Option<String> {

@@ -627,7 +627,7 @@ fn open_work_in_a_project_with_no_lead_is_anyones_move() {
     let mut ov = Overview::default();
     ov.refresh(fetched("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")], vec![("p", Ok(vec![work("w1", "open")]))]));
     let w = ov.world(&[]);
-    assert_eq!(w.whose_move(&w.work["w1"]), "Anyone");
+    assert_eq!(w.whose_move(&w.work[&WorkKey::new("p", "w1")]), "Anyone");
 }
 
 #[test]
@@ -644,7 +644,7 @@ fn work_the_person_holds_is_their_move_whoever_logged_before() {
     let mut ov = Overview::default();
     ov.refresh(fetched("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")], vec![("p", Ok(vec![held]))]));
     let w = ov.world(&[]);
-    assert_eq!(w.whose_move(&w.work["w1"]), "You");
+    assert_eq!(w.whose_move(&w.work[&WorkKey::new("p", "w1")]), "You");
 }
 
 #[test]
@@ -666,8 +666,8 @@ fn parked_and_closed_work_is_no_ones_move() {
     let mut ov = Overview::default();
     ov.refresh(fetched("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")], vec![("p", Ok(vec![work("w1", "parked"), work("w2", "closed")]))]));
     let w = ov.world(&[]);
-    assert_eq!(w.whose_move(&w.work["w1"]), "No one");
-    assert_eq!(super::phase::move_of(&w.whose_move(&w.work["w2"])), "No one's move");
+    assert_eq!(w.whose_move(&w.work[&WorkKey::new("p", "w1")]), "No one");
+    assert_eq!(super::phase::move_of(&w.whose_move(&w.work[&WorkKey::new("p", "w2")])), "No one's move");
 }
 
 #[test]

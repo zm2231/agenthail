@@ -32,7 +32,7 @@ fn toolbar(s: &App, key: &str, k: &Kit) -> Toolbar {
 }
 
 pub fn work_card(s: &App, w: &Work, compact: bool, k: &Kit) -> El {
-    let id = w.id.clone();
+    let key = w.key();
     let phase = phase(w);
     let whose = s.d.whose_move(w);
     let who = match phase {
@@ -41,7 +41,7 @@ pub fn work_card(s: &App, w: &Work, compact: bool, k: &Kit) -> El {
         _ => format!("{}'s move", ui::short_title(&whose, 22)),
     };
     let mut c = col()
-        .key(format!("w-{}", w.id))
+        .key(format!("w-{}-{}", w.ledger_key(), w.id))
         .w_full()
         .gap(8.0)
         .padding(12.0)
@@ -49,7 +49,7 @@ pub fn work_card(s: &App, w: &Work, compact: bool, k: &Kit) -> El {
         .fill(k.c.surface_base)
         .border(1.0, if phase == CHECK { k.c.warning.icon.alpha(0.35) } else { ui::edge(k) })
         .hover(k.c.surface_raised_hover)
-        .on_press(move |s: &mut App| go(s, Screen::Work(id.clone())))
+        .on_press(move |s: &mut App| go(s, Screen::Work(key.clone())))
         .child(ui::title_fit(s, &format!("card-{}-{compact}", w.id), &plain(&w.text), BODY_MED.lh(19.0), strong(k), 2));
     c = c.child(ui::mini_phase(phase, k));
     let last = w.timeline.last().map(|t| s.d.ago(&t.at)).unwrap_or_default();
