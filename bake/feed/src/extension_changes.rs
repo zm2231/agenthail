@@ -143,6 +143,13 @@ pub fn build_blocked(listed: bool, error: Option<&str>, host_name: &str) -> Opti
     (!listed).then(|| format!("Waiting for {host_name} to list its extensions."))
 }
 
+fn forwarded(host: Option<&str>, mut error: RespondError) -> RespondError {
+    if host.is_some_and(|h| !h.is_empty()) && error.code == "host_unreachable" {
+        error.maybe_delivered = true;
+    }
+    error
+}
+
 fn unreadable(what: &str, e: serde_json::Error, maybe_delivered: bool) -> RespondError {
     RespondError { message: format!("the {what} reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered, answered: true, reply: Value::Null, status: 0 }
 }
@@ -166,7 +173,7 @@ impl Client {
     }
 
     pub fn undo_extension_change(&self, host: Option<&str>, rev: &str) -> std::result::Result<(), RespondError> {
-        self.post_empty(&on_host(&format!("{}/undo", rev_path(rev)), host), "undo", &request_key()).and_then(confirmed).map(drop)
+        self.post_empty(&on_host(&format!("{}/undo", rev_path(rev)), host), "undo", &request_key()).map_err(|e| forwarded(host, e)).and_then(confirmed).map(drop)
     }
 
     pub fn build_extension(&self, host: Option<&str>, message: &str, key: &str) -> std::result::Result<Started, RespondError> {
@@ -176,7 +183,7 @@ impl Client {
                 let made: Started = serde_json::from_value(error.reply.clone()).unwrap_or_default();
                 return match made.session_id() {
                     Some(_) => Ok(Started { failure: Some(error.message), ..made }),
-                    None => Err(error),
+                    None => Err(forwarded(host, error)),
                 };
             }
         };

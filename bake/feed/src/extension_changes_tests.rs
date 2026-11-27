@@ -116,6 +116,15 @@ fn a_failed_build_that_made_its_session_opens_it_with_the_failure() {
 }
 
 #[test]
+fn a_paired_computer_that_dropped_the_answer_may_still_have_acted() {
+    let lost = r#"{"error":{"code":"host_unreachable","message":"Host forge is unreachable: connection reset"},"host":"h2"}"#;
+    let (client, _rx) = daemon(replies(&[(503, lost), (503, lost), (503, lost)]));
+    assert!(client.build_extension(Some("h2"), "a board", "k1").unwrap_err().maybe_delivered);
+    assert!(client.undo_extension_change(Some("h2"), "r2").unwrap_err().maybe_delivered);
+    assert!(!client.build_extension(None, "a board", "k2").unwrap_err().maybe_delivered);
+}
+
+#[test]
 fn a_build_or_undo_reply_that_proves_nothing_may_have_happened() {
     let (client, _rx) = daemon(replies(&[(200, r#"{"ok":true}"#), (202, r#"{"ok":true,"status":"submitted"}"#)]));
     let nameless = client.build_extension(None, "a board", "k1").unwrap_err();
