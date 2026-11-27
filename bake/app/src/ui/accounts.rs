@@ -141,6 +141,7 @@ fn settled(s: &mut App, done: Done) {
         Done::Sets(seq, sets) => {
             if seq == s.accounts.sets_seq {
                 s.accounts.in_flight = false;
+                s.accounts.asked_at = Some(Instant::now());
                 match sets {
                     Err(error) if matches!(s.accounts.sets, Some(Ok(_))) => s.accounts.refresh_error = Some(error),
                     sets => {
