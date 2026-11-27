@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use feed::shortcuts::{COMMANDS, Group, Shortcuts};
+use feed::shortcuts::{ANY_APP, ANY_APP_ID, COMMANDS, Group, Shortcuts};
 use rune::{El, Shortcut, ShortcutError, el, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, Kit, ShortcutRecorder, ShortcutRecorderState, shortcut_error_message};
 
@@ -11,8 +11,11 @@ use crate::ui::bindings;
 #[derive(Default)]
 pub struct Form {
     rows: HashMap<&'static str, ShortcutRecorderState>,
+    any_app: ShortcutRecorderState,
     kept: Vec<(&'static str, &'static str)>,
     kept_at: u64,
+    seen: u64,
+    unsaved: Option<String>,
 }
 
 pub const PAGE: usize = 2;
@@ -23,15 +26,40 @@ pub fn opened(s: &mut Prefs) {
     }
     bindings::refresh();
     s.keyboard.kept.clear();
+    s.keyboard.unsaved = None;
     sync_rows(s);
 }
 
+pub fn poll(s: &mut Prefs) -> bool {
+    let recording = s.keyboard.any_app.is_recording() || s.keyboard.rows.values().any(ShortcutRecorderState::is_recording);
+    let changed = s.keyboard.seen != bindings::generation() && !recording;
+    if changed {
+        sync_rows(s);
+    }
+    if crate::hotkey::asks_again() {
+        s.keyboard.any_app.mark_unregistered();
+    }
+    changed
+}
+
+fn follow(state: &mut ShortcutRecorderState, stored: Option<Shortcut>) -> bool {
+    if state.is_recording() {
+        return false;
+    }
+    if state.shortcut() != stored.as_ref() {
+        *state = ShortcutRecorderState::new(stored);
+    }
+    true
+}
+
 fn sync_rows(s: &mut Prefs) {
+    crate::hotkey::sync();
+    let mut all = follow(&mut s.keyboard.any_app, bindings::any_app());
     for c in COMMANDS {
-        let state = s.keyboard.rows.entry(c.id).or_default();
-        if !state.is_recording() {
-            *state = ShortcutRecorderState::new(bindings::shortcut(c.id));
-        }
+        all &= follow(s.keyboard.rows.entry(c.id).or_default(), bindings::shortcut(c.id));
+    }
+    if all {
+        s.keyboard.seen = bindings::generation();
     }
 }
 
@@ -51,33 +79,75 @@ fn propose(id: &'static str, next: Option<&Shortcut>) -> Result<(), ShortcutErro
     if stored.is_some_and(|s| s.types()) {
         return Err(ShortcutError::InvalidAccelerator(next.map(Shortcut::to_string).unwrap_or_default()));
     }
-    bindings::change(|sc| sc.set(id, stored)).map_err(|_| ShortcutError::Conflict)
+    bindings::change(|sc| sc.set(id, stored)).map_err(ShortcutError::Backend)?.map_err(|_| ShortcutError::Conflict)
+}
+
+fn propose_any_app(next: Option<&Shortcut>) -> Result<(), ShortcutError> {
+    let stored = match next {
+        None => None,
+        Some(shortcut) => Some(bindings::stored(shortcut).ok_or_else(|| ShortcutError::InvalidAccelerator(shortcut.to_string()))?),
+    };
+    bindings::change(|sc| sc.set_any_app(stored)).map_err(ShortcutError::Backend)?.map_err(|_| ShortcutError::Conflict)?;
+    crate::hotkey::chose();
+    Ok(())
 }
 
 fn message(id: &'static str, error: &ShortcutError, shortcut: Option<&Shortcut>) -> String {
     let Some(shortcut) = shortcut else { return shortcut_error_message(error, None) };
-    let keys = bindings::keycaps(shortcut);
+    let keys = if id == ANY_APP_ID { crate::hotkey::keycaps(shortcut) } else { bindings::keycaps(shortcut) };
     match error {
-        ShortcutError::Conflict => match bindings::stored(shortcut).and_then(|s| bindings::read(|sc| sc.owner(s, id))) {
+        ShortcutError::Backend(why) => format!("{keys} couldn't be saved: {why}."),
+        ShortcutError::Conflict => match bindings::stored(shortcut).and_then(|s| bindings::read(|sc| if id == ANY_APP_ID { sc.any_app_owner(s) } else { sc.owner(s, id) })) {
             Some(owner) => format!("{keys} is already used by {owner}."),
             None => shortcut_error_message(error, Some(shortcut)),
         },
+        ShortcutError::InvalidAccelerator(_) if bindings::stored(shortcut).is_none() => format!("{keys} can't be saved as a shortcut."),
         ShortcutError::InvalidAccelerator(_) if bindings::stored(shortcut).is_some_and(|s| s.types()) => format!("{keys} types in the message box. Add ⌘, ⌃ or ⌥."),
         _ => shortcut_error_message(error, Some(shortcut)),
     }
 }
 
 fn reset(s: &mut Prefs, id: &'static str) {
-    if bindings::change(|sc| sc.reset(id)).is_ok() {
-        *row_state(s, id) = ShortcutRecorderState::new(bindings::shortcut(id));
+    match bindings::change(|sc| sc.reset(id)) {
+        Ok(Ok(())) => {
+            s.keyboard.unsaved = None;
+            *row_state(s, id) = ShortcutRecorderState::new(bindings::shortcut(id));
+        }
+        Ok(Err(_)) => {}
+        Err(error) => s.keyboard.unsaved = Some(format!("The default couldn't be saved: {error}.")),
     }
 }
 
 fn restore(s: &mut Prefs) {
-    s.keyboard.kept = bindings::change(Shortcuts::reset_all);
+    s.keyboard.kept = match bindings::change(Shortcuts::reset_all) {
+        Ok(kept) => {
+            s.keyboard.unsaved = None;
+            kept
+        }
+        Err(error) => {
+            s.keyboard.unsaved = Some(format!("The defaults couldn't be saved: {error}."));
+            Vec::new()
+        }
+    };
     s.keyboard.kept_at = bindings::generation();
     s.keyboard.rows.clear();
+    s.keyboard.any_app = ShortcutRecorderState::default();
     sync_rows(s);
+}
+
+fn any_app_state(s: &mut Prefs) -> &mut ShortcutRecorderState {
+    &mut s.keyboard.any_app
+}
+
+fn any_app_row(s: &Prefs, k: &Kit) -> El {
+    let recorder = ShortcutRecorder::new("settings-shortcut-any-app", &s.keyboard.any_app, any_app_state)
+        .label(ANY_APP.to_string())
+        .width(180.0)
+        .on_change(|_: &mut Prefs, next, _| propose_any_app(next))
+        .error_message(|error, shortcut| message(ANY_APP_ID, error, shortcut))
+        .build(k);
+    let row = line(ANY_APP, Some("Brings Agenthail forward with the session palette open, from any app.".to_string()), recorder, k);
+    section("", vec![row], crate::hotkey::note(), k)
 }
 
 fn command_row(s: &Prefs, id: &'static str, title: &str, k: &Kit) -> El {
@@ -115,7 +185,7 @@ fn command_row(s: &Prefs, id: &'static str, title: &str, k: &Kit) -> El {
 }
 
 pub fn page(s: &Prefs, k: &Kit) -> El {
-    let mut out = parts::page();
+    let mut out = parts::page().child(any_app_row(s, k));
     for group in Group::ALL {
         let rows = COMMANDS.iter().filter(|c| c.group == group).map(|c| command_row(s, c.id, c.title, k)).collect();
         out = out.child(section(group.title(), rows, None, k));
@@ -129,6 +199,9 @@ pub fn page(s: &Prefs, k: &Kit) -> El {
     let current = s.keyboard.kept_at == bindings::generation();
     for (title, owner) in s.keyboard.kept.iter().filter(|_| current) {
         out = out.child(text(format!("{title} kept its shortcut: its default is used by {owner}.")).font(k.text(crate::theme::META)).color(crate::theme::muted()).wrap().px(4.0));
+    }
+    if let Some(unsaved) = &s.keyboard.unsaved {
+        out = out.child(text(unsaved.clone()).font(k.text(crate::theme::META)).color(crate::theme::muted()).wrap().px(4.0));
     }
     out.child(row().w_full().child(el().grow(1.0)).child(restore))
 }

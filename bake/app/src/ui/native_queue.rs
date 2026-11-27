@@ -41,6 +41,10 @@ impl NativeQueue {
     }
 }
 
+pub fn covering(s: &App) -> bool {
+    s.native_queue.menu.is_some() || s.native_queue.editor.is_some()
+}
+
 fn showing(s: &App, id: &str) -> bool {
     s.screen == crate::Screen::Session && s.selected.as_deref() == Some(id)
 }

@@ -33,6 +33,10 @@ pub fn shortcut(id: &str) -> Option<Shortcut> {
     with_bound(|b| b.saved.spec(id)?.parse().ok())
 }
 
+pub fn any_app() -> Option<Shortcut> {
+    with_bound(|b| b.saved.any_app()?.global_spec()?.parse().ok())
+}
+
 pub fn generation() -> u64 {
     with_bound(|b| b.generation)
 }
@@ -49,18 +53,26 @@ pub fn refresh() {
     }
 }
 
-pub fn change<T>(f: impl FnOnce(&mut Shortcuts) -> T) -> T {
+pub fn change<T>(f: impl FnOnce(&mut Shortcuts) -> T) -> Result<T, String> {
     let fresh = store::load();
     let mut saved = fresh.clone();
     let out = f(&mut saved);
-    if saved != fresh {
-        store::save(&saved);
+    if saved != fresh
+        && let Err(error) = store::save(&fresh, &saved)
+    {
+        eprintln!("agenthail: keyboard shortcuts not saved: {error}");
+        saved = fresh;
+        let generation = with_bound(|b| b.generation);
+        if read(|now| *now != saved) {
+            BOUND.with_borrow_mut(|b| *b = Some(Bound::new(saved, generation + 1)));
+        }
+        return Err(error);
     }
     let generation = with_bound(|b| b.generation);
     if read(|now| *now != saved) {
         BOUND.with_borrow_mut(|b| *b = Some(Bound::new(saved, generation + 1)));
     }
-    out
+    Ok(out)
 }
 
 pub fn stored(shortcut: &Shortcut) -> Option<Stored> {
@@ -93,20 +105,35 @@ mod store {
         Shortcuts::load(data.as_deref(), any_app.as_deref())
     }
 
-    pub fn save(saved: &Shortcuts) {
+    pub fn save(before: &Shortcuts, saved: &Shortcuts) -> Result<(), String> {
         let Some(defaults) = defaults() else {
-            eprintln!("agenthail: keyboard shortcuts not saved: the {DOMAIN} settings couldn't be opened");
-            return;
+            return Err(format!("the {DOMAIN} settings couldn't be opened"));
         };
         let key = NSString::from_str(KEY);
-        match saved.data() {
-            Some(bytes) => {
-                let data = NSData::from_vec(bytes);
-                let object: &AnyObject = &data;
+        let commands = saved.data();
+        if commands != before.data() {
+            match commands {
+                Some(bytes) => {
+                    let data = NSData::from_vec(bytes);
+                    let object: &AnyObject = &data;
+                    unsafe { defaults.setObject_forKey(Some(object), &key) };
+                }
+                None => defaults.removeObjectForKey(&key),
+            }
+        }
+        if before.any_app() == saved.any_app() {
+            return Ok(());
+        }
+        let key = NSString::from_str(ANY_APP_KEY);
+        match saved.any_app_json() {
+            Some(json) => {
+                let value = NSString::from_str(&json);
+                let object: &AnyObject = &value;
                 unsafe { defaults.setObject_forKey(Some(object), &key) };
             }
             None => defaults.removeObjectForKey(&key),
         }
+        Ok(())
     }
 }
 
@@ -114,25 +141,33 @@ mod store {
 mod store {
     use std::path::PathBuf;
 
-    use feed::shortcuts::Shortcuts;
+    use feed::shortcuts::{ANY_APP_ID, Shortcuts};
+    use serde_json::{Map, Value};
 
     fn path() -> Option<PathBuf> {
         std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".agenthail/keyboard-shortcuts.json"))
     }
 
     pub fn load() -> Shortcuts {
-        Shortcuts::load(path().and_then(|p| std::fs::read(p).ok()).as_deref(), None)
+        let mut map: Map<String, Value> = path().and_then(|p| std::fs::read(p).ok()).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let any_app = map.remove(ANY_APP_ID).map(|v| v.to_string());
+        let commands = (!map.is_empty()).then(|| serde_json::to_vec(&map).ok()).flatten();
+        Shortcuts::load(commands.as_deref(), any_app.as_deref())
     }
 
-    pub fn save(saved: &Shortcuts) {
-        let Some(path) = path() else { return };
-        let result = match saved.data() {
-            Some(bytes) => std::fs::write(&path, bytes),
-            None => std::fs::remove_file(&path).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }),
-        };
-        if let Err(e) = result {
-            eprintln!("agenthail: keyboard shortcuts not saved: {e}");
+    pub fn save(_: &Shortcuts, saved: &Shortcuts) -> Result<(), String> {
+        let path = path().ok_or("HOME isn't set")?;
+        let mut map: Map<String, Value> = saved.data().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        if let Some(any_app) = saved.any_app_json().and_then(|j| serde_json::from_str(&j).ok()) {
+            map.insert(ANY_APP_ID.into(), any_app);
         }
+        let result = if map.is_empty() {
+            std::fs::remove_file(&path).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) })
+        } else {
+            let staged = path.with_extension("json.new");
+            serde_json::to_vec(&map).map_err(std::io::Error::other).and_then(|bytes| std::fs::write(&staged, bytes)).and_then(|()| std::fs::rename(&staged, &path))
+        };
+        result.map_err(|e| e.to_string())
     }
 }
 
@@ -144,14 +179,19 @@ mod store {
 
     thread_local! {
         pub static SAVED: RefCell<Shortcuts> = RefCell::new(Shortcuts::default());
+        pub static FAILS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     }
 
     pub fn load() -> Shortcuts {
         SAVED.with_borrow(Clone::clone)
     }
 
-    pub fn save(saved: &Shortcuts) {
+    pub fn save(_: &Shortcuts, saved: &Shortcuts) -> Result<(), String> {
+        if FAILS.get() {
+            return Err("disk full".into());
+        }
         SAVED.with_borrow_mut(|s| *s = saved.clone());
+        Ok(())
     }
 }
 
@@ -166,11 +206,11 @@ mod tests {
         let before = generation();
         assert!(chord("goToSession").is_some());
         let k = KeyEvent { key: Key::Command('g'), mods: Mods { cmd: true, ..Mods::default() } };
-        assert_eq!(change(|s| s.set("goToSession", Stored::parse("mod+g"))), Ok(()));
+        assert_eq!(change(|s| s.set("goToSession", Stored::parse("mod+g"))), Ok(Ok(())));
         assert!(generation() > before);
         assert!(chord("goToSession").is_some_and(|c| c.matches_on(&k, KeyPlatform::Mac)));
-        assert_eq!(change(|s| s.set("goToSession", Stored::parse("mod+g"))), Ok(()));
-        change(Shortcuts::reset_all);
+        assert_eq!(change(|s| s.set("goToSession", Stored::parse("mod+g"))), Ok(Ok(())));
+        change(Shortcuts::reset_all).unwrap();
         assert!(!chord("goToSession").is_some_and(|c| c.matches_on(&k, KeyPlatform::Mac)));
         assert_eq!(shortcut("goToSession").map(|s| s.to_string()), "mod+k".parse::<Shortcut>().ok().map(|s| s.to_string()));
     }
@@ -178,17 +218,26 @@ mod tests {
     #[test]
     fn a_change_starts_from_what_the_mac_app_saved_since() {
         assert_eq!(chord("refresh").map(|c| c.to_string()), Some("mod+r".parse::<Chord>().unwrap().to_string()));
-        store::save(&Shortcuts::load(Some(br#"{"refresh":{"carbonKeyCode":15,"carbonModifiers":768}}"#), None));
-        assert_eq!(change(|s| s.set("stop", Stored::parse("mod+g"))), Ok(()));
+        store::save(&Shortcuts::default(), &Shortcuts::load(Some(br#"{"refresh":{"carbonKeyCode":15,"carbonModifiers":768}}"#), None));
+        assert_eq!(change(|s| s.set("stop", Stored::parse("mod+g"))), Ok(Ok(())));
         let saved = store::load();
         assert_eq!(saved.spec("refresh").as_deref(), Some("shift+mod+r"), "the other app's change survives");
         assert_eq!(saved.spec("stop").as_deref(), Some("mod+g"));
         assert_eq!(shortcut("refresh").map(|s| s.to_string()), "shift+mod+r".parse::<Shortcut>().ok().map(|s| s.to_string()));
-        store::save(&Shortcuts::default());
+        store::save(&Shortcuts::default(), &Shortcuts::default());
         let before = generation();
         refresh();
         assert!(generation() > before);
         assert_eq!(shortcut("stop").map(|s| s.to_string()), "mod+period".parse::<Shortcut>().ok().map(|s| s.to_string()));
+    }
+
+    #[test]
+    fn a_change_that_cant_be_saved_is_refused_and_leaves_the_binding() {
+        store::FAILS.set(true);
+        assert_eq!(change(|s| s.set_any_app(Stored::parse("alt+mod+k"))), Err("disk full".to_string()));
+        store::FAILS.set(false);
+        assert_eq!(any_app(), None);
+        assert_eq!(store::load().any_app(), None);
     }
 
     #[test]
