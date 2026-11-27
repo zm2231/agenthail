@@ -250,8 +250,10 @@ fn take(s: &mut App, done: Done) {
         Done::Claude(id, seq, read) => {
             let Some(asked) = s.crew.claude_asked.get_mut(&id).filter(|a| a.seq == seq) else { return };
             asked.in_flight = false;
-            if let Some(metadata) = read.metadata {
-                super::inspect::took(s, &id, metadata);
+            match (read.metadata, &read.subagents) {
+                (Some(metadata), _) => super::inspect::took(s, &id, metadata),
+                (None, Err(error)) => super::inspect::read_failed(s, &id, error.clone()),
+                (None, Ok(_)) => {}
             }
             if s.crew.claude_again.remove(&id) {
                 reload_claude(s, &id);

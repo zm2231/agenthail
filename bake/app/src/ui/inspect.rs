@@ -80,7 +80,8 @@ pub fn load(s: &mut App, id: &str) {
     if s.inspect.expanded.as_deref() != Some(id) {
         s.inspect.expanded = None;
     }
-    fetch(s, id, true);
+    let shared = session(s, id).is_some_and(|x| x.surface == "claude");
+    fetch(s, id, !shared);
 }
 
 pub fn refresh(s: &mut App, id: &str) {
@@ -130,6 +131,12 @@ pub(crate) fn took(s: &mut App, id: &str, data: Metadata) {
     let entry = s.inspect.meta.entry(id.to_string()).or_default();
     entry.data = Some(data.after(entry.data.as_ref()));
     entry.stamp = stamp;
+    entry.at = Some(Instant::now());
+}
+
+pub(crate) fn read_failed(s: &mut App, id: &str, error: String) {
+    let entry = s.inspect.meta.entry(id.to_string()).or_default();
+    entry.data = Some(Metadata::failed(entry.data.as_ref(), error));
     entry.at = Some(Instant::now());
 }
 
