@@ -27,16 +27,16 @@ pub enum Ask {
 }
 
 pub fn latest(asks: impl IntoIterator<Item = (Ask, Option<Stored>)>) -> Option<(Ask, Option<Stored>)> {
-    asks.into_iter().reduce(|(was, _), (ask, shortcut)| {
-        let kind = if was == Ask::Choose || ask == Ask::Choose {
-            Ask::Choose
-        } else if was == Ask::Regain || ask == Ask::Regain {
-            Ask::Regain
-        } else {
-            Ask::Want
-        };
-        (kind, shortcut)
-    })
+    let asks: Vec<_> = asks.into_iter().collect();
+    let (_, shortcut) = *asks.last()?;
+    let kind = if asks.iter().any(|a| *a == (Ask::Choose, shortcut)) {
+        Ask::Choose
+    } else if asks.iter().any(|(ask, _)| *ask == Ask::Regain) {
+        Ask::Regain
+    } else {
+        Ask::Want
+    };
+    Some((kind, shortcut))
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -187,7 +187,9 @@ mod tests {
     fn asks_waiting_behind_a_slow_one_settle_on_the_newest_binding() {
         let (a, b) = (Some(s("alt+mod+k")), Some(s("ctrl+alt+space")));
         assert_eq!(latest([]), None);
-        assert_eq!(latest([(Ask::Choose, b), (Ask::Want, None)]), Some((Ask::Choose, None)));
+        assert_eq!(latest([(Ask::Choose, b), (Ask::Want, None)]), Some((Ask::Want, None)));
+        assert_eq!(latest([(Ask::Choose, b), (Ask::Want, a)]), Some((Ask::Want, a)), "a choice of another binding doesn't re-ask for this one");
+        assert_eq!(latest([(Ask::Choose, a), (Ask::Want, a)]), Some((Ask::Choose, a)));
         assert_eq!(latest([(Ask::Want, a), (Ask::Regain, a)]), Some((Ask::Regain, a)));
         assert_eq!(latest([(Ask::Want, a), (Ask::Want, b)]), Some((Ask::Want, b)));
 
@@ -199,6 +201,13 @@ mod tests {
         assert_eq!(fake.calls, 1, "the passed-over choice is never registered");
         assert!(fake.live.is_empty());
         assert!(!hk.held());
+
+        let mut fake = Fake { taken: vec![(s("alt+mod+k"), None)], ..Fake::default() };
+        let mut hk = Hotkey::default();
+        hk.ask(&mut fake, Ask::Choose, a);
+        let (ask, shortcut) = latest([(Ask::Choose, b), (Ask::Want, a)]).unwrap();
+        assert!(!hk.ask(&mut fake, ask, shortcut), "a refused binding restored elsewhere isn't retried");
+        assert_eq!(fake.calls, 1);
     }
 
     #[test]

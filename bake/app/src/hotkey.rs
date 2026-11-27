@@ -13,6 +13,7 @@ thread_local! {
     static WORKER: OnceCell<Sender<(Ask, Option<Stored>)>> = const { OnceCell::new() };
     static REFUSED: RefCell<Option<(Refusal, Option<Stored>)>> = const { RefCell::new(None) };
     static RETURN: RefCell<Return> = RefCell::new(Return::default());
+    static SENT: RefCell<Option<Option<Stored>>> = const { RefCell::new(None) };
 }
 
 struct Live<'a>(&'a AppHandle<App>);
@@ -87,9 +88,14 @@ pub fn keep(handle: AppHandle<App>) {
 
 fn ask(ask: Ask) {
     let want = bindings::read(|sc| sc.any_app());
+    if ask == Ask::Want && SENT.with_borrow(|sent| *sent == Some(want)) {
+        return;
+    }
     WORKER.with(|w| {
         if let Some(tx) = w.get() {
-            let _ = tx.send((ask, want));
+            if tx.send((ask, want)).is_ok() {
+                SENT.set(Some(want));
+            }
         }
     });
 }
