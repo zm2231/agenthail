@@ -37,6 +37,7 @@ pub mod queue;
 pub mod prefer;
 pub mod paste;
 pub mod prefs;
+pub mod project_message;
 pub mod projects;
 pub mod source;
 pub mod store;

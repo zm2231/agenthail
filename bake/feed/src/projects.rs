@@ -56,6 +56,7 @@ pub struct Checkout {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Item {
     NewConversation { host: String, folder: String },
+    Message,
     Rename,
     Lead { change: bool },
     ClearLead,
@@ -78,6 +79,24 @@ pub struct Entry {
 impl Entry {
     fn on(item: Item, label: impl Into<String>) -> Entry {
         Entry { item, label: label.into(), note: None, enabled: true }
+    }
+}
+
+impl Item {
+    pub fn key(&self) -> &'static str {
+        match self {
+            Item::NewConversation { .. } => "new-conversation",
+            Item::Message => "message",
+            Item::Rename => "rename",
+            Item::Lead { .. } => "lead",
+            Item::ClearLead => "clear-lead",
+            Item::Pin(_) => "pin",
+            Item::Earlier => "earlier",
+            Item::Later => "later",
+            Item::Tools { .. } => "tools",
+            Item::Archive(_) => "archive",
+            Item::Remove { .. } => "remove",
+        }
     }
 }
 
@@ -139,6 +158,9 @@ pub fn entries(p: &ProjectRecord, tiles: &Arrangement, arranged: &[String]) -> V
         lead.push(Entry::on(Item::Rename, "Rename…"));
     }
     if !p.archived {
+        let mut message = Entry::on(Item::Message, "Message Every Conversation…");
+        message.note = Some(crate::project_message::help(p.name()));
+        lead.push(message);
         for c in p.checkouts.iter().filter(|c| !c.archived) {
             lead.push(Entry::on(Item::NewConversation { host: c.host.target().to_string(), folder: c.root_path.clone() }, format!("New conversation{}", p.place(c))));
         }
