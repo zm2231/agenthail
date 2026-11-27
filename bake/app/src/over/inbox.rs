@@ -248,6 +248,9 @@ pub fn drain(s: &mut crate::App) -> bool {
                         st.notes.insert(id, (hold, why));
                     }
                 }
+                if let Some(client) = &s.client {
+                    refresh(client, &s.ov.inbox);
+                }
             }
             Done::Version(shown, daemon) => {
                 st.version = shown;
@@ -333,7 +336,7 @@ pub fn toggle_open(s: &mut crate::App, d: &Decision, tx: &mut rune::Tx) {
 pub fn reply(s: &mut crate::App, d: &Decision) {
     let id = d.id();
     let words = s.ov.inbox.replies.get(&id).map(|t| t.text.trim().to_string()).unwrap_or_default();
-    if words.is_empty() || d.session_id.is_empty() || s.ov.inbox.replying.contains(&id) {
+    if words.is_empty() || d.session_id.is_empty() || s.ov.inbox.replying.contains(&id) || crate::closed(s, &d.session_id) {
         return;
     }
     let who = title_of(s, d);

@@ -80,7 +80,7 @@ fn line(s: &App, i: usize, d: &Decision, shift: bool) -> El {
     }
     let open = st_open(s, d);
     let answers = !d.is_review() && d.answerable && !d.requests.is_empty();
-    let replies = d.is_parked() && !d.session_id.is_empty();
+    let replies = d.is_parked() && !d.session_id.is_empty() && !crate::closed(s, &d.session_id);
     if answers || replies {
         let dd = d.clone();
         let label = match (open, answers) {

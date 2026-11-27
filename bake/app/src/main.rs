@@ -696,7 +696,7 @@ pub fn send_to(s: &mut App, id: &str, tx: &mut Tx) {
     }
 }
 
-fn closed(s: &App, id: &str) -> bool {
+pub fn closed(s: &App, id: &str) -> bool {
     session(s, id).is_some_and(|x| feed::notice::read_only(x).is_some())
 }
 
@@ -1226,6 +1226,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 note(s, &id, status.clone());
                 s.answer_status.insert(request.clone(), status);
                 fetch_requests_at(s, &id, &[0, 2000, 6000, 9000]);
+                if let Some(client) = &s.client {
+                    over::inbox::refresh(client, &s.ov.inbox);
+                }
             }
             Bg::NewSession(loaded) => ui::new_session::take(s, loaded),
             Bg::Queue(id, asked, result) => ui::queue::take(s, id, asked, result),
