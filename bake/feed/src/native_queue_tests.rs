@@ -92,26 +92,72 @@ fn outcomes_follow_the_daemon_codes() {
     assert_eq!(Outcome::of(Err(failed("session_operation_failed", 502, true))), Outcome::Failed("boom".into()));
     assert_eq!(Outcome::of(Err(failed("session_operation_unknown", 502, true))), Outcome::Unknown("boom The outcome is unknown; check the session before retrying.".into()));
     assert_eq!(Outcome::of(Err(failed("host_outcome_unknown", 502, true))), Outcome::Unknown("boom The outcome is unknown; check the session before retrying.".into()));
-    assert_eq!(Outcome::of(Err(failed("submitted", 0, true))), Outcome::Unknown("Agenthail is still finishing this request. The outcome is unknown; check the session before retrying.".into()));
-    assert!(matches!(Outcome::of(Err(failed("", 0, true))), Outcome::Unknown(_)), "a dropped connection after sending is unknown");
+    assert_eq!(Outcome::of(Err(failed("submitted", 0, true))), Outcome::Pending("Agenthail is still finishing this request. The outcome is unknown; check the session before retrying.".into()));
+    assert!(matches!(Outcome::of(Err(failed("", 0, true))), Outcome::Pending(_)), "a dropped connection after sending is still pending");
     assert!(matches!(Outcome::of(Err(failed("", 0, false))), Outcome::Failed(_)), "a request that never left is a plain failure");
+    assert_eq!(Outcome::Pending("x".into()).error(), Some("x"));
+    assert_eq!(Outcome::Done.error(), None);
 }
 
 #[test]
-fn a_retry_after_an_unknown_outcome_reuses_its_key_until_the_queue_is_read() {
+fn a_retry_after_an_unknown_outcome_reuses_its_key_until_a_later_read() {
     let mut keys = Keys::default();
     let add = Act::Add("Ship it".into());
     let first = keys.key("s", &add);
-    keys.settled("s", &add, &Outcome::Unknown("lost".into()));
+    let early = keys.read_started();
+    keys.settled(&first, &Outcome::Unknown("lost".into()));
     assert_eq!(keys.key("s", &add), first, "the same add retries with the same key");
     assert_ne!(keys.key("s", &Act::Add("Other".into())), first);
     assert_ne!(keys.key("t", &add), first, "another session's add is its own request");
-    keys.observed("s");
-    assert_ne!(keys.key("s", &add), first, "after a read the next add is a new request");
+    keys.observed("s", early);
+    assert_eq!(keys.key("s", &add), first, "a read that started before the answer doesn't count");
+    let late = keys.read_started();
+    keys.observed("s", late);
+    assert_ne!(keys.key("s", &add), first, "after a later read the next add is a new request");
+}
+
+#[test]
+fn a_still_running_request_keeps_its_key_across_reads() {
+    let mut keys = Keys::default();
+    let add = Act::Add("Ship it".into());
+    let first = keys.key("s", &add);
+    keys.settled(&first, &Outcome::Pending("still finishing".into()));
+    let read = keys.read_started();
+    keys.observed("s", read);
+    assert_eq!(keys.key("s", &add), first, "a submitted add retries with the same key and message id");
+    keys.settled(&first, &Outcome::Done);
+    assert_ne!(keys.key("s", &add), first);
+}
+
+#[test]
+fn a_late_answer_only_settles_its_own_request() {
+    let mut keys = Keys::default();
     let del = Act::Delete("q1".into());
-    let k = keys.key("s", &del);
-    keys.settled("s", &del, &Outcome::Failed("nope".into()));
-    assert_ne!(keys.key("s", &del), k, "a definite answer clears the session's keys");
+    let add = Act::Add("Ship it".into());
+    let old = keys.key("s", &del);
+    let newer = keys.key("s", &add);
+    keys.settled(&newer, &Outcome::Pending("still finishing".into()));
+    keys.settled(&old, &Outcome::Failed("nope".into()));
+    assert_ne!(keys.key("s", &del), old, "a definite answer clears its key");
+    assert_eq!(keys.key("s", &add), newer, "and leaves the other request's key alone");
+}
+
+#[test]
+fn a_change_during_a_read_asks_for_another_read() {
+    let mut q = Queue::default();
+    q.reset("s");
+    assert!(q.invalidate("s"), "idle: read now");
+    assert!(!q.invalidate("t"), "another session's change is ignored");
+    let (s, g) = q.begin().unwrap();
+    assert!(!q.invalidate("s"), "busy: read after this one");
+    q.listed(&s, g, true, Ok(page(json!({"data": [{"id": "a"}, {"id": "b"}]}))));
+    assert!(q.take_dirty(), "the stale page is followed by a fresh read");
+    assert!(!q.take_dirty());
+    let (s, g) = q.begin().unwrap();
+    assert!(!q.can_reorder(), "no reorder while a read or change is running");
+    q.invalidate("s");
+    assert!(q.mutated(&s, g, &Outcome::Done));
+    assert!(!q.take_dirty(), "a done change reloads anyway");
 }
 
 #[test]
@@ -142,7 +188,7 @@ fn every_queue_action_sends_the_body_the_daemon_reads() {
     assert_eq!(seen.recv().unwrap().1, json!({"action": "native-queue", "sessionId": "s1", "nativeQueue": {"queueAction": "start", "queuedSubmissionId": "q2"}}));
     let submitted = Outcome::of(client.native_queue("s1", &Act::Start(None), "k5"));
     assert_eq!(seen.recv().unwrap().1, json!({"action": "native-queue", "sessionId": "s1", "nativeQueue": {"queueAction": "start"}}));
-    assert!(matches!(submitted, Outcome::Unknown(_)));
+    assert!(matches!(submitted, Outcome::Pending(_)));
     let gone = Outcome::of(client.native_queue("s1", &Act::Delete("q9".into()), "k6"));
     assert_eq!(seen.recv().unwrap().1, json!({"action": "native-queue", "sessionId": "s1", "nativeQueue": {"queueAction": "delete", "queuedSubmissionId": "q9"}}));
     assert_eq!(gone, Outcome::Failed("queued submission not found".into()));

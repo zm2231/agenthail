@@ -121,18 +121,27 @@ pub fn moving(ids: &[String], id: &str, by: isize) -> Option<Vec<String>> {
 pub enum Outcome {
     Done,
     Unknown(String),
+    Pending(String),
     Failed(String),
 }
 
 impl Outcome {
     pub fn of(result: Result<(), RespondError>) -> Outcome {
         let Err(error) = result else { return Outcome::Done };
-        let unknown = matches!(error.code.as_str(), "submitted" | "session_operation_unknown" | "host_outcome_unknown") || (error.status == 0 && error.maybe_delivered);
-        if !unknown {
-            return Outcome::Failed(error.message);
+        let unknown = |message: &str| format!("{} {UNKNOWN_SUFFIX}", message.trim_end());
+        match error.code.as_str() {
+            "session_operation_unknown" | "host_outcome_unknown" => Outcome::Unknown(unknown(&error.message)),
+            "submitted" => Outcome::Pending(unknown(STILL_FINISHING)),
+            _ if error.status == 0 && error.maybe_delivered => Outcome::Pending(unknown(&error.message)),
+            _ => Outcome::Failed(error.message),
         }
-        let message = if error.code == "submitted" { STILL_FINISHING.to_string() } else { error.message };
-        Outcome::Unknown(format!("{} {UNKNOWN_SUFFIX}", message.trim_end()))
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        match self {
+            Outcome::Done => None,
+            Outcome::Unknown(e) | Outcome::Pending(e) | Outcome::Failed(e) => Some(e),
+        }
     }
 }
 
@@ -140,12 +149,13 @@ struct Pending {
     identity: String,
     session: String,
     key: String,
-    recorded: bool,
+    recorded: Option<u64>,
 }
 
 #[derive(Default)]
 pub struct Keys {
     pending: Vec<Pending>,
+    seq: u64,
 }
 
 impl Keys {
@@ -155,24 +165,31 @@ impl Keys {
             return p.key.clone();
         }
         let key = crate::catalog::request_key();
-        self.pending.push(Pending { identity, session: session.to_string(), key: key.clone(), recorded: false });
+        self.pending.push(Pending { identity, session: session.to_string(), key: key.clone(), recorded: None });
         key
     }
 
-    pub fn settled(&mut self, session: &str, act: &Act, outcome: &Outcome) {
+    pub fn settled(&mut self, key: &str, outcome: &Outcome) {
         match outcome {
+            Outcome::Done | Outcome::Failed(_) => self.pending.retain(|p| p.key != key),
             Outcome::Unknown(_) => {
-                let identity = act.identity(session);
-                if let Some(p) = self.pending.iter_mut().find(|p| p.identity == identity) {
-                    p.recorded = true;
+                self.seq += 1;
+                let at = self.seq;
+                if let Some(p) = self.pending.iter_mut().find(|p| p.key == key) {
+                    p.recorded = Some(at);
                 }
             }
-            _ => self.pending.retain(|p| p.session != session),
+            Outcome::Pending(_) => {}
         }
     }
 
-    pub fn observed(&mut self, session: &str) {
-        self.pending.retain(|p| p.session != session || !p.recorded);
+    pub fn read_started(&mut self) -> u64 {
+        self.seq += 1;
+        self.seq
+    }
+
+    pub fn observed(&mut self, session: &str, read: u64) {
+        self.pending.retain(|p| p.session != session || p.recorded.is_none_or(|at| at > read));
     }
 }
 
@@ -185,6 +202,7 @@ pub struct Queue {
     pub busy: bool,
     pub error: Option<String>,
     generation: u64,
+    dirty: bool,
 }
 
 impl Queue {
@@ -197,13 +215,28 @@ impl Queue {
     }
 
     pub fn can_reorder(&self) -> bool {
-        self.loaded && self.next_cursor.is_none() && self.items.len() > 1
+        self.loaded && !self.busy && self.next_cursor.is_none() && self.items.len() > 1
     }
 
     pub fn begin(&mut self) -> Option<(String, u64)> {
         let session = self.session.clone().filter(|_| !self.busy)?;
         self.busy = true;
         Some((session, self.generation))
+    }
+
+    pub fn invalidate(&mut self, session: &str) -> bool {
+        if self.session.as_deref() != Some(session) {
+            return false;
+        }
+        if self.busy {
+            self.dirty = true;
+            return false;
+        }
+        true
+    }
+
+    pub fn take_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.dirty)
     }
 
     fn current(&self, session: &str, generation: u64) -> bool {
@@ -237,16 +270,12 @@ impl Queue {
             return false;
         }
         self.busy = false;
-        match outcome {
-            Outcome::Done => {
-                self.error = None;
-                true
-            }
-            Outcome::Unknown(error) | Outcome::Failed(error) => {
-                self.error = Some(error.clone());
-                false
-            }
+        self.error = outcome.error().map(str::to_string);
+        if *outcome == Outcome::Done {
+            self.dirty = false;
+            return true;
         }
+        false
     }
 
     pub fn moved(&self, id: &str, by: isize) -> Option<Act> {
