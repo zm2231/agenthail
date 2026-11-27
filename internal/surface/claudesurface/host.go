@@ -312,10 +312,12 @@ func (c *Claude) SendAgenthailTurn(ctx context.Context, sess *surface.Session, m
 	if err := c.EnsureWritable(ctx, sess); err != nil {
 		return nil, err
 	}
-	if _, err := c.reach(ctx, sess); err != nil {
+	way, err := c.reach(ctx, sess)
+	if err != nil {
 		return nil, err
 	}
-	return c.sendHostTurn(ctx, sess, message, "", nil, false, true)
+	result, err := c.sendHostTurn(ctx, sess, message, "", nil, false, true)
+	return way.notice(result), err
 }
 
 func (c *Claude) interruptHost(ctx context.Context, sess *surface.Session) error {

@@ -147,6 +147,7 @@ class Session {
     this.running = false;
     this.interruptOwed = false;
     this.human = [];
+    this.preface = '';
     this.ambient = new Set();
     this.context = null;
     this.measuring = null;
@@ -579,10 +580,6 @@ const methods = {
 
 async function open(params) {
   if (draining) throw new HostError('draining', 'the Claude host is shutting down; open again on the next host');
-  const cwd = params.cwd;
-  if (typeof cwd !== 'string' || !path.isAbsolute(cwd) || !fs.statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) {
-    throw new HostError('invalid', `cwd must be an existing absolute directory: ${cwd}`);
-  }
   if (params.resume && params.sessionId) throw new HostError('invalid', 'pass resume or sessionId, not both');
   const id = params.resume || params.sessionId || randomUUID();
   if (!UUID.test(id)) throw new HostError('invalid', `session id must be a uuid: ${id}`);
@@ -590,7 +587,7 @@ async function open(params) {
     throw new HostError('invalid', `unknown permission mode: ${params.permissionMode}`);
   }
   if (params.effort && !EFFORTS.has(params.effort)) throw new HostError('invalid', `unknown effort: ${params.effort}`);
-  for (const name of ['model', 'agent', 'name']) {
+  for (const name of ['model', 'agent', 'name', 'preface']) {
     if (params[name] !== undefined && typeof params[name] !== 'string') throw new HostError('invalid', `${name} must be a string`);
   }
   if (params.checker !== undefined) {
@@ -621,6 +618,10 @@ async function open(params) {
     return existing.describe();
   }
   await refuseRunningOrphan(id);
+  const cwd = params.cwd;
+  if (typeof cwd !== 'string' || !path.isAbsolute(cwd) || !fs.statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) {
+    throw new HostError('invalid', `cwd must be an existing absolute directory: ${cwd}`);
+  }
 
   // Claude starts a resumed conversation in the settings' default mode and
   // model, so a resume without them reopens in the ones it last ran with here.
@@ -641,6 +642,7 @@ async function open(params) {
     ...(s.window !== 'default' ? { autoCompactWindow: compactWindowSetting(s.window) } : {}),
   };
   s.checker = params.checker?.run ?? '';
+  s.preface = params.preface ?? '';
   // Claude runs SessionStart before the server is attached, so a conversation opened with it counts as having it.
   if (params.mcp) s.agenthail = 'attached';
   let opened;
@@ -672,7 +674,7 @@ async function open(params) {
           // asks canUseTool for questions in bypassPermissions.
           allowDangerouslySkipPermissions: true,
           ...(params.mcp ? { allowedTools: [`mcp__${AGENTHAIL_MCP}`] } : {}),
-          ...(args.agenthail ? { hooks: sessionContextHooks(s) } : {}),
+          ...(args.agenthail ? { hooks: sessionContextHooks(s) } : s.preface ? { hooks: { SessionStart: [{ hooks: [prefaceHook(s)] }] } } : {}),
           canUseTool: (toolName, input, options) => s.ask(toolName, input, options),
         };
     s.query = query({
@@ -1102,12 +1104,28 @@ function sessionContextHooks(s) {
       child.stdin.on('error', () => {});
       child.stdin.end(JSON.stringify(withAgenthailTools(s, withMessageUUID(s, input))));
     });
+  const start = async (input, toolUseID, options) => withPreface(s, input, await run(input, toolUseID, options));
   return {
-    SessionStart: [{ hooks: [run] }],
+    SessionStart: [{ hooks: [start] }],
     UserPromptSubmit: [{ hooks: [run] }],
     SubagentStart: [{ hooks: [subagent] }],
     PreToolUse: [{ matcher: `mcp__${AGENTHAIL_MCP}__.*`, hooks: [subagent] }],
   };
+}
+
+// A preface is what the daemon tells a conversation it reopens, such as the
+// folder it now runs in; Claude reads it from SessionStart before whatever
+// message, by whatever route, starts the first turn.
+function prefaceHook(s) {
+  return async (input) => withPreface(s, input, {});
+}
+
+function withPreface(s, input, output) {
+  const preface = s.preface;
+  s.preface = '';
+  if (!preface) return output;
+  const context = [output.hookSpecificOutput?.additionalContext, preface].filter(Boolean).join('\n\n');
+  return { hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: context } };
 }
 
 // subagent tells a Claude subagent it works inside this session and refuses

@@ -281,6 +281,7 @@ func New(reg *registry.Registry, surfaces []surface.Surface) *Daemon {
 		reg.SetBusyPolicy(d.busyPolicy)
 		attachCodexConfigStore(reg, surfaces)
 		attachCodexTurnContext(d, surfaces)
+		attachFolderBounds(reg, surfaces)
 	}
 	for _, adapter := range surfaces {
 		if opener, ok := adapter.(interface {

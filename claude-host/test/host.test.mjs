@@ -553,6 +553,67 @@ test('a duplicate uuid runs once', async () => {
   c.close();
 });
 
+test("an open's preface reaches Claude at SessionStart, after the session card, once", async () => {
+  const f = fixture();
+  const agenthail = path.join(f.root, 'agenthail');
+  fs.writeFileSync(
+    agenthail,
+    `#!${process.execPath}
+const input = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: input.hook_event_name, additionalContext: 'card' } }));
+`,
+    { mode: 0o755 },
+  );
+  await startHost(f, { agenthail });
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd, preface: '[agenthail] Your folder moved.' });
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'first' });
+  await c.event(turnResult(id, uuid));
+  const hooked = fs.readFileSync(path.join(f.claudeDir, 'hooks.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.event !== 'Stop');
+  assert.deepEqual(
+    hooked.map((r) => [r.event, r.output.hookSpecificOutput?.additionalContext]),
+    [['SessionStart', 'card\n\n[agenthail] Your folder moved.'], ['UserPromptSubmit', 'card']],
+  );
+  assert.deepEqual(transcript(f, id).map((l) => l.text), ['first']);
+  c.close();
+});
+
+test('a host without the agenthail command still gives an open its preface', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  await c.call('open', { sessionId: id, cwd: f.cwd, preface: '[agenthail] Your folder moved.' });
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'first' });
+  await c.event(turnResult(id, uuid));
+  const hooked = fs.readFileSync(path.join(f.claudeDir, 'hooks.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  assert.deepEqual(hooked.map((r) => [r.event, r.output]), [['SessionStart', { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: '[agenthail] Your folder moved.' } }]]);
+  c.close();
+});
+
+test('an open session whose folder was removed is still reached and takes messages', async () => {
+  const f = fixture();
+  await startHost(f);
+  const c = new Client(f.socket);
+  await c.call('subscribe');
+  const id = randomUUID();
+  const cwd = path.join(f.root, 'removed');
+  fs.mkdirSync(cwd);
+  const opened = await c.call('open', { sessionId: id, cwd });
+  fs.rmSync(cwd, { recursive: true });
+  assert.equal((await c.call('open', { resume: id, cwd })).pid, opened.pid);
+  const uuid = randomUUID();
+  await c.call('send', { sessionId: id, uuid, text: 'still here' });
+  await c.event(turnResult(id, uuid));
+  await assert.rejects(c.call('open', { sessionId: randomUUID(), cwd }), { code: 'invalid' });
+  c.close();
+});
+
 async function openPending(f, c, text) {
   const id = randomUUID();
   await c.call('open', { sessionId: id, cwd: f.cwd });

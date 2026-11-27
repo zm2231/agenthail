@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
@@ -36,6 +37,22 @@ func parseCeiling(raw json.RawMessage) (sessionCeiling, error) {
 		return ceiling, fmt.Errorf("decode ceiling: %w", err)
 	}
 	return ceiling, nil
+}
+
+func attachFolderBounds(reg *registry.Registry, surfaces []surface.Surface) {
+	bounds := func(sessionID string) ([]string, error) {
+		raw, err := reg.SessionCeiling(sessionID)
+		if err != nil {
+			return nil, err
+		}
+		ceiling, err := parseCeiling(raw)
+		return ceiling.Roots, err
+	}
+	for _, adapter := range surfaces {
+		if bounded, ok := adapter.(interface{ BoundFolders(surface.FolderBounds) }); ok {
+			bounded.BoundFolders(bounds)
+		}
+	}
 }
 
 func (c sessionCeiling) encode() json.RawMessage {

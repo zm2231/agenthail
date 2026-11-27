@@ -86,6 +86,8 @@ type OpenRequest struct {
 	ConfigDir      string       `json:"configDir,omitempty"`
 	Checker        *CheckerOpen `json:"checker,omitempty"`
 	MCP            *MCPServer   `json:"mcp,omitempty"`
+	// Preface goes before the first message the opened conversation takes.
+	Preface string `json:"preface,omitempty"`
 }
 
 type MCPServer struct {

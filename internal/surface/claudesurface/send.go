@@ -31,19 +31,22 @@ func (c *Claude) Send(ctx context.Context, sess *surface.Session, message string
 	if err := c.EnsureWritable(ctx, sess); err != nil {
 		return nil, err
 	}
-	if _, err := c.reach(ctx, sess); err != nil {
+	way, err := c.reach(ctx, sess)
+	if err != nil {
 		return nil, err
 	}
 	if sess.Transport == "uds" {
 		if err := peerSlashCommand(sess, message); err != nil {
 			return nil, err
 		}
-		return c.sendPeer(ctx, sess, message)
+		result, err := c.sendPeer(ctx, sess, message)
+		return way.notice(result), err
 	}
 	if _, err := ownTurn(ctx); err != nil {
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("%w: %w; %s has no messaging socket yet", surface.ErrDeliveryHeld, surface.ErrNotOwnTurn, sess.ID))
 	}
-	return c.postWhenIdle(ctx, sess, message, nil)
+	result, err := c.postWhenIdle(ctx, sess, message, nil)
+	return way.notice(result), err
 }
 
 // peerSlashCommand rejects a slash command for the peer socket, which cannot
@@ -132,11 +135,13 @@ func (c *Claude) SendHumanTurn(ctx context.Context, sess *surface.Session, messa
 	if !c.canSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(errors.New("Claude web bridge session is unavailable"))
 	}
-	if _, err := c.reach(ctx, sess); err != nil {
+	way, err := c.reach(ctx, sess)
+	if err != nil {
 		return nil, err
 	}
 	if claudeHosted(sess) {
-		return c.sendHostTurn(ctx, sess, message, "", images, true, true)
+		result, err := c.sendHostTurn(ctx, sess, message, "", images, true, true)
+		return way.notice(result), err
 	}
 	if !c.canSendHumanTurn(sess) {
 		return nil, surface.DeliveryUnavailable(fmt.Errorf("%w: Claude conversation %s runs without its web bridge", surface.ErrRouteChanged, sess.ID))
