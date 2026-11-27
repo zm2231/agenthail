@@ -96,7 +96,7 @@ func (r *Registry) RefreshHostQueueCounts() (int, error) {
 			return 0, err
 		}
 		observedAt, _ := parseTimestamp(row.observedAt)
-		if _, _, err := appendHostUpsertTx(tx, entityID, projection, generation, observedAt, row.unavailable); err != nil {
+		if _, _, err := appendHostUpsertTx(tx, entityID, projection, nil, generation, observedAt, row.unavailable); err != nil {
 			return 0, err
 		}
 		changed++

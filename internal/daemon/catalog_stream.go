@@ -59,6 +59,35 @@ func (f *catalogFollower) read(limit int) ([]registry.CatalogEvent, error) {
 	return window.Events, nil
 }
 
+// changedBeyond reads every event after the cursor and reports whether any is
+// not idle. Events lost to a gap count as a change, and the cursor moves to
+// the end of the journal.
+func (f *catalogFollower) changedBeyond(idle func(registry.CatalogEvent) bool) (bool, error) {
+	changed := false
+	for {
+		events, err := f.read(catalogStreamBatch)
+		if errors.Is(err, errCatalogFollowerGap) {
+			_, latest, stateErr := f.hub.registry.CatalogState()
+			if stateErr != nil {
+				return true, stateErr
+			}
+			f.cursor = latest
+			return true, nil
+		}
+		if err != nil {
+			return true, err
+		}
+		for _, event := range events {
+			if !idle(event) {
+				changed = true
+			}
+		}
+		if len(events) < catalogStreamBatch {
+			return changed, nil
+		}
+	}
+}
+
 func newCatalogHub(store *registry.Registry) *catalogHub {
 	_, latest, err := store.CatalogState()
 	if err != nil {

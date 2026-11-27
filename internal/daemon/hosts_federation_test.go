@@ -374,7 +374,7 @@ type unreadableUpserts struct{ http.ResponseWriter }
 
 func (w unreadableUpserts) Write(p []byte) (int, error) {
 	if bytes.Contains(p, []byte("event: session.upserted\n")) && bytes.Contains(p, []byte(`"name":"unreadable `)) {
-		if _, err := w.ResponseWriter.Write(bytes.Replace(p, []byte(`"data":{"session":{`), []byte(`"data":{"session":7,"was":{`), 1)); err != nil {
+		if _, err := w.ResponseWriter.Write(bytes.Replace(p, []byte(`"session":{`), []byte(`"session":7,"was":{`), 1)); err != nil {
 			return 0, err
 		}
 		return len(p), nil

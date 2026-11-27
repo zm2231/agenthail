@@ -101,6 +101,13 @@ func (d *Daemon) followLedgerBoards(ctx context.Context, wait time.Duration, fol
 			return
 		case <-follower.Wake:
 		}
+		changed, err := follower.changedBeyond(catalogEventIdle)
+		if err != nil {
+			d.logRuntimeError("ledger-page:catalog", err)
+		}
+		if !changed {
+			continue
+		}
 		d.readLedgerBoards(ctx)
 		select {
 		case <-ctx.Done():

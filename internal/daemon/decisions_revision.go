@@ -83,6 +83,13 @@ func (d *Daemon) runDecisionsRevision(ctx context.Context) {
 			if !open {
 				return
 			}
+			changed, err := follower.changedBeyond(catalogEventIdle)
+			if err != nil {
+				d.log.Printf("decisions revision: %s", err)
+			}
+			if !changed {
+				continue
+			}
 		case <-d.decisions.wake:
 		}
 		select {

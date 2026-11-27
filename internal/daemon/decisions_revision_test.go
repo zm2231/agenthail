@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/zm2231/agenthail/internal/registry"
 	"github.com/zm2231/agenthail/internal/surface"
 	"github.com/zm2231/agenthail/internal/testkit"
 )
@@ -157,5 +158,36 @@ func TestAPairedHostsOwnRevisionReachesTheMirrorAndTheSnapshot(t *testing.T) {
 	}
 	if snapshot := local.snapshot(t); snapshot.DecisionsRev != rev || snapshot.OwnDecisionsRev != own {
 		t.Fatalf("the snapshot names the revisions: %q %q", snapshot.DecisionsRev, snapshot.OwnDecisionsRev)
+	}
+}
+
+func TestAnUnchangedRegistryKeepsItsDecisionsRevisionAsTheClockMoves(t *testing.T) {
+	f := newMCPAnswerFixture(t)
+	second := surface.Session{ID: "worker-2", Surface: surface.KindClaude, RuntimeKind: surface.RuntimeClaudeHost, Status: surface.StatusIdle, Cwd: f.surface.sessions["worker"].Cwd}
+	if err := f.r.RecordObservedSession(second); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.r.RecordSessionOrigin(registry.OriginOf("worker-2", "lead")); err != nil {
+		t.Fatal(err)
+	}
+	f.surface.sessions["worker-2"] = second
+	f.surface.open["worker-2"] = []surface.Request{{ID: "worker-2-prompt", Kind: surface.WaitingApproval, Tool: "Bash"}}
+	f.asProjectLead(t, "lead")
+	for _, text := range []string{"Import the March export", "Import the April export", "Import the May export"} {
+		f.submitWork(t, text)
+	}
+	f.waitOnPrompt(t, "worker", "worker-2")
+	if page := f.sweepReviews(t); len(page.LeadHandling) != 5 {
+		t.Fatalf("want the lead holding two prompts and three reviews, got %+v", page.LeadHandling)
+	}
+	now := time.Now()
+	f.d.presentation.clock = func() time.Time { return now }
+	first := ownRevision(t, f.d)
+	for step := range 20 {
+		now = now.Add(time.Duration(step+1) * 7 * time.Second)
+		if again := ownRevision(t, f.d); again != first {
+			rows, _, _ := f.d.decisionRows(t.Context())
+			t.Fatalf("build %d moved the revision with nothing changed: %s then %s (rows %d)", step+1, first, again, len(rows))
+		}
 	}
 }

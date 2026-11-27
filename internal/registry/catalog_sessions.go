@@ -294,6 +294,10 @@ func (r *Registry) RecordCatalogSession(state CatalogSessionState, event Catalog
 		if err := json.Unmarshal(event.Payload, &envelope); err == nil {
 			if session, ok := envelope["session"].(map[string]any); ok {
 				session["freshness"] = CatalogFreshness{Generation: uint64(priorGeneration), ObservedAt: state.ObservedAt, Stale: false}
+				delete(envelope, catalogChangedKey)
+				if changes, known := prior.changesFrom(state.ProjectionFingerprint, state.Project, state.Checkout, state.UnavailableReason); known {
+					envelope[catalogChangedKey] = changes
+				}
 				if encoded, err := json.Marshal(envelope); err == nil {
 					event.Payload = encoded
 				}
@@ -332,7 +336,7 @@ func (r *Registry) catalogSessionUnchanged(state CatalogSessionState, event Cata
 }
 
 type catalogSessionPrior struct {
-	found                        bool
+	found, retired               bool
 	fingerprint, unavailable     string
 	project, checkout            []byte
 	generation, misses, failures int64
@@ -340,7 +344,7 @@ type catalogSessionPrior struct {
 
 func readCatalogSessionPrior(q catalogQuerier, sessionID string) (catalogSessionPrior, error) {
 	var prior catalogSessionPrior
-	err := q.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures,host_project,checkout,unavailable_reason FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&prior.fingerprint, &prior.generation, &prior.misses, &prior.failures, &prior.project, &prior.checkout, &prior.unavailable)
+	err := q.QueryRow(`SELECT projection_fingerprint,projection_generation,misses,discovery_failures,host_project,checkout,unavailable_reason,retired FROM catalog_sessions WHERE session_id=?`, sessionID).Scan(&prior.fingerprint, &prior.generation, &prior.misses, &prior.failures, &prior.project, &prior.checkout, &prior.unavailable, &prior.retired)
 	if err == sql.ErrNoRows {
 		return catalogSessionPrior{}, nil
 	}

@@ -478,16 +478,24 @@ func (r *Registry) ApplyHostCatalogRow(hostID string, row HostCatalogRow) (Catal
 		session.ID, []byte(row.Project), []byte(row.Checkout), row.UnavailableReason, formatTimestamp(observedAt), fingerprint, generation, row.QueueCount, waitingOn, background, usageLimit, turnStop, settings, staysRetired); err != nil {
 		return CatalogEvent{}, false, err
 	}
-	event, created, err := appendHostUpsertTx(tx, row.EntityID, projection, generation, observedAt, row.UnavailableReason)
+	changes, known := prior.changesFrom(fingerprint, row.Project, row.Checkout, row.UnavailableReason)
+	if !known {
+		changes = nil
+	}
+	event, created, err := appendHostUpsertTx(tx, row.EntityID, projection, changes, generation, observedAt, row.UnavailableReason)
 	if err != nil {
 		return CatalogEvent{}, false, err
 	}
 	return event, created, tx.Commit()
 }
 
-func appendHostUpsertTx(tx *sql.Tx, entityID string, projection map[string]any, generation int64, observedAt time.Time, unavailable string) (CatalogEvent, bool, error) {
+func appendHostUpsertTx(tx *sql.Tx, entityID string, projection map[string]any, changes []string, generation int64, observedAt time.Time, unavailable string) (CatalogEvent, bool, error) {
 	projection["freshness"] = CatalogFreshness{Generation: uint64(generation), ObservedAt: observedAt, Stale: unavailable != ""}
-	payload, err := json.Marshal(map[string]any{"session": projection})
+	envelope := map[string]any{"session": projection}
+	if changes != nil {
+		envelope[catalogChangedKey] = changes
+	}
+	payload, err := json.Marshal(envelope)
 	if err != nil {
 		return CatalogEvent{}, false, err
 	}

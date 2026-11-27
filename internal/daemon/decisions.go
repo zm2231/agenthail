@@ -182,6 +182,19 @@ func buildDecisions(sources decisionSources) decisionsPage {
 		}
 		return a.WorkItem < b.WorkItem
 	})
+	sort.SliceStable(page.LeadHandling, func(i, j int) bool {
+		a, b := page.LeadHandling[i], page.LeadHandling[j]
+		if !a.Since.Equal(b.Since) {
+			return a.Since.Before(b.Since)
+		}
+		if a.SessionID != b.SessionID {
+			return a.SessionID < b.SessionID
+		}
+		if a.LedgerKey != b.LedgerKey {
+			return a.LedgerKey < b.LedgerKey
+		}
+		return a.WorkItem < b.WorkItem
+	})
 	return page
 }
 
