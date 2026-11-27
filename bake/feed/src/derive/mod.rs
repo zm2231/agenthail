@@ -35,3 +35,5 @@ mod behaviour_tests;
 mod live_tests;
 #[cfg(test)]
 mod tails_tests;
+#[cfg(test)]
+mod steps_tests;

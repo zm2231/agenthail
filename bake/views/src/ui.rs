@@ -247,18 +247,18 @@ pub fn happened_style(kind: Happened, k: &Kit) -> (&'static Icon, Color) {
 
 pub fn stepper(w: &feed::derive::Work, whose: &str, k: &Kit) -> El {
     match feed::derive::phase::shown_step(&w.phase, &w.state) {
-        Some(phase) => steps(phase, whose, k),
+        Some(phase) => steps(phase, &w.steps, whose, k),
         None => step_word(w, k),
     }
 }
 
 pub fn step_word(w: &feed::derive::Work, k: &Kit) -> El {
-    text(feed::derive::phase::step_word(&w.phase, &w.state)).font(META).color(weak(k))
+    text(feed::derive::phase::step_word(&w.phase, &w.state, &w.steps)).font(META).color(weak(k))
 }
 
-fn steps(phase: usize, whose: &str, k: &Kit) -> El {
+fn steps(phase: usize, names: &feed::derive::phase::Steps, whose: &str, k: &Kit) -> El {
     let mut r = row().w_full().items_start();
-    for (i, name) in PHASES.iter().enumerate() {
+    for (i, name) in names.names().enumerate() {
         let done = i < phase;
         let current = i == phase;
         let you = current && i == 4;
@@ -292,19 +292,19 @@ fn steps(phase: usize, whose: &str, k: &Kit) -> El {
             .w_full()
             .justify_center()
             .gap(6.0)
-            .child(text(format!("{}:", PHASES[phase.min(5)])).font(META_MED).color(k.c.text_accent))
+            .child(text(format!("{}:", names.name(phase))).font(META_MED).color(k.c.text_accent))
             .child(text(format!("{whose}'s move")).font(META).color(base(k)).truncate().shrink()),
     )
 }
 
 pub fn mini_phase(w: &feed::derive::Work, k: &Kit) -> El {
     match feed::derive::phase::shown_step(&w.phase, &w.state) {
-        Some(phase) => mini_steps(phase, k),
+        Some(phase) => mini_steps(phase, &w.steps, k),
         None => step_word(w, k),
     }
 }
 
-fn mini_steps(phase: usize, k: &Kit) -> El {
+fn mini_steps(phase: usize, names: &feed::derive::phase::Steps, k: &Kit) -> El {
     let mut r = row().gap(3.0).items_center();
     for i in 0..PHASES.len() {
         let color = if i < phase {
@@ -316,7 +316,7 @@ fn mini_steps(phase: usize, k: &Kit) -> El {
         };
         r = r.child(el().size(if i == phase { 14.0 } else { 8.0 }, 4.0).radius(2.0).fill(color));
     }
-    r.child(text(PHASES[phase.min(5)].to_string()).font(META).color(weak(k)).ml(6.0))
+    r.child(text(names.name(phase).to_string()).font(META).color(weak(k)).ml(6.0))
 }
 
 pub fn section_head(title: &str, count: Option<usize>, trailing: Option<El>, k: &Kit) -> El {

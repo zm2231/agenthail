@@ -1,9 +1,44 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use serde::{Deserialize, Deserializer};
+
 use super::world::{Work, World};
 
 pub const PHASES: [&str; 6] = ["Scope", "Build", "Review", "Verify", "Check", "Ship"];
 const KEYS: [&str; 6] = ["scope", "build", "review", "verify", "check", "ship"];
 pub const CHECK: usize = 4;
 pub const SHIP: usize = 5;
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Steps(Option<Arc<[String; 6]>>);
+
+impl Steps {
+    pub fn from_labels(labels: &HashMap<String, String>) -> Steps {
+        let own = |i: usize| labels.iter().find(|(k, _)| k.eq_ignore_ascii_case(KEYS[i])).map(|(_, v)| v.trim()).filter(|v| !v.is_empty());
+        let names: [String; 6] = std::array::from_fn(|i| own(i).unwrap_or(PHASES[i]).to_string());
+        if names.iter().zip(PHASES).all(|(n, d)| n == d) { Steps(None) } else { Steps(Some(Arc::new(names))) }
+    }
+
+    pub fn from_reply(reply: &serde_json::Value) -> Steps {
+        serde_json::from_value::<HashMap<String, String>>(reply["phaseLabels"].clone()).map(|l| Steps::from_labels(&l)).unwrap_or_default()
+    }
+
+    pub fn name(&self, i: usize) -> &str {
+        let i = i.min(SHIP);
+        self.0.as_ref().map_or(PHASES[i], |n| n[i].as_str())
+    }
+
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        (0..PHASES.len()).map(|i| self.name(i))
+    }
+}
+
+impl<'de> Deserialize<'de> for Steps {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Steps, D::Error> {
+        Ok(Option::<HashMap<String, String>>::deserialize(d)?.map(|l| Steps::from_labels(&l)).unwrap_or_default())
+    }
+}
 
 pub fn move_of(whose: &str) -> String {
     if whose == "You" { "Your move".into() } else { format!("{whose}'s move") }
@@ -38,12 +73,12 @@ pub fn step(phase: &str, state: &str) -> usize {
     known(phase).unwrap_or_else(|| state_phase(state))
 }
 
-pub fn step_word(phase: &str, state: &str) -> String {
+pub fn step_word(phase: &str, state: &str, steps: &Steps) -> String {
     if let Some(word) = off_board(state) {
         return word.into();
     }
     match known(phase) {
-        Some(i) => PHASES[i].into(),
+        Some(i) => steps.name(i).into(),
         None if phase.trim().is_empty() => state_name(state),
         None => super::text::capital(&phase.trim().replace('_', " ")),
     }
@@ -67,6 +102,16 @@ pub fn phase(w: &Work) -> usize {
 }
 
 impl World {
+    pub fn steps_for(&self, ledger: &str) -> Option<&Steps> {
+        let record = self.records.iter().find(|p| p.ledger_key == ledger || p.id == ledger);
+        let keys = [record.map(|p| p.id.as_str()), Some(ledger), record.map(|p| p.ledger_key.as_str())];
+        keys.into_iter().flatten().find_map(|k| self.steps.get(k))
+    }
+
+    pub fn steps_of(&self, ledger: &str) -> Steps {
+        self.steps_for(ledger).cloned().unwrap_or_default()
+    }
+
     pub fn whose_move(&self, w: &Work) -> String {
         if matches!(w.state.as_str(), "parked" | "closed") {
             return "No one".into();
@@ -105,13 +150,13 @@ mod tests {
 
     #[test]
     fn the_step_word_names_parked_and_closed_work_then_the_phase_then_the_state() {
-        assert_eq!(step_word("scope", "parked"), "Parked");
-        assert_eq!(step_word("", "closed"), "Closed");
-        assert_eq!(step_word("verify", "in_progress"), "Verify");
-        assert_eq!(step_word("ship", "done"), "Ship");
-        assert_eq!(step_word("", "in_review"), "In review");
-        assert_eq!(step_word("", "in_progress"), "In progress");
-        assert_eq!(step_word("triage_later", "open"), "Triage later");
+        assert_eq!(step_word_default("scope", "parked"), "Parked");
+        assert_eq!(step_word_default("", "closed"), "Closed");
+        assert_eq!(step_word_default("verify", "in_progress"), "Verify");
+        assert_eq!(step_word_default("ship", "done"), "Ship");
+        assert_eq!(step_word_default("", "in_review"), "In review");
+        assert_eq!(step_word_default("", "in_progress"), "In progress");
+        assert_eq!(step_word_default("triage_later", "open"), "Triage later");
         assert_eq!(state_name("deleted"), "Deleted");
         assert_eq!(shown_step("verify", "in_progress"), Some(3));
         assert_eq!(shown_step("scope", "parked"), None);
@@ -131,7 +176,33 @@ mod tests {
         let w: Work = serde_json::from_value(serde_json::json!({"id": "w", "state": "in_review", "phase": "ship"})).unwrap();
         assert_eq!(phase(&w), CHECK);
         assert_eq!(shown_step(&w.phase, &w.state), Some(SHIP));
-        assert_eq!(step_word(&w.phase, &w.state), "Ship");
+        assert_eq!(step_word(&w.phase, &w.state, &w.steps), "Ship");
+    }
+
+    fn step_word_default(phase: &str, state: &str) -> String {
+        step_word(phase, state, &Steps::default())
+    }
+
+    #[test]
+    fn a_project_that_renames_two_steps_shows_its_names_and_keeps_the_rest() {
+        let steps: Steps = serde_json::from_value(serde_json::json!({"scope": "Scope", "build": "Make", "review": "Review", "verify": "  ", "check": "Sign-off", "ship": "Ship"})).unwrap();
+        assert_eq!(steps.names().collect::<Vec<_>>(), ["Scope", "Make", "Review", "Verify", "Sign-off", "Ship"]);
+        assert_eq!(step_word("build", "in_progress", &steps), "Make");
+        assert_eq!(step_word("CHECK", "in_review", &steps), "Sign-off");
+        assert_eq!(step_word("", "in_review", &steps), "In review");
+        assert_eq!(step_word("check", "parked", &steps), "Parked");
+        assert_eq!(steps.name(9), "Ship");
+    }
+
+    #[test]
+    fn default_names_when_a_project_has_none() {
+        let same: Steps = serde_json::from_value(serde_json::json!({"scope": "Scope", "build": "Build", "review": "Review", "verify": "Verify", "check": "Check", "ship": "Ship"})).unwrap();
+        assert_eq!(same, Steps::default());
+        assert_eq!(serde_json::from_value::<Steps>(serde_json::Value::Null).unwrap(), Steps::default());
+        assert_eq!(Steps::from_reply(&serde_json::json!({"work": []})), Steps::default());
+        assert_eq!(Steps::default().names().collect::<Vec<_>>(), PHASES);
+        let w: Work = serde_json::from_value(serde_json::json!({"id": "w", "state": "in_progress", "phase": "verify"})).unwrap();
+        assert_eq!(step_word(&w.phase, &w.state, &w.steps), "Verify");
     }
 
     #[test]
