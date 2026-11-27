@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -291,6 +292,37 @@ func TestAProjectsSubscriberIsNotWokenForOtherProjects(t *testing.T) {
 	<-wake
 	if changes := hub.take(id); len(changes) != 1 || changes[0].ProjectKey != "mine" {
 		t.Fatalf("took %+v", changes)
+	}
+}
+
+func TestASlowEarlierPublishDoesNotReplaceANewerVersion(t *testing.T) {
+	reading, release := make(chan struct{}), make(chan struct{})
+	var reads atomic.Int32
+	hub := newLedgerChangeHub(time.Hour, func(string) (string, error) {
+		if reads.Add(1) == 1 {
+			close(reading)
+			<-release
+			return "old", nil
+		}
+		return "new", nil
+	}, t.Logf)
+	id, wake, cancel := hub.subscribe("")
+	defer cancel()
+	slow := make(chan struct{})
+	go func() {
+		defer close(slow)
+		hub.publish("proj")
+	}()
+	<-reading
+	hub.publish("proj")
+	<-wake
+	if changes := hub.take(id); len(changes) != 1 || changes[0].Version != "new" {
+		t.Fatalf("took %+v", changes)
+	}
+	close(release)
+	<-slow
+	if changes := hub.take(id); len(changes) != 0 {
+		t.Fatalf("the slow earlier publish delivered %+v after the newer version", changes)
 	}
 }
 

@@ -9,12 +9,16 @@ import (
 
 // ledgerChangeHub publishes one change per project at most once per wait, so replaying thousands of events sends a handful.
 // A subscriber keeps only the newest version per project, so one that reads slowly gets the current versions and is never dropped.
+// Publishes of one project can overlap when reading its version takes longer than the wait; only the one that started last
+// delivers, so a slow earlier read never replaces a newer version.
 type ledgerChangeHub struct {
 	mu          sync.Mutex
 	wait        time.Duration
 	version     func(key string) (string, error)
 	logf        func(format string, args ...any)
 	pending     map[string]bool
+	latest      map[string]uint64
+	started     uint64
 	subscribers map[uint64]*ledgerSubscriber
 	nextID      uint64
 }
@@ -30,7 +34,7 @@ func (sub *ledgerSubscriber) wants(key string) bool {
 }
 
 func newLedgerChangeHub(wait time.Duration, version func(string) (string, error), logf func(string, ...any)) *ledgerChangeHub {
-	return &ledgerChangeHub{wait: wait, version: version, logf: logf, pending: map[string]bool{}, subscribers: map[uint64]*ledgerSubscriber{}}
+	return &ledgerChangeHub{wait: wait, version: version, logf: logf, pending: map[string]bool{}, latest: map[string]uint64{}, subscribers: map[uint64]*ledgerSubscriber{}}
 }
 
 func (h *ledgerChangeHub) changed(key string) {
@@ -46,6 +50,9 @@ func (h *ledgerChangeHub) changed(key string) {
 func (h *ledgerChangeHub) publish(key string) {
 	h.mu.Lock()
 	delete(h.pending, key)
+	h.started++
+	publish := h.started
+	h.latest[key] = publish
 	listening := false
 	for _, sub := range h.subscribers {
 		listening = listening || sub.wants(key)
@@ -61,6 +68,9 @@ func (h *ledgerChangeHub) publish(key string) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.latest[key] != publish {
+		return
+	}
 	for _, sub := range h.subscribers {
 		if !sub.wants(key) {
 			continue
