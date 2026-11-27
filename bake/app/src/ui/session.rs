@@ -6,7 +6,7 @@ use crate::Confirm;
 const COMPOSER_BELOW: f32 = 18.0;
 
 pub(crate) fn header(s: &App, x: &Session, k: &Kit) -> El {
-    let state = x.state(s.now);
+    let state = x.state(s.ov.d.shown);
     let label_value = if state == State::NeedsYou || x.display.label.is_empty() { state.label().to_string() } else { x.display.label.clone() };
     let mut chips = row().w_full().flex_wrap().gap(6.0).items_center().child(chip(&icons::FOLDER, x.project_name(), k));
     if let Some(branch) = &x.checkout.branch {
@@ -290,7 +290,7 @@ pub(crate) fn session_screen(s: &App, k: &Kit) -> El {
     let stop = x.limit(s.now);
     if let Some(stop) = stop.as_ref().filter(|_| !open) {
         center = center.child(super::limit::card(s, x, stop, k));
-    } else if open || (x.state(s.now) == State::NeedsYou && !sent) {
+    } else if open || (x.state(s.ov.d.shown) == State::NeedsYou && !sent) {
         center = center.child(waiting_card(s, x, k));
     } else if sent {
         let request = settled_request(s, x).map(|r| r.id.clone()).unwrap_or_default();

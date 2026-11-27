@@ -416,7 +416,7 @@ fn init() -> App {
     let mut app = empty(live, recording.is_none());
     if recording.is_some() {
         app.sessions = app.ov.d.sessions.clone();
-        app.now = app.ov.d.now;
+        app.now = feed::wake::minute_of(app.ov.d.now);
     }
     if let Some(dir) = fixtures {
         let streams = std::fs::read_to_string(format!("{dir}/streams.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
@@ -1406,11 +1406,6 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                         fetch_ledger(s, &project);
                     }
                 }
-                let now = OffsetDateTime::now_utc();
-                if feed::wake::minute_of(now) != s.now {
-                    s.now = feed::wake::minute_of(now);
-                    changed = true;
-                }
                 s.status = "live".into();
                 ui::connect::up(s);
                 link::listed(s);
@@ -1706,12 +1701,13 @@ fn minute(s: &mut App) -> bool {
         return false;
     }
     let now = OffsetDateTime::now_utc();
-    let turned = feed::wake::minute_of(now) != s.now;
-    if turned {
-        s.now = feed::wake::minute_of(now);
+    let deadlines = quiet::deadlines(s);
+    let turned = feed::wake::turn(now, s.now, &deadlines);
+    if let Some(at) = turned {
+        s.now = at;
     }
-    wake::later(feed::wake::next_minute(now) - now);
-    turned
+    wake::later(feed::wake::next_turn(now, &deadlines) - now);
+    turned.is_some()
 }
 
 fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {

@@ -317,7 +317,7 @@ fn keep_open_lineage(s: &mut App, parent: &str, rows: &[Session]) {
 }
 
 fn child_row(s: &App, c: &Session, k: &Kit) -> El {
-    let state = c.state(s.now);
+    let state = c.state(s.ov.d.shown);
     let id = c.id.clone();
     row()
         .key(format!("subagent-{}", c.id))

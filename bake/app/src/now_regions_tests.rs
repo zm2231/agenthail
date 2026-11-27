@@ -227,26 +227,33 @@ fn a_session_crossing_into_idle_within_the_minute_shows_as_a_fresh_build_would()
 }
 
 #[test]
-fn the_app_clock_moving_to_another_minute_runs_the_view() {
-    if !isolated("now_regions::the_app_clock_moving_to_another_minute_runs_the_view") {
+fn the_app_clock_turning_runs_the_view_at_each_minute_and_each_deadline() {
+    if !isolated("now_regions::the_app_clock_turning_runs_the_view_at_each_minute_and_each_deadline") {
         return;
     }
-    use super::rows_memo_lines::people;
     use crate::over::rows::built;
     let dir = Dir::new("now-regions-clock");
     let mut rt = world(&dir);
     now(&mut rt, false);
-    send(&rt, snapshot(2, people(), None));
-    rt.frame(DT);
-    rt.frame(DT);
-    rt.update(|s, _| s.now -= time::Duration::hours(3));
-    rt.frame(DT);
+    let fixtures = rt.state.fixtures.take();
+    rt.state.now -= time::Duration::hours(3);
     let views = built::views();
-    send(&rt, snapshot(2, people(), None));
     rt.frame(DT);
+    assert!(built::views() > views, "the app clock turning to another minute redraws what reads it");
+    assert_eq!(rt.state.now, feed::wake::minute_of(time::OffsetDateTime::now_utc()), "the app clock sits on the start of the minute");
+    let reset = time::OffsetDateTime::now_utc().replace_nanosecond(0).unwrap() + time::Duration::seconds(2);
+    let mut sessions = rt.state.sessions.to_vec();
+    sessions[0].usage_limit = Some(feed::limit::UsageLimit { resets_at: Some(reset.format(&time::format_description::well_known::Rfc3339).unwrap()) });
+    rt.state.sessions = sessions.into();
     rt.frame(DT);
-    assert!(built::views() > views, "a repeated snapshot that moves the app clock to another minute redraws what reads it");
-    assert_eq!(rt.state.now, feed::wake::minute_of(rt.state.now), "the app clock moves to the start of the minute");
+    std::thread::sleep(std::time::Duration::from_millis(2100));
+    let views = built::views();
+    rt.frame(DT);
+    if feed::wake::minute_of(reset) == feed::wake::minute_of(time::OffsetDateTime::now_utc()) {
+        assert_eq!(rt.state.now, reset, "the app clock turns when a usage limit resets, not at the next minute");
+    }
+    assert!(built::views() > views, "a usage limit resetting redraws what reads it");
+    rt.state.fixtures = fixtures;
 }
 
 #[test]

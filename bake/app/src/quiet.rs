@@ -33,6 +33,11 @@ pub fn wall(s: &App) -> OffsetDateTime {
     if s.fixtures.is_some() { s.ov.d.now } else { OffsetDateTime::now_utc() }
 }
 
+pub fn deadlines(s: &App) -> Vec<OffsetDateTime> {
+    let roots = s.limits.roots.values().flat_map(|r| r.iter().flatten()).flat_map(|r| r.deadlines());
+    s.sessions.iter().flat_map(|x| x.deadlines()).chain(roots).collect()
+}
+
 pub fn shown_minute(s: &App) -> Option<OffsetDateTime> {
     s.fixtures.is_none().then(|| feed::wake::minute_of(s.now))
 }
