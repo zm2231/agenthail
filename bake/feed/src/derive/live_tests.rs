@@ -380,6 +380,17 @@ fn a_ledger_that_changes_during_an_overview_read_is_read_again() {
 }
 
 #[test]
+fn a_change_heard_after_the_overview_began_but_before_that_ledger_was_read_is_already_in_it() {
+    let mut known = super::live::Known::default();
+    let began = Instant::now() - std::time::Duration::from_millis(20);
+    let heard = began + std::time::Duration::from_millis(5);
+    let mut f = keyed(began);
+    f.ledgers.get_mut("p").unwrap().0 = heard + std::time::Duration::from_millis(5);
+    assert_eq!(known.changed("shared:x", heard), Change::Nothing);
+    assert!(!known.learn(&f), "its own read started after the change, so it isn't read again");
+}
+
+#[test]
 fn a_change_heard_after_the_read_landed_reads_that_ledger_alone() {
     let mut known = super::live::Known::default();
     let heard_at = Instant::now();
