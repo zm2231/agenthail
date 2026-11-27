@@ -405,6 +405,10 @@ fn remove_dialog(s: &Prefs, role: &RoleView, layer: &mut Vec<El>, k: &Kit) {
 
 fn create(s: &mut Prefs) {
     let Some(name) = s.agents.creating.as_ref().map(|e| e.text.trim().to_string()).filter(|n| !n.is_empty()) else { return };
+    let taken: Vec<&str> = roles(s).map(|r| r.roles.iter().map(|x| x.name.as_str()).collect()).unwrap_or_default();
+    if agents::name_hint(&name, &taken).is_some() {
+        return;
+    }
     let Some(from) = s.agents.selected.as_ref().and_then(|n| roles(s)?.role(n)).map(|r| r.definition.clone()) else { return };
     send(s, Draft::copying(&name, &from).request(), After::Created(name));
 }
@@ -433,7 +437,7 @@ fn new_dialog(s: &Prefs, r: &Roles, from: &RoleView, layer: &mut Vec<El>, k: &Ki
         s.agents.creating = None;
         s.agents.save_error = None;
     };
-    let empty = edit.text.trim().is_empty();
+    let blocked = edit.text.trim().is_empty() || agents::name_hint(&edit.text, &taken).is_some();
     let buttons = row()
         .w_full()
         .gap(8.0)
@@ -441,7 +445,7 @@ fn new_dialog(s: &Prefs, r: &Roles, from: &RoleView, layer: &mut Vec<El>, k: &Ki
         .py(14.0)
         .child(el().grow(1.0))
         .child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(close).build(k).key("agent-role-new-cancel"))
-        .child(Button::new("Create").control_size(ControlSize::Small).disabled(empty || !editable(s)).on_press(create).build(k).key("agent-role-create"));
+        .child(Button::new("Create").control_size(ControlSize::Small).disabled(blocked || !editable(s)).on_press(create).build(k).key("agent-role-create"));
     Dialog::new("agent-role-new", format!("New role from {}", from.name)).open(true).fit().width(360.0).on_close(close).child(body).child(buttons).build(k, layer);
 }
 

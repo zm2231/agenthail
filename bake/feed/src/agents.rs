@@ -37,6 +37,17 @@ impl Definition {
             ..self.clone()
         }
     }
+
+    fn same(&self, other: &Definition) -> bool {
+        let sorted = |d: &Definition| {
+            let mut d = d.normalized();
+            if let Some(tools) = &mut d.tools {
+                tools.sort();
+            }
+            d
+        };
+        sorted(self) == sorted(other)
+    }
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -294,11 +305,11 @@ impl Draft {
     }
 
     pub fn changed(&self) -> bool {
-        self.definition != self.base
+        !self.definition.same(&self.base)
     }
 
     pub fn conflicts(&self, role: &RoleView) -> bool {
-        self.changed() && self.base != role.definition
+        self.changed() && !self.base.same(&role.definition)
     }
 
     pub fn follow(&mut self, role: &RoleView) {
@@ -540,6 +551,14 @@ mod tests {
         assert_eq!(d.definition.tools, Some(every.clone()), "tools keep the daemon's order");
         d.set_default_tools(true, &every);
         assert!(d.default_tools());
+        let stored = role(json!({"name": "w", "definition": {"reach": "project", "tools": ["c", "a"]}}));
+        let mut sorted = Draft::of(&stored);
+        let every: Vec<String> = ["a", "b", "c"].map(String::from).to_vec();
+        sorted.set_tool("b", true, &every);
+        sorted.set_tool("b", false, &every);
+        assert!(!sorted.changed(), "the daemon keeps tools in its own order, so turning one off and on again is no change");
+        sorted.definition.description = Some(String::new());
+        assert!(!sorted.changed(), "an emptied description is the same as none");
     }
 
     #[test]

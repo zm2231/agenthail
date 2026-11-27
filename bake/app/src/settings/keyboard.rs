@@ -19,6 +19,7 @@ pub fn opened(s: &mut Prefs) {
     if s.tab != TAB {
         return;
     }
+    bindings::refresh();
     for c in COMMANDS {
         let state = s.keyboard.rows.entry(c.id).or_default();
         if !state.is_recording() {

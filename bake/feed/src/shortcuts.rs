@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 
 pub const DOMAIN: &str = "com.agenthail.app";
 pub const KEY: &str = "keyboardShortcuts";
+pub const ANY_APP_KEY: &str = "KeyboardShortcuts_openPalette";
+pub const ANY_APP: &str = "Open sessions from any app";
 
 const CMD: i64 = 0x100;
 const SHIFT: i64 = 0x200;
@@ -182,12 +184,13 @@ fn default_of(id: &str) -> Option<Stored> {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Shortcuts {
     overrides: BTreeMap<String, Option<Stored>>,
+    any_app: Option<Stored>,
 }
 
 impl Shortcuts {
-    pub fn load(data: Option<&[u8]>) -> Shortcuts {
+    pub fn load(data: Option<&[u8]>, any_app: Option<&str>) -> Shortcuts {
         let overrides = data.and_then(|d| serde_json::from_slice(d).ok()).unwrap_or_default();
-        Shortcuts { overrides }
+        Shortcuts { overrides, any_app: any_app.and_then(|s| serde_json::from_str(s).ok()) }
     }
 
     pub fn data(&self) -> Option<Vec<u8>> {
@@ -210,12 +213,15 @@ impl Shortcuts {
     }
 
     pub fn any_customized(&self) -> bool {
-        !self.overrides.is_empty()
+        COMMANDS.iter().any(|c| self.customized(c.id))
     }
 
     pub fn owner(&self, shortcut: Stored, except: &str) -> Option<&'static str> {
         if let Some(c) = COMMANDS.iter().find(|c| c.id != except && self.get(c.id) == Some(shortcut)) {
             return Some(c.title);
+        }
+        if self.any_app == Some(shortcut) {
+            return Some(ANY_APP);
         }
         FIXED.iter().find(|(spec, _)| Stored::parse(spec) == Some(shortcut)).map(|(_, title)| *title)
     }
@@ -245,7 +251,9 @@ impl Shortcuts {
     }
 
     pub fn reset_all(&mut self) {
-        self.overrides.clear();
+        for c in COMMANDS {
+            self.overrides.remove(c.id);
+        }
     }
 }
 
@@ -298,7 +306,7 @@ mod tests {
     #[test]
     fn the_mac_apps_saved_overrides_read_and_unknown_commands_survive_a_save() {
         let native = br#"{"goToSession":{"carbonKeyCode":37,"carbonModifiers":256},"jumpToLatest":null,"showRunning":{"carbonKeyCode":18,"carbonModifiers":4352}}"#;
-        let mut sc = Shortcuts::load(Some(native));
+        let mut sc = Shortcuts::load(Some(native), None);
         assert_eq!(sc.spec("goToSession").as_deref(), Some("mod+l"));
         assert_eq!(sc.get("jumpToLatest"), None, "null clears the shortcut");
         assert!(sc.customized("jumpToLatest"));
@@ -308,7 +316,7 @@ mod tests {
         assert_eq!(saved["showRunning"], serde_json::json!({"carbonKeyCode": 18, "carbonModifiers": 4352}));
         assert_eq!(saved["refresh"], serde_json::json!({"carbonKeyCode": 15, "carbonModifiers": 768}));
         assert_eq!(saved["jumpToLatest"], serde_json::Value::Null);
-        assert_eq!(Shortcuts::load(Some(b"not json")), Shortcuts::default());
+        assert_eq!(Shortcuts::load(Some(b"not json"), Some("false")), Shortcuts::default());
         assert_eq!(Shortcuts::default().data(), None, "no overrides removes the key");
     }
 
@@ -330,6 +338,24 @@ mod tests {
         sc.reset_all();
         assert!(!sc.any_customized());
         assert_eq!(sc.spec("refresh").as_deref(), Some("mod+r"));
+    }
+
+    #[test]
+    fn restoring_defaults_keeps_what_only_the_mac_app_shows() {
+        let native = br#"{"refresh":{"carbonKeyCode":15,"carbonModifiers":768},"toggleSidebar":null}"#;
+        let mut sc = Shortcuts::load(Some(native), None);
+        assert!(sc.any_customized());
+        sc.reset_all();
+        assert!(!sc.any_customized());
+        let saved: serde_json::Value = serde_json::from_slice(&sc.data().unwrap()).unwrap();
+        assert_eq!(saved, serde_json::json!({"toggleSidebar": null}));
+    }
+
+    #[test]
+    fn the_mac_apps_shortcut_from_any_app_is_taken() {
+        let mut sc = Shortcuts::load(None, Some(r#"{"carbonKeyCode":40,"carbonModifiers":2304}"#));
+        assert_eq!(sc.set("refresh", Some(s("alt+mod+k"))), Err(ANY_APP));
+        assert_eq!(Shortcuts::load(None, Some("false")).set("refresh", Some(s("alt+mod+k"))), Ok(()));
     }
 
     #[test]

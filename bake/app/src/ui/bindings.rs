@@ -41,11 +41,23 @@ pub fn read<R>(f: impl FnOnce(&Shortcuts) -> R) -> R {
     with_bound(|b| f(&b.saved))
 }
 
+pub fn refresh() {
+    let fresh = store::load();
+    let generation = with_bound(|b| b.generation);
+    if read(|now| *now != fresh) {
+        BOUND.with_borrow_mut(|b| *b = Some(Bound::new(fresh, generation + 1)));
+    }
+}
+
 pub fn change<T>(f: impl FnOnce(&mut Shortcuts) -> T) -> T {
-    let (mut saved, generation) = with_bound(|b| (b.saved.clone(), b.generation));
+    let fresh = store::load();
+    let mut saved = fresh.clone();
     let out = f(&mut saved);
-    if read(|now| *now != saved) {
+    if saved != fresh {
         store::save(&saved);
+    }
+    let generation = with_bound(|b| b.generation);
+    if read(|now| *now != saved) {
         BOUND.with_borrow_mut(|b| *b = Some(Bound::new(saved, generation + 1)));
     }
     out
@@ -61,7 +73,7 @@ pub fn keycaps(shortcut: &Shortcut) -> String {
 
 #[cfg(all(target_os = "macos", not(test)))]
 mod store {
-    use feed::shortcuts::{DOMAIN, KEY, Shortcuts};
+    use feed::shortcuts::{ANY_APP_KEY, DOMAIN, KEY, Shortcuts};
     use objc2::AllocAnyThread;
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
@@ -75,8 +87,10 @@ mod store {
     }
 
     pub fn load() -> Shortcuts {
-        let data = defaults().and_then(|d| d.dataForKey(&NSString::from_str(KEY))).map(|d| d.to_vec());
-        Shortcuts::load(data.as_deref())
+        let Some(defaults) = defaults() else { return Shortcuts::default() };
+        let data = defaults.dataForKey(&NSString::from_str(KEY)).map(|d| d.to_vec());
+        let any_app = defaults.stringForKey(&NSString::from_str(ANY_APP_KEY)).map(|s| s.to_string());
+        Shortcuts::load(data.as_deref(), any_app.as_deref())
     }
 
     pub fn save(saved: &Shortcuts) {
@@ -107,7 +121,7 @@ mod store {
     }
 
     pub fn load() -> Shortcuts {
-        Shortcuts::load(path().and_then(|p| std::fs::read(p).ok()).as_deref())
+        Shortcuts::load(path().and_then(|p| std::fs::read(p).ok()).as_deref(), None)
     }
 
     pub fn save(saved: &Shortcuts) {
@@ -124,13 +138,21 @@ mod store {
 
 #[cfg(test)]
 mod store {
+    use std::cell::RefCell;
+
     use feed::shortcuts::Shortcuts;
 
-    pub fn load() -> Shortcuts {
-        Shortcuts::default()
+    thread_local! {
+        pub static SAVED: RefCell<Shortcuts> = RefCell::new(Shortcuts::default());
     }
 
-    pub fn save(_: &Shortcuts) {}
+    pub fn load() -> Shortcuts {
+        SAVED.with_borrow(Clone::clone)
+    }
+
+    pub fn save(saved: &Shortcuts) {
+        SAVED.with_borrow_mut(|s| *s = saved.clone());
+    }
 }
 
 #[cfg(test)]
@@ -151,6 +173,22 @@ mod tests {
         change(Shortcuts::reset_all);
         assert!(!chord("goToSession").is_some_and(|c| c.matches_on(&k, KeyPlatform::Mac)));
         assert_eq!(shortcut("goToSession").map(|s| s.to_string()), "mod+k".parse::<Shortcut>().ok().map(|s| s.to_string()));
+    }
+
+    #[test]
+    fn a_change_starts_from_what_the_mac_app_saved_since() {
+        assert_eq!(chord("refresh").map(|c| c.to_string()), Some("mod+r".parse::<Chord>().unwrap().to_string()));
+        store::save(&Shortcuts::load(Some(br#"{"refresh":{"carbonKeyCode":15,"carbonModifiers":768}}"#), None));
+        assert_eq!(change(|s| s.set("stop", Stored::parse("mod+g"))), Ok(()));
+        let saved = store::load();
+        assert_eq!(saved.spec("refresh").as_deref(), Some("shift+mod+r"), "the other app's change survives");
+        assert_eq!(saved.spec("stop").as_deref(), Some("mod+g"));
+        assert_eq!(shortcut("refresh").map(|s| s.to_string()), "shift+mod+r".parse::<Shortcut>().ok().map(|s| s.to_string()));
+        store::save(&Shortcuts::default());
+        let before = generation();
+        refresh();
+        assert!(generation() > before);
+        assert_eq!(shortcut("stop").map(|s| s.to_string()), "mod+period".parse::<Shortcut>().ok().map(|s| s.to_string()));
     }
 
     #[test]
