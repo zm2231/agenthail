@@ -166,9 +166,13 @@ fn line_end(t: &str, caret: usize) -> bool {
     !t[caret.min(t.len())..].contains('\n')
 }
 
-pub fn browse_origin(s: &App, id: &str) -> Option<String> {
-    let h = s.complete.history.get(id)?;
-    (super::paste::expand(h.current()?) == super::paste::expand(&super::paste::draft(s))).then(|| h.origin().map(str::to_string)).flatten()
+pub fn browse_origins(s: &App) -> Vec<(String, String)> {
+    let shown = |id: &str| if s.composer_for.as_deref() == Some(id) { super::paste::draft(s) } else { s.drafts.get(id).to_string() };
+    s.complete
+        .history
+        .iter()
+        .filter_map(|(id, h)| (super::paste::expand(h.current()?) == super::paste::expand(&shown(id))).then(|| (id.clone(), h.origin().unwrap_or_default().to_string())))
+        .collect()
 }
 
 pub(super) fn replace_composer(s: &mut App, text: &str) {

@@ -88,10 +88,8 @@ fn unsent(s: &App) -> Value {
 
 fn drafts(s: &App) -> feed::composer::Drafts {
     let mut drafts = s.drafts.clone();
-    if let Some(id) = &s.composer_for
-        && let Some(origin) = crate::ui::complete::browse_origin(s, id)
-    {
-        drafts.set(id, &origin);
+    for (id, origin) in crate::ui::complete::browse_origins(s) {
+        drafts.set(&id, &origin);
     }
     drafts
 }
