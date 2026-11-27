@@ -90,9 +90,17 @@ pub fn refusal(e: &RespondError) -> String {
     }
 }
 
+pub fn unconfirmed(e: &RespondError, again: bool) -> String {
+    if again {
+        format!("Still not confirmed: {}. If the timeline doesn't show it, pressing again sends it as new.", e.message)
+    } else {
+        format!("Sent, not confirmed: {}. Check the timeline; pressing again asks about the same send.", e.message)
+    }
+}
+
 impl Client {
     pub fn work_move(&self, w: &Work, m: Move, words: &str, key: &str) -> Result<Value, RespondError> {
-        self.post_json_keyed("/api/v1/ledger/work", m.action(), body(w, m, words), key)
+        self.post_json_keyed("/api/v1/ledger/work", m.action(), body(w, m, words), key).and_then(crate::catalog::confirmed)
     }
 }
 
@@ -164,5 +172,14 @@ mod tests {
         assert_eq!(refusal(&unknown), "Agenthail doesn't know you yet. Send any session a message once, then try again.");
         let lost = client.work_move(&w, Move::Claim, "", "k3").unwrap_err();
         assert!(lost.maybe_delivered);
+        assert_eq!(unconfirmed(&lost, false), "Sent, not confirmed: Host mac did not answer. Check the timeline; pressing again asks about the same send.");
+        assert_eq!(unconfirmed(&lost, true), "Still not confirmed: Host mac did not answer. If the timeline doesn't show it, pressing again sends it as new.");
+    }
+
+    #[test]
+    fn a_pending_receipt_is_not_taken_as_done() {
+        let (client, _seen) = daemon(replies(&[(202, r#"{"ok":true,"status":"submitted"}"#)]));
+        let e = client.work_move(&work("open", None), Move::Comment, "hi", "k").unwrap_err();
+        assert!(e.maybe_delivered && e.code == "submitted");
     }
 }

@@ -225,6 +225,10 @@ pub fn open_jump(s: &mut App, tx: &mut Tx) {
     tx.focus("jump-input", false);
 }
 
+pub fn note_open(s: &App) -> bool {
+    s.ov.inbox.note.is_some() || s.ov.work.words.is_some()
+}
+
 pub fn work_review(s: &App, id: &str) -> Option<feed::decisions::Decision> {
     let w = s.ov.d.work.get(id)?;
     let inbox = s.ov.inbox.inbox.as_ref()?;

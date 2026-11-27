@@ -38,7 +38,7 @@ impl World {
         work.sort_by(|a, b| phase(b).cmp(&phase(a)).then(b.last_at().cmp(a.last_at())).then(a.id.cmp(&b.id)));
         for w in work.into_iter().take(cap) {
             let ph = phase(w);
-            let whose = if ph == CHECK { "your move".to_string() } else { format!("{}'s move", short_title(&self.whose_move(w), 24)) };
+            let whose = if ph == CHECK { "your move".to_string() } else { super::phase::move_of(&short_title(&self.whose_move(w), 24)) };
             let project = self.project(&w.project).map(|p| p.name.clone()).unwrap_or_default();
             out.push(Hit { group: "Work", title: plain(&w.text), status: format!("{} · {whose} · {project}", PHASES[ph]), badge: short_id(&w.id), avatar: project, target: Target::Work(w.id.clone()) });
         }

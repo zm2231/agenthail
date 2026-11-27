@@ -109,7 +109,10 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
             .child(row().gap(6.0).items_center().child(icon(&icons::INFO, 13.0).color(weak())).child(text(format!("Approval covers {revision} only. A new commit asks again. Merging is a separate step.").to_string()).font(META).color(weak())));
         col().w_full().radius(14.0).fill(k.c.surface_raised).border(1.0, k.c.warning.icon.alpha(0.4)).child(c)
     } else {
-        ui::card(col().w_full().padding(16.0).gap(8.0).child(text(format!("{}'s move. Nothing waits on you yet.", s.ov.d.whose_move(w))).font(BODY_MED).color(strong())).child(links))
+        ui::card(col().w_full().padding(16.0).gap(8.0).child(text(match s.ov.d.whose_move(w).as_str() {
+            "You" => "Your move. You hold it.".to_string(),
+            whose => format!("{whose}'s move. Nothing waits on you yet."),
+        }).font(BODY_MED).color(strong())).child(links))
     };
 
     let first_result = w.timeline.iter().rev().find(|t| t.kind == "log" && t.log_type.as_deref() == Some("result")).and_then(|t| t.text.clone()).unwrap_or_default();
@@ -120,7 +123,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>) -> El {
         ("Before you approve", format!("{passed} of {} checks have a recorded pass. {} raised after it was submitted.", steps.len(), if unchecked.is_empty() { "Nothing was".to_string() } else { format!("{} thing{} {}", unchecked.len(), if unchecked.len() == 1 { "" } else { "s" }, if unchecked.len() == 1 { "was" } else { "were" }) })),
     ]
     .into_iter()
-    .filter(|(t, b)| *t != "What was asked" || !b.trim().is_empty())
+    .filter(|(_, b)| !b.trim().is_empty())
     .collect();
     let mut brief = col().w_full().gap(2.0).padding(8.0);
     for (i, (t, b)) in brief_rows.iter().enumerate() {
@@ -291,12 +294,18 @@ pub struct Words {
     text: TextEdit,
 }
 
+struct Pending {
+    words: String,
+    key: String,
+    unconfirmed: bool,
+}
+
 pub struct State {
     tx: Sender<Done>,
     rx: Receiver<Done>,
     acting: HashSet<String>,
     notes: HashMap<String, (bool, String)>,
-    keys: HashMap<(String, Move), (String, String)>,
+    keys: HashMap<(String, Move), Pending>,
     pub words: Option<Words>,
 }
 
@@ -340,10 +349,13 @@ fn send(s: &mut App, id: &str, m: Move, words: &str) {
     };
     let slot = (id.to_string(), m);
     let key = match s.ov.work.keys.get(&slot) {
-        Some((said, key)) if said == words => key.clone(),
-        _ => feed::catalog::request_key(),
+        Some(p) if p.words == words => p.key.clone(),
+        _ => {
+            let key = feed::catalog::request_key();
+            s.ov.work.keys.insert(slot, Pending { words: words.to_string(), key: key.clone(), unconfirmed: false });
+            key
+        }
     };
-    s.ov.work.keys.insert(slot, (words.to_string(), key.clone()));
     s.ov.work.acting.insert(id.into());
     s.ov.work.notes.remove(id);
     let (tx, id, words) = (s.ov.work.tx.clone(), id.to_string(), words.to_string());
@@ -366,7 +378,15 @@ pub fn drain(s: &mut App) -> bool {
                 crate::ask_overview(s, crate::Ask::Refresh);
             }
             Err(e) if e.maybe_delivered => {
-                st.notes.insert(id, (true, format!("Sent, not confirmed: {}. Trying again won't do it twice.", e.message)));
+                let slot = (id.clone(), m);
+                let again = st.keys.get(&slot).is_some_and(|p| p.unconfirmed);
+                if again {
+                    st.keys.remove(&slot);
+                } else if let Some(p) = st.keys.get_mut(&slot) {
+                    p.unconfirmed = true;
+                }
+                st.notes.insert(id, (true, ledger::unconfirmed(&e, again)));
+                crate::ask_overview(s, crate::Ask::Refresh);
             }
             Err(e) => {
                 st.keys.remove(&(id.clone(), m));

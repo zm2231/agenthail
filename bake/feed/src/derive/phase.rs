@@ -4,6 +4,10 @@ pub const PHASES: [&str; 6] = ["Scope", "Build", "Review", "Verify", "Check", "S
 pub const CHECK: usize = 4;
 pub const SHIP: usize = 5;
 
+pub fn move_of(whose: &str) -> String {
+    if whose == "You" { "Your move".into() } else { format!("{whose}'s move") }
+}
+
 pub fn state_phase(state: &str) -> usize {
     match state {
         "in_progress" => 1,
@@ -44,7 +48,11 @@ impl World {
     pub fn whose_move(&self, w: &Work) -> String {
         match phase(w) {
             CHECK => "You".into(),
-            0 | SHIP => self.project(&w.project).map(|p| p.lead_name.clone()).unwrap_or_else(|| "The lead".into()),
+            0 | SHIP => match self.project(&w.project) {
+                Some(p) if p.lead.is_none() && p.lead_pending.is_none() => "Anyone".into(),
+                Some(p) => p.lead_name.clone(),
+                None => "The lead".into(),
+            },
             _ => self.worker(w),
         }
     }

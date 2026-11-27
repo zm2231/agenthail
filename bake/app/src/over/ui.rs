@@ -250,7 +250,7 @@ pub fn stepper(phase: usize, whose: &str) -> El {
             .justify_center()
             .gap(6.0)
             .child(text(format!("{}:", PHASES[phase.min(5)])).font(META_MED).color(k.c.text_accent))
-            .child(text(format!("{whose}'s move")).font(META).color(base()).truncate().shrink()),
+            .child(text(feed::derive::phase::move_of(whose)).font(META).color(base()).truncate().shrink()),
     )
 }
 
