@@ -91,15 +91,18 @@ fn probe() {
         rt.frame(DT);
         lines.push(format!("{name}: rows built {}", tally(built::take())));
     }
-    let (mut outside, mut view, mut commit, mut after) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut outside, mut view, mut commit, mut after, mut built_rows) = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let copies = feed::shared::copies();
+    let steady = std::env::var_os("AGENTHAIL_LIVE_STEADY").is_some();
     for round in 0..30 {
-        let next = poll(&path, 20 + round * 5, if round % 2 == 1 { top.as_deref() } else { None }, &mut sent);
+        let next = poll(&path, 20 + round * 5, if round % 2 == 1 && !steady { top.as_deref() } else { None }, &mut sent);
+        built::take();
         phases();
         let at = std::time::Instant::now();
         send(&rt, next);
         rt.frame(DT);
         let wall = at.elapsed().as_secs_f64() * 1000.0;
+        built_rows.push(built::take().len() as f64);
         let p = phase_ms();
         outside.push(wall - p[1]);
         view.push(p[0]);
@@ -109,13 +112,15 @@ fn probe() {
         after.push(at.elapsed().as_secs_f64() * 1000.0 - phase_ms()[1]);
     }
     lines.push(format!(
-        "fresh poll, 30 frames: outside commit median {:.2} ms (max {:.2}), view median {:.2} ms, commit median {:.2} ms, next frame outside commit median {:.2} ms, shared copies {}",
+        "fresh poll{}, 30 frames: outside commit median {:.2} ms (max {:.2}), view median {:.2} ms, commit median {:.2} ms, next frame outside commit median {:.2} ms, shared copies {}, rows built median {:.0}",
+        if steady { " (steady)" } else { "" },
         median(outside.clone()),
         outside.iter().copied().fold(0.0, f64::max),
         median(view),
         median(commit),
         median(after),
-        feed::shared::copies() - copies
+        feed::shared::copies() - copies,
+        median(built_rows)
     ));
     if let Ok(dump) = std::env::var("AGENTHAIL_LIVE_PATHS") {
         let paths: Vec<String> = rt.elements().into_iter().filter(|e| !e.exiting).map(|e| e.path).collect();
