@@ -21,6 +21,7 @@ pub struct Editor {
     pub text: TextEdit,
     pub saving: Option<u64>,
     pub error: Option<String>,
+    pub unknown: bool,
 }
 
 pub struct NativeQueue {
@@ -128,12 +129,13 @@ fn settled(s: &mut App, done: Done) {
             if editing && let Some(e) = s.native_queue.editor.as_mut() {
                 e.saving = None;
                 e.error = outcome.error().map(str::to_string);
+                e.unknown = matches!(outcome, Outcome::Unknown(_));
             }
             if !s.native_queue.queue.current(&session, generation) {
                 return;
             }
             if !s.native_queue.queue.mutated(&session, generation, &outcome) {
-                if s.native_queue.queue.take_dirty() {
+                if s.native_queue.queue.take_dirty() || matches!(outcome, Outcome::Unknown(_)) {
                     fetch(s, false);
                 }
                 return;
@@ -180,7 +182,7 @@ fn open_editor(s: &mut App, item: Option<String>, original: String) {
     let mut text = TextEdit::new(&original);
     text.focused = true;
     s.composer.focused = false;
-    s.native_queue.editor = Some(Editor { session: id, item, original, text, saving: None, error: None });
+    s.native_queue.editor = Some(Editor { session: id, item, original, text, saving: None, error: None, unknown: false });
 }
 
 fn close_editor(s: &mut App) {
@@ -197,6 +199,10 @@ fn save_editor(s: &mut App) {
         Some(id) => Act::Update { id: id.clone(), text: typed },
         None => Act::Add(typed),
     };
+    if e.unknown {
+        let session = e.session.clone();
+        s.native_queue.keys.abandon(&session, &a);
+    }
     let op = act(s, a);
     if let Some(e) = s.native_queue.editor.as_mut().filter(|_| op.is_some()) {
         e.saving = op;

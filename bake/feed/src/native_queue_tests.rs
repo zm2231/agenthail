@@ -304,4 +304,6 @@ fn an_interrupted_change_may_have_happened_and_its_retry_keeps_the_key_and_messa
     }
     assert!(tries.iter().all(|t| t.0 == tries[0].2 && t.1 == tries[0].2), "{tries:?}");
     assert_eq!(tries[0], tries[1]);
+    keys.abandon("s1", &add);
+    assert_ne!(keys.key("s1", &add), tries[0].2, "sending it as new takes a fresh key");
 }

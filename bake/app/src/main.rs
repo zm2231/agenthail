@@ -805,8 +805,8 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
         }
         _ => busy,
     };
-    if let Some(key) = s.unsent.list(id).iter().find(|u| u.outcome_unknown && u.same(&message, &attachments)).map(|u| u.key.clone()) {
-        send_new(s, id, &key, tx);
+    if s.unsent.list(id).iter().any(|u| u.outcome_unknown && u.same(&message, &attachments)) {
+        note(s, id, ASKED_UNKNOWN.into());
         return;
     }
     ui::paste::set_composer(s, "");
@@ -1006,17 +1006,18 @@ fn shows(s: &App, id: &str, unsent: &Unsent) -> bool {
 }
 
 pub fn offers_new_send(s: &App, id: &str) -> bool {
-    resendable(s, id) && s.unsent.latest(id).is_some_and(|u| u.offers_new_send())
+    resendable(s, id) && new_send_target(s, id).is_some()
+}
+
+const ASKED_UNKNOWN: &str = "Agenthail can't tell whether this message arrived, and sending it the same way gets the same answer. Check the conversation, then use Send as new.";
+
+fn new_send_target(s: &App, id: &str) -> Option<Unsent> {
+    let list = s.unsent.list(id);
+    list.iter().rev().find(|u| u.outcome_unknown && u.offers_new_send()).or_else(|| list.last().filter(|u| u.offers_new_send())).cloned()
 }
 
 pub fn send_as_new(s: &mut App, id: &str, tx: &mut Tx) {
-    if let Some(key) = s.unsent.latest(id).map(|u| u.key.clone()) {
-        send_new(s, id, &key, tx);
-    }
-}
-
-fn send_new(s: &mut App, id: &str, key: &str, tx: &mut Tx) {
-    let Some(unsent) = s.unsent.list(id).iter().find(|u| u.key == key).cloned().filter(|u| u.offers_new_send()) else { return };
+    let Some(unsent) = new_send_target(s, id) else { return };
     if sending(s, id) || s.client.is_none() || !confirmed(s, id, Confirm::SendNew, true) {
         return;
     }

@@ -201,6 +201,11 @@ impl Keys {
         }
     }
 
+    pub fn abandon(&mut self, session: &str, act: &Act) {
+        let identity = act.identity(session);
+        self.pending.retain(|p| p.identity != identity);
+    }
+
     pub fn read_started(&mut self) -> u64 {
         self.seq += 1;
         self.seq

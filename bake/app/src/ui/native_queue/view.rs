@@ -128,7 +128,13 @@ fn editor(e: &Editor, layer: &mut Vec<El>, k: &Kit) {
     if let Some(error) = &e.error {
         body = body.child(text(error.clone()).font(k.text(META)).color(failed()).wrap_anywhere());
     }
-    let save = if saving { "Saving…" } else if e.item.is_none() { "Add" } else { "Save" };
+    let save = match (saving, e.item.is_none(), e.unknown) {
+        (true, _, _) => "Saving…",
+        (false, true, true) => "Add as new",
+        (false, true, false) => "Add",
+        (false, false, true) => "Save as new",
+        (false, false, false) => "Save",
+    };
     let buttons = row()
         .w_full()
         .gap(8.0)
