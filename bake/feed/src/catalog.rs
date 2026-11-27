@@ -220,6 +220,8 @@ pub struct Capabilities {
     #[serde(default)]
     pub goal_set: bool,
     #[serde(default)]
+    pub steer_images: Option<bool>,
+    #[serde(default)]
     pub lifecycle: Lifecycle,
 }
 
@@ -235,7 +237,7 @@ fn capabilities_or_default<'de, D: serde::Deserializer<'de>>(d: D) -> std::resul
 
 impl Default for Capabilities {
     fn default() -> Self {
-        Capabilities { interrupt: true, steer: true, model: false, compact: false, commands: false, attach: false, goal_set: false, lifecycle: Lifecycle::default() }
+        Capabilities { interrupt: true, steer: true, model: false, compact: false, commands: false, attach: false, goal_set: false, steer_images: None, lifecycle: Lifecycle::default() }
     }
 }
 

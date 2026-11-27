@@ -5,6 +5,7 @@ use feed::derive::menubar::{self, Link, MenuBar};
 use rune::{AppHandle, MenuItem, Taskbar, Tray, TrayEvent, TrayIcon, TrayItem, TraySpec, WindowHandle};
 
 use crate::App;
+use crate::ui::keys::{self, MenuState};
 
 const ICON: &[u8] = include_bytes!("../assets/menubar.png");
 const WARNING: &[u8] = include_bytes!("../assets/menubar-warning.png");
@@ -14,6 +15,7 @@ pub struct Bar {
     tray: Option<Tray>,
     app: Option<AppHandle<App>>,
     shown: Option<(MenuBar, Link, Option<&'static str>)>,
+    keys: Option<MenuState>,
     warning: bool,
 }
 
@@ -88,10 +90,20 @@ pub fn refresh(s: &mut App) {
     if let Some(tray) = &s.bar.tray {
         tray.set_menu(tray_items(&bar, link, note));
     }
-    if let Some(app) = &s.bar.app {
-        let _ = app.set_menu(dock_items(&bar));
-    }
     s.bar.shown = Some((bar, link, note));
+    s.bar.keys = None;
+    sync_keys(s);
+}
+
+pub fn sync_keys(s: &mut App) {
+    let state = keys::menu_state(s);
+    if s.bar.keys == Some(state) {
+        return;
+    }
+    if let (Some(app), Some((bar, ..))) = (&s.bar.app, &s.bar.shown) {
+        let _ = app.set_menu(dock_items(bar).into_iter().chain(keys::menu_items(state)));
+    }
+    s.bar.keys = Some(state);
 }
 
 fn show_link(tray: &Tray, link: Link) -> bool {
@@ -130,7 +142,11 @@ fn tray_items(bar: &MenuBar, link: Link, note: Option<&str>) -> Vec<TrayItem> {
     items
 }
 
-pub fn settings_item() -> MenuItem<App> {
+pub fn with_menus(app: rune::App<App>) -> rune::App<App> {
+    keys::menu_items(MenuState::default()).into_iter().fold(app.menu_item(settings_item()), rune::App::menu_item)
+}
+
+fn settings_item() -> MenuItem<App> {
     let shortcut = "cmd+comma".parse().expect("the Settings shortcut parses");
     MenuItem::new("Settings…", crate::settings::open_from_menu).id("settings").key_equivalent(shortcut)
 }

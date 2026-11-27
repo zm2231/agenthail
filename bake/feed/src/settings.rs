@@ -159,6 +159,19 @@ impl Chip {
             _ => Pick::Apply,
         }
     }
+
+    /// Choices that let the agent act without asking are only ever picked from the menu.
+    pub fn cycled(&self) -> Option<&Choice> {
+        if !self.changeable {
+            return None;
+        }
+        let quiet: Vec<&Choice> = self.choices.iter().filter(|c| !c.confirm).collect();
+        let next = match quiet.iter().position(|c| c.id == self.value) {
+            Some(i) => quiet[(i + 1) % quiet.len()],
+            None => *quiet.first()?,
+        };
+        (next.id != self.value).then_some(next)
+    }
 }
 
 const CLAUDE_HOST: &str = "claude-host";
@@ -477,6 +490,24 @@ mod tests {
                 "/api/v1/session-metadata?id=h1%3A%3As+1"
             ]
         );
+    }
+
+    #[test]
+    fn shift_tab_steps_through_the_modes_that_still_ask_first() {
+        let mut s = claude_host();
+        let mode = |s: &SessionSettings| chips(s, &[], &all()).into_iter().find(|c| c.key == "mode").unwrap();
+        let next = |s: &SessionSettings| mode(s).cycled().map(|c| c.id.clone());
+        assert_eq!(next(&s).as_deref(), Some("manual"), "from a mode only the menu picks, start at the first");
+        s.permission = Some(Permission { mode: "acceptEdits".into() });
+        assert_eq!(next(&s).as_deref(), Some("plan"));
+        s.permission = Some(Permission { mode: "auto".into() });
+        assert_eq!(next(&s).as_deref(), Some("manual"), "wraps without landing on don't ask or bypass");
+        s.runtime_kind = "claude-cli".into();
+        assert_eq!(next(&s), None, "a mode Agenthail can't change doesn't cycle");
+        let mut codex = codex();
+        assert_eq!(next(&codex).as_deref(), Some("plan"));
+        codex.collaboration_mode = Some(Setting { value: "plan".into() });
+        assert_eq!(next(&codex).as_deref(), Some("default"));
     }
 
     #[test]

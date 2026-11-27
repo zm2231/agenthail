@@ -245,6 +245,7 @@ impl Hold {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Tray {
     chips: HashMap<String, Vec<Chip>>,
+    stashed: HashMap<String, Vec<Chip>>,
     next: u64,
 }
 
@@ -278,8 +279,23 @@ impl Tray {
         self.chips.retain(|_, list| !list.is_empty());
     }
 
+    pub fn has_stashed(&self, id: &str) -> bool {
+        self.stashed.contains_key(id)
+    }
+
+    pub fn swap_stash(&mut self, id: &str) {
+        let shown = self.chips.remove(id).unwrap_or_default();
+        let held = self.stashed.remove(id).unwrap_or_default();
+        if !shown.is_empty() {
+            self.stashed.insert(id.to_string(), shown);
+        }
+        if !held.is_empty() {
+            self.chips.insert(id.to_string(), held);
+        }
+    }
+
     pub fn uploaded(&mut self, local: u64, result: Result<Upload, String>) {
-        if let Some(chip) = self.chips.values_mut().flatten().find(|c| c.local == local) {
+        if let Some(chip) = self.chips.values_mut().chain(self.stashed.values_mut()).flatten().find(|c| c.local == local) {
             chip.state = match result {
                 Ok(upload) => State::Ready(upload),
                 Err(error) => State::Failed(error),
@@ -320,21 +336,27 @@ impl Tray {
     }
 
     fn put(&mut self, id: &str, upload: &Upload, gone: bool) {
-        let list = self.chips.entry(id.to_string()).or_default();
-        if list.iter().any(|c| matches!(&c.state, State::Ready(u) | State::Gone(u) if u.id == upload.id)) {
+        self.put_in(id, upload, gone, false);
+    }
+
+    fn put_in(&mut self, id: &str, upload: &Upload, gone: bool, stashed: bool) {
+        let held = if stashed { &self.stashed } else { &self.chips };
+        if held.get(id).into_iter().flatten().any(|c| matches!(&c.state, State::Ready(u) | State::Gone(u) if u.id == upload.id)) {
             return;
         }
         self.next += 1;
-        let state = if gone { State::Gone(upload.clone()) } else { State::Ready(upload.clone()) };
-        list.push(Chip { local: self.next, name: upload.name.clone(), image: upload.is_image(), size: upload.bytes, data: None, state });
+        let (next, state) = (self.next, if gone { State::Gone(upload.clone()) } else { State::Ready(upload.clone()) });
+        self.list(id, stashed).push(Chip { local: next, name: upload.name.clone(), image: upload.is_image(), size: upload.bytes, data: None, state });
     }
 
     pub fn rekey(&mut self, rekeyed: &HashMap<String, String>) {
-        let retired: Vec<String> = self.chips.keys().filter(|id| crate::composer::current(rekeyed, id) != id.as_str()).cloned().collect();
-        for old in retired {
-            let moving = self.chips.remove(&old).unwrap_or_default();
-            let new = crate::composer::current(rekeyed, &old).to_string();
-            self.chips.entry(new).or_default().extend(moving);
+        for map in [&mut self.chips, &mut self.stashed] {
+            let retired: Vec<String> = map.keys().filter(|id| crate::composer::current(rekeyed, id) != id.as_str()).cloned().collect();
+            for old in retired {
+                let moving = map.remove(&old).unwrap_or_default();
+                let new = crate::composer::current(rekeyed, &old).to_string();
+                map.entry(new).or_default().extend(moving);
+            }
         }
     }
 
@@ -350,54 +372,88 @@ impl Tray {
     }
 
     pub fn to_json(&self) -> Value {
-        Value::Object(
-            self.chips
-                .iter()
-                .map(|(id, list)| {
-                    let kept: Vec<Value> = list
-                        .iter()
-                        .filter_map(|c| match &c.state {
-                            State::Ready(u) => Some(u.to_json()),
-                            State::Gone(u) => Some(json!({"upload": u.to_json(), "gone": true})),
-                            State::Uploading | State::Failed(_) => Some(json!({"lost": {"name": c.name, "bytes": c.size, "image": c.image}})),
-                        })
-                        .collect();
-                    (id.clone(), Value::Array(kept))
-                })
-                .filter(|(_, v)| v.as_array().is_some_and(|a| !a.is_empty()))
-                .collect(),
-        )
+        lists_json(&self.chips)
     }
 
     pub fn to_json_with(&self, adding: &[(String, String)]) -> Value {
-        let mut value = self.to_json();
-        for (id, name) in adding {
-            let entry = json!({"lost": {"name": name, "bytes": 0, "image": false}});
-            match value[id.as_str()].as_array_mut() {
-                Some(list) => list.push(entry),
-                None => value[id.as_str()] = json!([entry]),
-            }
-        }
-        value
+        with_lost(self.to_json(), adding)
+    }
+
+    pub fn stashed_json_with(&self, adding: &[(String, String)]) -> Value {
+        with_lost(lists_json(&self.stashed), adding)
     }
 
     pub fn from_json(value: &Value) -> Tray {
         let mut tray = Tray::default();
+        tray.load(value, false);
+        tray
+    }
+
+    pub fn load_stashed(&mut self, value: &Value) {
+        self.load(value, true);
+    }
+
+    fn load(&mut self, value: &Value, stashed: bool) {
         for (id, raw) in value.as_object().into_iter().flatten() {
             for entry in raw.as_array().into_iter().flatten() {
                 if let Some(name) = entry["lost"]["name"].as_str() {
-                    tray.next += 1;
-                    let chip = Chip { local: tray.next, name: name.to_string(), image: entry["lost"]["image"] == true, size: entry["lost"]["bytes"].as_u64().unwrap_or_default(), data: None, state: State::Failed(UNSAVED.into()) };
-                    tray.chips.entry(id.clone()).or_default().push(chip);
+                    self.next += 1;
+                    let chip = Chip { local: self.next, name: name.to_string(), image: entry["lost"]["image"] == true, size: entry["lost"]["bytes"].as_u64().unwrap_or_default(), data: None, state: State::Failed(UNSAVED.into()) };
+                    self.list(id, stashed).push(chip);
                     continue;
                 }
                 let (value, gone) = if entry["gone"] == true { (&entry["upload"], true) } else { (entry, false) };
                 if let Some(upload) = Upload::from_json(value) {
-                    tray.put(id, &upload, gone);
+                    self.put_in(id, &upload, gone, stashed);
                 }
             }
         }
-        tray
+    }
+
+    fn list(&mut self, id: &str, stashed: bool) -> &mut Vec<Chip> {
+        if stashed { &mut self.stashed } else { &mut self.chips }.entry(id.to_string()).or_default()
+    }
+}
+
+fn with_lost(mut value: Value, adding: &[(String, String)]) -> Value {
+    for (id, name) in adding {
+        let entry = json!({"lost": {"name": name, "bytes": 0, "image": false}});
+        match value[id.as_str()].as_array_mut() {
+            Some(list) => list.push(entry),
+            None => value[id.as_str()] = json!([entry]),
+        }
+    }
+    value
+}
+
+fn lists_json(lists: &HashMap<String, Vec<Chip>>) -> Value {
+    Value::Object(
+        lists
+            .iter()
+            .map(|(id, list)| {
+                let kept: Vec<Value> = list
+                    .iter()
+                    .filter_map(|c| match &c.state {
+                        State::Ready(u) => Some(u.to_json()),
+                        State::Gone(u) => Some(json!({"upload": u.to_json(), "gone": true})),
+                        State::Uploading | State::Failed(_) => Some(json!({"lost": {"name": c.name, "bytes": c.size, "image": c.image}})),
+                    })
+                    .collect();
+                (id.clone(), Value::Array(kept))
+            })
+            .filter(|(_, v)| v.as_array().is_some_and(|a| !a.is_empty()))
+            .collect(),
+    )
+}
+
+pub fn steer_refusal(attachments: &[Upload], capabilities: &crate::catalog::Capabilities) -> Option<&'static str> {
+    if attachments.is_empty() {
+        return None;
+    }
+    match capabilities.steer_images {
+        None => Some("Update Agenthail on this computer to steer attachments, so this was queued for next."),
+        Some(false) if attachments.iter().any(Upload::is_image) => Some("Attached images can't join a running turn on this session, so this was queued for next."),
+        Some(_) => None,
     }
 }
 
@@ -637,6 +693,55 @@ mod tests {
         tray.remove(a);
         assert_eq!(tray.ready("s1").unwrap().len(), 1);
         assert_eq!(tray.ready("other"), Ok(vec![]));
+    }
+
+    #[test]
+    fn a_steer_carries_only_attachments_the_session_can_take() {
+        use crate::catalog::Capabilities;
+        let image = Upload { media_type: "image/png".into(), ..upload("pic") };
+        let with = |steer_images| Capabilities { steer_images, ..Capabilities::default() };
+        assert_eq!(steer_refusal(&[], &with(None)), None, "plain text always steers");
+        assert!(steer_refusal(&[upload("a")], &with(None)).unwrap().starts_with("Update Agenthail"));
+        assert_eq!(steer_refusal(&[upload("a")], &with(Some(false))), None);
+        assert!(steer_refusal(&[upload("a"), image.clone()], &with(Some(false))).unwrap().starts_with("Attached images"));
+        assert_eq!(steer_refusal(&[image], &with(Some(true))), None);
+    }
+
+    #[test]
+    fn a_stash_sets_attachments_aside_and_brings_them_back() {
+        let mut tray = Tray::default();
+        let a = tray.add("s1", prepared("a.txt", b"aaa")).unwrap().unwrap();
+        tray.swap_stash("s1");
+        assert!(!tray.has("s1") && tray.has_stashed("s1"));
+        assert_eq!(tray.ready("s1"), Ok(vec![]), "a send now carries none of them");
+        tray.uploaded(a, Ok(upload("a")));
+        let b = tray.add("s1", prepared("b.txt", b"bbb")).unwrap().unwrap();
+        tray.swap_stash("s1");
+        assert_eq!(tray.ready("s1").unwrap(), vec![upload("a")], "an upload that finished while set aside comes back ready");
+        tray.rekey(&HashMap::from([("s1".to_string(), "s2".to_string())]));
+        tray.swap_stash("s2");
+        assert_eq!(tray.chips("s2").iter().map(|c| c.local).collect::<Vec<_>>(), [b]);
+        tray.swap_stash("s2");
+        tray.swap_stash("s2");
+        assert!(tray.has_stashed("s2"));
+        tray.remove(b);
+        tray.swap_stash("s2");
+        assert_eq!(tray.ready("s2").unwrap(), vec![upload("a")]);
+        assert!(!tray.has_stashed("s2"), "an empty draft leaves nothing set aside");
+    }
+
+    #[test]
+    fn stashed_attachments_come_back_after_a_restart() {
+        let mut tray = Tray::default();
+        tray.restore("s1", &[upload("kept")]);
+        tray.swap_stash("s1");
+        tray.restore("s1", &[upload("shown")]);
+        let mut back = Tray::from_json(&tray.to_json());
+        back.load_stashed(&tray.stashed_json_with(&[]));
+        assert_eq!(back.ready("s1").unwrap(), vec![upload("shown")]);
+        back.swap_stash("s1");
+        assert_eq!(back.ready("s1").unwrap(), vec![upload("kept")]);
+        assert!(!Tray::from_json(&tray.to_json()).has_stashed("s1"), "the draft list alone holds nothing set aside");
     }
 
     #[test]

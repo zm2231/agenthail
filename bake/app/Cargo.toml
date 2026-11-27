@@ -21,6 +21,7 @@ libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 wry = "0.58"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSEvent"] }
 
 [patch.crates-io]
 winit = { git = "https://github.com/zm2231/rune", rev = "99527ae68d598d11b4410c3ab0c72c8309f12950" }

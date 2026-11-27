@@ -361,6 +361,8 @@ pub fn distinct(prompts: Vec<Prompt>) -> Vec<Prompt> {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct History {
     entries: Vec<String>,
+    sent: Vec<String>,
+    cleared: Vec<String>,
     position: Option<usize>,
     draft: String,
     waiting: Option<Vec<String>>,
@@ -376,8 +378,28 @@ impl History {
             self.waiting = Some(texts);
             return;
         }
+        self.sent = texts;
+        self.rebuild();
+    }
+
+    pub fn clear(&mut self, text: &str) -> bool {
+        if text.trim().is_empty() {
+            return false;
+        }
+        self.cleared.retain(|t| t != text);
+        self.cleared.insert(0, text.to_string());
+        self.stop();
+        self.rebuild();
+        true
+    }
+
+    pub fn sent_again(&mut self, text: &str) {
+        self.cleared.retain(|t| t != text);
+    }
+
+    fn rebuild(&mut self) {
         let mut seen = std::collections::HashSet::new();
-        self.entries = texts.into_iter().filter(|t| !t.trim().is_empty() && seen.insert(t.clone())).collect();
+        self.entries = self.cleared.iter().chain(&self.sent).filter(|t| !t.trim().is_empty() && seen.insert(t.as_str())).cloned().collect();
         if self.position.is_some_and(|p| p >= self.entries.len()) {
             self.position = self.entries.len().checked_sub(1);
         }
@@ -737,6 +759,31 @@ mod tests {
         assert_eq!(later.older("").as_deref(), Some("b"), "a prompt recorded since comes first");
         assert_eq!(distinct(vec![prompt("a", None), prompt("a", Some("t")), prompt("b", None)]).len(), 2);
         assert!(forkable(&prompt("a", Some("t1"))) && !forkable(&prompt("a", Some(""))) && !forkable(&prompt("a", None)));
+    }
+
+    #[test]
+    fn a_cleared_draft_is_the_newest_entry_and_survives_a_refresh() {
+        let mut h = History::default();
+        h.replace(vec!["sent".into()]);
+        assert!(!h.clear("  "), "nothing to clear");
+        h.older("");
+        assert!(h.clear("half a thought"));
+        assert!(!h.browsing(), "clearing leaves the history");
+        h.replace(vec!["newer sent".into(), "sent".into()]);
+        assert_eq!(h.older("").as_deref(), Some("half a thought"));
+        assert_eq!(h.older("").as_deref(), Some("newer sent"));
+        assert_eq!(h.older("").as_deref(), Some("sent"));
+        h.stop();
+        h.clear("sent");
+        assert_eq!(h.older("").as_deref(), Some("sent"), "the same text isn't listed twice");
+        assert_eq!(h.older("").as_deref(), Some("half a thought"));
+        assert_eq!(h.older("").as_deref(), Some("newer sent"));
+        assert_eq!(h.older(""), None);
+        h.stop();
+        h.sent_again("sent");
+        h.replace(vec!["sent".into(), "newer sent".into()]);
+        assert_eq!(h.older("").as_deref(), Some("half a thought"), "a cleared draft stays ahead of what was sent, as in the Mac app");
+        assert_eq!(h.older("").as_deref(), Some("sent"), "sending a cleared draft takes it out of the cleared list");
     }
 
     #[test]

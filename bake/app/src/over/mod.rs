@@ -282,6 +282,9 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         }
         s.ov.jump = None;
     }
+    if crate::ui::keys::on_key(s, ev, tx) {
+        return true;
+    }
     if ev.mods.cmd && ev.mods.alt {
         let base = tx.key_base().map(|c| c.to_ascii_lowercase());
         match (&s.screen, base) {

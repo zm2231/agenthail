@@ -562,6 +562,14 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
             return;
         }
     };
+    let refusal = session(s, id).and_then(|x| feed::attach::steer_refusal(&attachments, &x.capabilities));
+    let busy = match (busy.or_else(|| send_busy(s, id)), refusal) {
+        (Some(Busy::Steer), Some(why)) => {
+            note(s, id, why.into());
+            Some(Busy::Queue)
+        }
+        _ => busy,
+    };
     let focused = s.composer.focused;
     s.composer = TextEdit::new("");
     s.composer.focused = focused;
@@ -1156,6 +1164,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     if changed || !s.bar.is_shown() {
         menubar::refresh(s);
     }
+    menubar::sync_keys(s);
     menubar::warn(s);
     menubar::badge(s);
     tx.wake_after(Duration::from_millis(if busy { 16 } else { 250 }));
@@ -1201,5 +1210,5 @@ fn main() {
     prefs.options = WindowOptions { visible: false, resizable: true, ..Default::default() };
     let (handle, window) = app.window(prefs);
     settings::keep(handle, window);
-    menubar::install(app.menu_item(menubar::settings_item())).run();
+    menubar::install(menubar::with_menus(app)).run();
 }
