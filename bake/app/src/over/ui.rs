@@ -54,6 +54,11 @@ pub fn avatar(name: &str, size: f32) -> El {
         .child(text(initial).font(TextStyle::new(size * 0.62, 640.0)).color(Color::WHITE))
 }
 
+// Overhangs Rune's text_size(16) sidebar avatar slot by 1 pt a side at every text size.
+fn row_avatar(name: &str, k: &Kit) -> El {
+    avatar(name, k.text_size(16.0) + 2.0).key("chip")
+}
+
 fn cut_to(word: &str, style: TextStyle, width: f32) -> String {
     let chars: Vec<char> = word.chars().collect();
     let mut n = chars.len();
@@ -479,7 +484,7 @@ fn session_row(s: &App, x: &feed::catalog::Session, depth: u8, lead: bool, selec
     let mut r = SidebarRow::new(short_title(&s.ov.d.title(x), 40))
         .height(k.text_size(44.0))
         .depth(depth)
-        .avatar(avatar(&s.ov.d.title(x), 18.0))
+        .avatar(row_avatar(&s.ov.d.title(x), k))
         .subtitle(if waiting { x.display.label.clone() } else if lead { format!("Lead · {}", short_title(&s.ov.d.gist(x), 40)) } else { short_title(&s.ov.d.gist(x), 48) })
         .selected(selected == Some(x.id.as_str()))
         .on_select(move |s: &mut App, _| crate::over::open_session(s, &id));
@@ -577,7 +582,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
         };
         let mut need = SidebarRow::new(short_title(&n.title, 60))
             .height(k.text_size(44.0))
-            .avatar(avatar(&n.project, 18.0))
+            .avatar(row_avatar(&n.project, k))
             .subtitle(n.kind.wanted())
             .subtitle_color(needs_color(k))
             .selected(sel)
@@ -637,7 +642,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
         let waiting = s.ov.needs.iter().filter(|n| n.project_key == p.key).count();
         let mut r = SidebarRow::new(p.name.clone())
             .height(k.text_size(32.0))
-            .avatar(avatar(&p.name, 18.0))
+            .avatar(row_avatar(&p.name, k))
             .detail(s.ov.d.ago(&p.last_active))
             .selected(matches!(&s.screen, Screen::Project(k2) if *k2 == p.key))
             .on_select(move |s: &mut App, _| go(s, Screen::Project(key.clone())));

@@ -84,6 +84,22 @@ fn changing_the_text_size_in_an_open_window_grows_the_transcript_rows_already_sh
     assert!(after[3] > heading[3] * 1.15, "a heading grows with the text: {heading:?} -> {after:?}");
 }
 
+#[test]
+fn sidebar_avatars_fill_their_slot_and_keep_the_label_beside_them_at_every_text_size() {
+    if !isolated("text_scale::sidebar_avatars_fill_their_slot_and_keep_the_label_beside_them_at_every_text_size") {
+        return;
+    }
+    let dir = Dir::new("text-scale-avatars");
+    for scale in [1.0, 1.6] {
+        let rt = laid_out(scale, "now", &dir);
+        let (slot, chip, label) = (rect(&rt, "p-p1/avatar"), rect(&rt, "p-p1/avatar/chip"), rect(&rt, "p-p1/label"));
+        assert!((slot[2] - 16.0 * scale).abs() < 0.01, "the slot follows the text at {scale}: {slot:?}");
+        assert!((chip[2] - (slot[2] + 2.0)).abs() < 0.01, "the chip fills its slot at {scale}: {chip:?} in {slot:?}");
+        let gap = label[0] - (chip[0] + chip[2]);
+        assert!((gap - 5.0).abs() < 0.01, "the label sits 5 pt past the chip at {scale}: {gap}");
+    }
+}
+
 struct Capture {
     gpu: rune::render::Gpu,
     renderer: rune::render::Renderer,
