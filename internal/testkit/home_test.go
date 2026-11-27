@@ -1,18 +1,23 @@
 package testkit
 
 import (
+	"bufio"
+	"fmt"
 	"go/ast"
 	"go/build"
 	"go/parser"
 	"go/token"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMain(m *testing.M) {
@@ -175,4 +180,86 @@ func runsInOwnHome(path string) bool {
 		})
 	}
 	return found
+}
+
+func TestHoldHomeUntilKilled(t *testing.T) {
+	if os.Getenv("AGENTHAIL_TESTKIT_HOLD_HOME") == "" {
+		t.Skip("run by TestAKilledTestBinarysHomeIsRemovedByTheNextOne")
+	}
+	fmt.Println(os.Getenv("HOME"))
+	time.Sleep(time.Minute)
+}
+
+func TestAKilledTestBinarysHomeIsRemovedByTheNextOne(t *testing.T) {
+	tmp := t.TempDir()
+	env := append(os.Environ(), "TMPDIR="+tmp)
+	killedHome := func() (string, int) {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestHoldHomeUntilKilled$")
+		cmd.Env = append(env, "AGENTHAIL_TESTKIT_HOLD_HOME=1")
+		out, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		home, err := bufio.NewReader(out).ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd.Process.Kill()
+		cmd.Wait()
+		return strings.TrimSpace(home), cmd.Process.Pid
+	}
+	backdate := func(path string) {
+		old := time.Now().Add(-time.Hour)
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	owned := func(name string, pid int) string {
+		home := filepath.Join(tmp, name)
+		if err := os.Mkdir(home, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(home, homeOwner), []byte(strconv.Itoa(pid)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return home
+	}
+
+	dead, pid := killedHome()
+	if filepath.Dir(dead) != tmp {
+		t.Fatalf("the child's home %s is not in %s", dead, tmp)
+	}
+	if _, err := os.Stat(dead); err != nil {
+		t.Fatalf("the killed child's home is already gone: %v", err)
+	}
+	backdate(filepath.Join(dead, homeOwner))
+	justDied := owned(homePrefix+"justdied", pid)
+	alive := owned(homePrefix+"alive", os.Getpid())
+	backdate(filepath.Join(alive, homeOwner))
+	unmarked := filepath.Join(tmp, homePrefix+"unmarked")
+	if err := os.Mkdir(unmarked, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	backdate(unmarked)
+
+	next := exec.Command(os.Args[0], "-test.run=^$")
+	next.Env = env
+	if out, err := next.CombinedOutput(); err != nil {
+		t.Fatalf("next test binary: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(dead); !os.IsNotExist(err) {
+		t.Errorf("the killed child's home %s was not removed: %v", dead, err)
+	}
+	for _, kept := range []string{justDied, alive, unmarked} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Errorf("%s was removed: %v", kept, err)
+		}
+	}
+	entries, _ := os.ReadDir(tmp)
+	if len(entries) != 3 {
+		t.Errorf("the next test binary left %d folders in %s, want the 3 kept ones", len(entries), tmp)
+	}
 }

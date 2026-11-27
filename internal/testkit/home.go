@@ -1,9 +1,20 @@
 package testkit
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+)
+
+const (
+	homePrefix = "agenthail-test-home-"
+	homeOwner  = ".agenthail-test-owner"
+	staleAfter = 5 * time.Minute
 )
 
 // RunInOwnHome runs a test binary in a new HOME it removes afterwards, so no
@@ -18,12 +29,17 @@ func RunInOwnHome(run func() int) int {
 		fmt.Fprintf(os.Stderr, "FAIL: keep the go command's caches: %v\n", err)
 		return 1
 	}
-	home, err := os.MkdirTemp("", "agenthail-test-home-")
+	removeDeadHomes(os.TempDir())
+	home, err := os.MkdirTemp("", homePrefix)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: make the test binary's HOME: %v\n", err)
 		return 1
 	}
 	defer os.RemoveAll(home)
+	if err := os.WriteFile(filepath.Join(home, homeOwner), []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: mark the test binary's HOME: %v\n", err)
+		return 1
+	}
 	for _, name := range []string{"HOME", "CFFIXED_USER_HOME"} {
 		os.Setenv(name, home)
 	}
@@ -58,4 +74,38 @@ func keepGoEnv() error {
 		}
 	}
 	return nil
+}
+
+// removeDeadHomes clears homes whose test binary was killed before its deferred
+// removal ran. A home without an owner marker is never touched.
+func removeDeadHomes(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), homePrefix) {
+			continue
+		}
+		home := filepath.Join(dir, entry.Name())
+		if owner, ok := deadOwner(filepath.Join(home, homeOwner)); ok && owner != os.Getpid() {
+			os.RemoveAll(home)
+		}
+	}
+}
+
+func deadOwner(marker string) (int, bool) {
+	info, err := os.Lstat(marker)
+	if err != nil || !info.Mode().IsRegular() || time.Since(info.ModTime()) < staleAfter {
+		return 0, false
+	}
+	data, err := os.ReadFile(marker)
+	if err != nil {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || pid <= 1 {
+		return 0, false
+	}
+	return pid, errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
 }
