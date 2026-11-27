@@ -757,26 +757,33 @@ fn send_with(s: &mut App, id: &str, busy: Option<Busy>, tx: &mut Tx) {
     ui::paste::set_composer(s, "");
     ui::attach::clear(s, id);
     ui::complete::sending(s, id);
+    if waiting_earlier(s, id) {
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        if s.unsent.list(id).iter().any(|u| u.redelivering(now) && u.reuses_key() && u.same(&message, &attachments)) {
+            note(s, id, "That message is already being sent again; it won't send twice.".into());
+            return;
+        }
+        let mut pending = fresh(s, id, message, attachments);
+        pending.draft = Some(draft).filter(|d| *d != pending.text);
+        pending.busy = busy.or(pending.busy);
+        pending.turn = turn;
+        s.unsent.add(id, Unsent { maybe_delivered: false, error: "an earlier message isn't confirmed yet".into(), ..pending });
+        over::layout::save(s);
+        return;
+    }
     match s.unsent.take_same(id, &message, &attachments) {
-        Some(again) if again.reuses_key() && again.turn != turn => {
-            note(s, id, "Sent again with the turn options it first had, since it may already have arrived".into());
+        Some(again) if again.reuses_key() => {
+            if again.turn != turn || !same_delivery(&again, busy, busy.or_else(|| send_busy(s, id))) {
+                note(s, id, "Sent again just as it first went, since it may already have arrived".into());
+            }
             dispatch(s, id, again, true, tx);
         }
-        Some(again) if again.reuses_key() && same_delivery(&again, busy, busy.or_else(|| send_busy(s, id))) => dispatch(s, id, again, true, tx),
-        found => {
-            if let Some(again) = found.filter(|u| u.reuses_key()) {
-                s.unsent.add(id, again);
-            }
+        _ => {
             let mut pending = fresh(s, id, message, attachments);
             pending.draft = Some(draft).filter(|d| *d != pending.text);
             pending.busy = busy.or(pending.busy);
             pending.turn = turn;
-            if waiting_earlier(s, id) {
-                s.unsent.add(id, Unsent { maybe_delivered: false, error: "an earlier message isn't confirmed yet".into(), ..pending });
-                over::layout::save(s);
-            } else {
-                dispatch(s, id, pending, false, tx);
-            }
+            dispatch(s, id, pending, false, tx);
         }
     }
 }

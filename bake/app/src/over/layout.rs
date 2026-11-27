@@ -79,9 +79,12 @@ pub fn restore(s: &mut App) -> bool {
 }
 
 fn unsent(s: &App) -> Value {
-    let mut all = s.unsent.clone();
+    let mut all = feed::composer::Unconfirmed::default();
     for (id, pending) in s.in_flight.iter().flat_map(|(id, list)| list.iter().map(move |p| (id, p))) {
         all.add(id, pending.clone());
+    }
+    for (id, unsent) in s.unsent.iter() {
+        all.add(id, unsent.clone());
     }
     all.to_json()
 }

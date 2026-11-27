@@ -495,7 +495,11 @@ fn footer(cx: &Cx, block: &Block) -> Option<El> {
     }
     let mut line = row().gap(6.0).items_center().pt(2.0);
     if let Some(full) = cx.pane.transcript.item(item).filter(|i| i.truncated && i.body_ref.is_some()) {
-        line = body_tools(cx, full, line);
+        line = body_tools(cx, full, line).child(
+            action(format!("share-{item}"), &icons::SHARE, "Share")
+                .help("Shares what has loaded so far; Show all loads the rest first")
+                .on_press_tx(crate::history::share(cx.session.to_string(), format!("share-{item}"), full.text.clone())),
+        );
         return Some(if user { col().w_full().items_end().child(line) } else { line });
     }
     let line = line.child(tools);
