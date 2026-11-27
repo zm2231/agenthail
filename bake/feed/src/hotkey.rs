@@ -15,8 +15,28 @@ impl Return {
             self.left = Some(now);
             return false;
         }
-        !self.left.take().is_some_and(|left| now.saturating_duration_since(left) < WINDOW_SWITCH)
+        self.left.take().is_some_and(|left| now.saturating_duration_since(left) >= WINDOW_SWITCH)
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ask {
+    Want,
+    Choose,
+    Regain,
+}
+
+pub fn latest(asks: impl IntoIterator<Item = (Ask, Option<Stored>)>) -> Option<(Ask, Option<Stored>)> {
+    asks.into_iter().reduce(|(was, _), (ask, shortcut)| {
+        let kind = if was == Ask::Choose || ask == Ask::Choose {
+            Ask::Choose
+        } else if was == Ask::Regain || ask == Ask::Regain {
+            Ask::Regain
+        } else {
+            Ask::Want
+        };
+        (kind, shortcut)
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,6 +68,14 @@ impl<I> Default for Hotkey<I> {
 }
 
 impl<I: Copy> Hotkey<I> {
+    pub fn ask<R: Registrar<Id = I>>(&mut self, registrar: &mut R, ask: Ask, shortcut: Option<Stored>) -> bool {
+        match ask {
+            Ask::Want => self.want(registrar, shortcut),
+            Ask::Choose => self.choose(registrar, shortcut),
+            Ask::Regain => self.regain(registrar, shortcut),
+        }
+    }
+
     pub fn want<R: Registrar<Id = I>>(&mut self, registrar: &mut R, shortcut: Option<Stored>) -> bool {
         if shortcut == self.tried {
             return false;
@@ -147,12 +175,30 @@ mod tests {
     fn moving_between_agenthails_own_windows_is_not_coming_back() {
         let t = Instant::now();
         let mut r = Return::default();
-        assert!(r.focus(true, t), "the first focus is coming back");
+        assert!(!r.focus(true, t), "the first focus at launch isn't a return");
         assert!(!r.focus(false, t + Duration::from_secs(1)));
         assert!(!r.focus(true, t + Duration::from_millis(1005)), "another of its windows took focus straight away");
         assert!(!r.focus(false, t + Duration::from_secs(2)));
         assert!(r.focus(true, t + Duration::from_secs(9)), "coming back from another app");
-        assert!(r.focus(true, t + Duration::from_secs(10)), "a focus without a blur is coming back");
+        assert!(!r.focus(true, t + Duration::from_secs(10)), "a focus without a blur is not a return");
+    }
+
+    #[test]
+    fn asks_waiting_behind_a_slow_one_settle_on_the_newest_binding() {
+        let (a, b) = (Some(s("alt+mod+k")), Some(s("ctrl+alt+space")));
+        assert_eq!(latest([]), None);
+        assert_eq!(latest([(Ask::Choose, b), (Ask::Want, None)]), Some((Ask::Choose, None)));
+        assert_eq!(latest([(Ask::Want, a), (Ask::Regain, a)]), Some((Ask::Regain, a)));
+        assert_eq!(latest([(Ask::Want, a), (Ask::Want, b)]), Some((Ask::Want, b)));
+
+        let mut fake = Fake::default();
+        let mut hk = Hotkey::default();
+        hk.ask(&mut fake, Ask::Choose, a);
+        let (ask, shortcut) = latest([(Ask::Choose, b), (Ask::Want, None)]).unwrap();
+        hk.ask(&mut fake, ask, shortcut);
+        assert_eq!(fake.calls, 1, "the passed-over choice is never registered");
+        assert!(fake.live.is_empty());
+        assert!(!hk.held());
     }
 
     #[test]

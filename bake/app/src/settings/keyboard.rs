@@ -84,7 +84,7 @@ fn propose_any_app(next: Option<&Shortcut>) -> Result<(), ShortcutError> {
 
 fn message(id: &'static str, error: &ShortcutError, shortcut: Option<&Shortcut>) -> String {
     let Some(shortcut) = shortcut else { return shortcut_error_message(error, None) };
-    let keys = bindings::keycaps(shortcut);
+    let keys = if id == ANY_APP_ID { crate::hotkey::keycaps(shortcut) } else { bindings::keycaps(shortcut) };
     match error {
         ShortcutError::Conflict => match bindings::stored(shortcut).and_then(|s| bindings::read(|sc| sc.owner(s, id))) {
             Some(owner) => format!("{keys} is already used by {owner}."),

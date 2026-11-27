@@ -1,19 +1,12 @@
 use std::cell::{OnceCell, RefCell};
 use std::sync::mpsc::{Receiver, Sender, channel};
 
-use feed::hotkey::{Hotkey, Refusal, Registrar, Return};
+use feed::hotkey::{Ask, Hotkey, Refusal, Registrar, Return};
 use feed::shortcuts::{ANY_APP, ANY_APP_ID, Stored};
 use rune::{AppHandle, Shortcut, ShortcutError, ShortcutId, Tx};
 
 use crate::App;
 use crate::ui::bindings;
-
-#[derive(Clone, Copy)]
-enum Ask {
-    Want,
-    Choose,
-    Regain,
-}
 
 thread_local! {
     static HANDLE: OnceCell<AppHandle<App>> = const { OnceCell::new() };
@@ -55,14 +48,9 @@ fn refusal(error: ShortcutError) -> Refusal {
 
 fn run(handle: AppHandle<App>, asks: Receiver<(Ask, Option<Stored>)>) {
     let mut state = Hotkey::default();
-    for (ask, want) in asks {
-        let mut live = Live(&handle);
-        let acted = match ask {
-            Ask::Want => state.want(&mut live, want),
-            Ask::Choose => state.choose(&mut live, want),
-            Ask::Regain => state.regain(&mut live, want),
-        };
-        if acted {
+    while let Ok(first) = asks.recv() {
+        let Some((ask, want)) = feed::hotkey::latest(std::iter::once(first).chain(asks.try_iter())) else { continue };
+        if state.ask(&mut Live(&handle), ask, want) {
             let refused = state.refused().cloned();
             handle.update(move |_, _| shown(refused, want));
         }
@@ -131,8 +119,12 @@ pub fn refused() -> bool {
     current().is_some()
 }
 
+pub fn keycaps(shortcut: &Shortcut) -> String {
+    shortcut.keycaps().join(if cfg!(target_os = "macos") { "" } else { "+" })
+}
+
 pub fn note() -> Option<String> {
-    current().map(|(refusal, shortcut)| feed::hotkey::note(&refusal, &bindings::keycaps(&shortcut)))
+    current().map(|(refusal, shortcut)| feed::hotkey::note(&refusal, &keycaps(&shortcut)))
 }
 
 fn pressed(s: &mut App, tx: &mut Tx) {
