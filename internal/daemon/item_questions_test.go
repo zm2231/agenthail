@@ -3,6 +3,7 @@ package daemon
 import (
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -160,10 +161,12 @@ func TestAWorkersAskWithItsLeadDoesNotMarkTheItemAsWaitingOnThePerson(t *testing
 func TestAnAskKeepsItsItemWaitingOnThePersonAfterAHandoffBeforeItsQuestionIsRecorded(t *testing.T) {
 	f := newMCPAnswerFixture(t)
 	key, asked := f.hold(t, "lead", "Import the March export", false)
+	// The ask queues a background sync that records its question the moment this lock is released.
 	f.d.itemQuestionsMu.Lock()
+	unlock := sync.OnceFunc(f.d.itemQuestionsMu.Unlock)
+	t.Cleanup(unlock)
 	out, refused := callMCP(t, f.lead, "agenthail_ask", deployAsk)
 	if refused || out["workItem"] != asked {
-		f.d.itemQuestionsMu.Unlock()
 		t.Fatalf("ask = %v", out)
 	}
 	store := f.d.ledgerStore()
@@ -173,15 +176,14 @@ func TestAnAskKeepsItsItemWaitingOnThePersonAfterAHandoffBeforeItsQuestionIsReco
 	} {
 		step.ProjectKey, step.ItemID = key, asked
 		if _, err := store.Work(step, time.Now()); err != nil {
-			f.d.itemQuestionsMu.Unlock()
 			t.Fatal(err)
 		}
 	}
-	lanes, flights := f.lanes(t)
-	f.d.itemQuestionsMu.Unlock()
 	if len(f.itemQuestions(t, key, asked)) != 0 {
 		t.Fatal("the question was recorded before the handoff; the test does not reach the unsynced ask")
 	}
+	lanes, flights := f.lanes(t)
+	unlock()
 	if lanes[asked] != laneYou || !slices.Contains(flights[asked].WaitsOn, "person") {
 		t.Fatalf("the handed-off item stopped waiting on the person before its question was recorded: %v", lanes)
 	}
