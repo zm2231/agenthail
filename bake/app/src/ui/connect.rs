@@ -137,6 +137,7 @@ fn sessions(c: Client, tx: Sender<Bg>, poke: Sender<Feed>, poked: Receiver<Feed>
                     }
                 }
             }
+            due |= last.is_none_or(|at| at.elapsed() >= if down { EVERY } else { SAFETY });
             if batch.is_empty() {
                 if gap {
                     catalog.forget();
