@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender, channel};
 
 use feed::catalog::{RespondError, request_key};
@@ -17,7 +18,7 @@ enum Done {
     Changes(u64, Result<Vec<Change>, String>),
     Patch(u64, Result<Shown, String>),
     Undone(Result<(), RespondError>),
-    Built(Result<Started, RespondError>),
+    Built(String, String, Result<Started, RespondError>),
 }
 
 pub struct History {
@@ -32,7 +33,6 @@ pub struct History {
 pub struct Building {
     host: Host,
     text: TextEdit,
-    sent: Option<(String, String)>,
     starting: bool,
     failure: Option<String>,
 }
@@ -41,6 +41,7 @@ pub struct Sheets {
     pub history: Option<History>,
     pub building: Option<Building>,
     pub diff: DiffState,
+    unsure: HashMap<(String, String), String>,
     seq: u64,
     tx: Sender<Done>,
     rx: Receiver<Done>,
@@ -49,7 +50,7 @@ pub struct Sheets {
 impl Sheets {
     pub fn new() -> Sheets {
         let (tx, rx) = channel();
-        Sheets { history: None, building: None, diff: DiffState::new(Vec::new()), seq: 0, tx, rx }
+        Sheets { history: None, building: None, diff: DiffState::new(Vec::new()), unsure: HashMap::new(), seq: 0, tx, rx }
     }
 
     pub fn is_open(&self) -> bool {
@@ -136,7 +137,7 @@ pub fn open_build(s: &mut App, host: Host) {
     s.composer.focused = false;
     let mut text = TextEdit::new("");
     text.focused = true;
-    s.ov.ext.sheets.building = Some(Building { host, text, sent: None, starting: false, failure: None });
+    s.ov.ext.sheets.building = Some(Building { host, text, starting: false, failure: None });
 }
 
 fn close_build(s: &mut App) {
@@ -155,17 +156,14 @@ fn start(s: &mut App) {
         s.ov.notice = Some("Fixture mode: not sent".into());
         return;
     };
-    let key = match &b.sent {
-        Some((sent, key)) if *sent == message => key.clone(),
-        _ => request_key(),
-    };
-    b.sent = Some((message.clone(), key.clone()));
     b.starting = true;
     b.failure = None;
     let host = b.host.clone();
+    let key = s.ov.ext.sheets.unsure.get(&(host.id.clone(), message.clone())).cloned().unwrap_or_else(request_key);
     let tx = s.ov.ext.sheets.tx.clone();
     std::thread::spawn(move || {
-        let _ = tx.send(Done::Built(client.build_extension(on(&host).as_deref(), &message, &key)));
+        let result = client.build_extension(on(&host).as_deref(), &message, &key);
+        let _ = tx.send(Done::Built(message, key, result));
     });
 }
 
@@ -200,8 +198,14 @@ fn settle(s: &mut App, done: Done) {
                 crate::over::extensions::relist(s, &host);
             }
         }
-        Done::Built(result) => {
-            let Some(b) = s.ov.ext.sheets.building.as_mut() else { return };
+        Done::Built(message, key, result) => {
+            let sheets = &mut s.ov.ext.sheets;
+            let Some(b) = sheets.building.as_mut() else { return };
+            let asked = (b.host.id.clone(), message);
+            match &result {
+                Err(e) if e.maybe_delivered => sheets.unsure.insert(asked, key),
+                _ => sheets.unsure.remove(&asked),
+            };
             b.starting = false;
             let host = b.host.clone();
             match result {
@@ -218,10 +222,7 @@ fn settle(s: &mut App, done: Done) {
                     }
                 }
                 Err(e) if e.maybe_delivered => b.failure = Some(format!("It may have started anyway: {}. Check your sessions before trying again.", e.message)),
-                Err(e) => {
-                    b.sent = None;
-                    b.failure = Some(e.message);
-                }
+                Err(e) => b.failure = Some(e.message),
             }
         }
     }
