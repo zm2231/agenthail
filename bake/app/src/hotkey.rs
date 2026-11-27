@@ -26,10 +26,8 @@ impl Registrar for Live<'_> {
         self.0.register_shortcut_named(parsed, ANY_APP_ID, ANY_APP, pressed).map_err(refusal)
     }
 
-    fn unregister(&mut self, id: ShortcutId) {
-        if let Err(error) = self.0.unregister_shortcut(id) {
-            eprintln!("agenthail: couldn't release the shortcut from any app: {error}");
-        }
+    fn unregister(&mut self, id: ShortcutId) -> Result<(), Refusal> {
+        self.0.unregister_shortcut(id).map_err(|error| Refusal::Failed(format!("the previous shortcut couldn't be released ({error})")))
     }
 }
 
@@ -116,10 +114,10 @@ pub fn focus(focused: bool) {
     }
 }
 
-fn current() -> Option<(Refusal, Shortcut)> {
+fn current() -> Option<(Refusal, Option<Shortcut>)> {
     let now = bindings::read(|sc| sc.any_app());
     let refused = REFUSED.with_borrow(|r| r.clone().filter(|(_, tried)| *tried == now))?;
-    Some((refused.0, chord(now?)?))
+    Some((refused.0, now.and_then(chord)))
 }
 
 pub fn asks_again() -> bool {
@@ -131,7 +129,7 @@ pub fn keycaps(shortcut: &Shortcut) -> String {
 }
 
 pub fn note() -> Option<String> {
-    current().map(|(refusal, shortcut)| feed::hotkey::note(&refusal, &keycaps(&shortcut)))
+    current().map(|(refusal, shortcut)| feed::hotkey::note(&refusal, &shortcut.map_or_else(|| "The shortcut".to_string(), |s| keycaps(&s))))
 }
 
 fn pressed(s: &mut App, tx: &mut Tx) {
@@ -142,9 +140,35 @@ fn pressed(s: &mut App, tx: &mut Tx) {
             None => handle.open(),
         }
     });
-    if s.ov.jump.is_none() && !crate::over::dialog_open(s) {
+    if s.ov.jump.is_none() && !covered(s) {
         crate::over::open_jump(s, tx);
     }
+}
+
+fn covered(s: &App) -> bool {
+    let menus = &s.menus;
+    crate::over::note_open(s)
+        || s.ov.ext.sheets.is_open()
+        || crate::over::projects::covering(s)
+        || crate::ui::turn_options::covering(s)
+        || crate::ui::native_queue::covering(s)
+        || menus.open.is_some()
+        || menus.chip.is_some()
+        || menus.renaming.is_some()
+        || menus.confirm.is_some()
+        || menus.ops.adopting.is_some()
+        || menus.ops.moving.is_some()
+        || !menus.ops.notices.is_empty()
+        || s.attach.menu.is_some()
+        || s.prs.linking.is_some()
+        || s.inspect.editing.is_some()
+        || s.inspect.logs.is_some()
+        || s.limits.picking.is_some()
+        || s.limits.confirm.is_some()
+        || s.accounts.open
+        || s.accounts.planning.is_some()
+        || s.holder_menu.is_some()
+        || s.new_session.is_some()
 }
 
 #[cfg(test)]

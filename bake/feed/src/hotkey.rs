@@ -55,7 +55,7 @@ pub enum Refusal {
 pub trait Registrar {
     type Id: Copy;
     fn register(&mut self, shortcut: Stored) -> Result<Self::Id, Refusal>;
-    fn unregister(&mut self, id: Self::Id);
+    fn unregister(&mut self, id: Self::Id) -> Result<(), Refusal>;
 }
 
 #[derive(Debug)]
@@ -98,11 +98,15 @@ impl<I: Copy> Hotkey<I> {
     }
 
     fn attempt<R: Registrar<Id = I>>(&mut self, registrar: &mut R, shortcut: Option<Stored>) {
-        if let Some(id) = self.held.take() {
-            registrar.unregister(id);
-        }
         self.tried = shortcut;
         self.refused = None;
+        if let Some(id) = self.held {
+            if let Err(refusal) = registrar.unregister(id) {
+                self.refused = Some(refusal);
+                return;
+            }
+            self.held = None;
+        }
         let Some(shortcut) = shortcut else { return };
         match registrar.register(shortcut) {
             Ok(id) => self.held = Some(id),
@@ -140,6 +144,7 @@ mod tests {
         live: Vec<(u32, Stored)>,
         taken: Vec<(Stored, Option<String>)>,
         refuse: Option<Refusal>,
+        stuck: Option<String>,
         calls: usize,
     }
 
@@ -159,8 +164,12 @@ mod tests {
             Ok(self.next)
         }
 
-        fn unregister(&mut self, id: u32) {
+        fn unregister(&mut self, id: u32) -> Result<(), Refusal> {
+            if let Some(why) = self.stuck.clone() {
+                return Err(Refusal::Failed(why));
+            }
             self.live.retain(|(i, _)| *i != id);
+            Ok(())
         }
     }
 
@@ -257,6 +266,21 @@ mod tests {
         assert_eq!(note(hk.refused().unwrap(), "⌘Space"), "⌘Space is already used by Spotlight. Agenthail tries again when you change it or come back to Agenthail.");
         assert!(hk.want(&mut fake, Some(s("alt+mod+k"))), "a rebinding moves off the taken shortcut");
         assert!(hk.held());
+    }
+
+    #[test]
+    fn a_shortcut_that_wont_let_go_stays_held_and_blocks_the_new_one() {
+        let (mut fake, mut hk) = (Fake::default(), Hotkey::default());
+        hk.want(&mut fake, Some(s("alt+mod+k")));
+        fake.stuck = Some("native status -50".into());
+        assert!(hk.choose(&mut fake, Some(s("ctrl+alt+space"))));
+        assert_eq!(fake.calls, 1, "nothing new is registered while the old one is held");
+        assert!(hk.held());
+        assert_eq!(hk.refused(), Some(&Refusal::Failed("native status -50".into())));
+        fake.stuck = None;
+        assert!(hk.choose(&mut fake, Some(s("ctrl+alt+space"))), "choosing it again releases and retries");
+        assert_eq!(fake.live, vec![(2, s("ctrl+alt+space"))]);
+        assert_eq!(hk.refused(), None);
     }
 
     #[test]
