@@ -98,3 +98,14 @@ fn an_unconfirmed_build_that_names_its_session_still_opens_it() {
     assert_eq!(started.session_id().as_deref(), Some("s-builder"));
     assert!(started.unconfirmed());
 }
+
+#[test]
+fn a_build_or_undo_reply_that_proves_nothing_may_have_happened() {
+    let (client, _rx) = daemon(replies(&[(200, r#"{"ok":true}"#), (202, r#"{"ok":true,"status":"submitted"}"#)]));
+    let nameless = client.build_extension(None, "a board", "k1").unwrap_err();
+    assert!(nameless.maybe_delivered);
+    assert_eq!(nameless.code, "no_session");
+    let undo = client.undo_extension_change(None, "r2").unwrap_err();
+    assert!(undo.maybe_delivered);
+    assert_eq!(undo.code, "submitted");
+}

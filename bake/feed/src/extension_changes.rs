@@ -164,15 +164,18 @@ impl Client {
     }
 
     pub fn undo_extension_change(&self, host: Option<&str>, rev: &str) -> std::result::Result<(), RespondError> {
-        self.post_empty(&on_host(&format!("{}/undo", rev_path(rev)), host), "undo", &request_key()).map(drop)
+        self.post_empty(&on_host(&format!("{}/undo", rev_path(rev)), host), "undo", &request_key()).and_then(confirmed).map(drop)
     }
 
     pub fn build_extension(&self, host: Option<&str>, message: &str, key: &str) -> std::result::Result<Started, RespondError> {
         let reply = self.post_json_keyed(&on_host("/api/v1/extensions/build", host), "build", json!({"message": message}), key)?;
         let started: Started = serde_json::from_value(reply.clone()).map_err(|e| unreadable("builder", e, true))?;
         match started.session_id() {
-            None => confirmed(reply).map(|_| started),
             Some(_) => Ok(started),
+            None => {
+                confirmed(reply.clone())?;
+                Err(RespondError { message: "the daemon took it but named no builder session".into(), code: "no_session".into(), maybe_delivered: true, answered: true, reply, status: 0 })
+            }
         }
     }
 }

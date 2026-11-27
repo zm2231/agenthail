@@ -208,14 +208,11 @@ fn settle(s: &mut App, done: Done) {
                 Ok(started) => {
                     s.ov.ext.sheets.building = None;
                     crate::over::extensions::relist(s, &host);
-                    match started.session_id() {
-                        Some(id) => {
-                            open_session(s, &id);
-                            if started.unconfirmed() {
-                                s.ov.notice = Some("The builder session was made, but the daemon hasn't confirmed its first message ran yet.".into());
-                            }
+                    if let Some(id) = started.session_id() {
+                        open_session(s, &id);
+                        if started.unconfirmed() {
+                            s.ov.notice = Some("The builder session was made, but the daemon hasn't confirmed its first message ran yet.".into());
                         }
-                        None => s.ov.notice = Some("The builder started. Its changes take effect as it makes them; undo any of them from History.".into()),
                     }
                 }
                 Err(e) if e.maybe_delivered => b.failure = Some(format!("It may have started anyway: {}. Check your sessions before trying again.", e.message)),
