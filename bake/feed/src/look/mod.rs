@@ -125,6 +125,7 @@ pub struct Look {
     pub text_scale: f32,
     pub target: f32,
     pub roles: HashMap<String, (Rgb, Rgb)>,
+    pub accent_roles: Vec<String>,
 }
 
 impl Default for Look {
@@ -244,6 +245,7 @@ impl Look {
             text_scale: number(v, "text.scale", 1.0, (0.8, 1.6)),
             target: number(v, "contrast.target", 4.5, (4.5, 7.0)),
             roles,
+            accent_roles: view.colors.iter().filter(|(name, c)| name.as_str() != "accent" && c.system_accent).map(|(name, _)| name.clone()).collect(),
         }
     }
 

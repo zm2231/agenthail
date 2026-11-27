@@ -1,3 +1,6 @@
+mod backgrounds;
+mod controls;
+mod history;
 mod page;
 
 use std::collections::{HashMap, HashSet};
@@ -222,6 +225,9 @@ pub fn take(s: &mut Prefs, got: Got) {
             match result {
                 Ok(view) => {
                     s.appearance.seen_rev = view.rev.clone();
+                    for path in fl::Look::from_view(&view).images() {
+                        want_thumb(s, &path);
+                    }
                     crate::look::take_view(ticket, view);
                 }
                 Err(f) => s.appearance.error = Some(f),

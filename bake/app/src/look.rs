@@ -354,14 +354,19 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool) {
         }
         let dark = s.look.dark(system_dark);
         let mut paint = if dark { Paint::dark() } else { Paint::light() };
-        let role = |name: &str, fallback: Color| s.look.role(name, dark).map(rgb).unwrap_or(fallback);
+        let accent_rgb = s.look.accent.map(|(d, l)| if dark { d } else { l }).unwrap_or(system_accent);
+        let role = |name: &str, fallback: Color| {
+            if s.look.accent_roles.iter().any(|r| r == name) {
+                return rgb(accent_rgb);
+            }
+            s.look.role(name, dark).map(rgb).unwrap_or(fallback)
+        };
         paint.text = role("body", paint.text);
         paint.muted = role("muted", paint.muted);
         paint.faint = role("faint", paint.faint);
         paint.attention = role("needs-you", paint.attention);
         paint.done = role("done", paint.done);
         paint.failed = role("error", paint.failed);
-        let accent_rgb = s.look.accent.map(|(d, l)| if dark { d } else { l }).unwrap_or(system_accent);
         paint.accent = rgb(accent_rgb);
         paint.accent_deep = rgb(fl::blend(accent_rgb, [0.0; 3], 0.35));
         let translucent = glass && s.look.translucent(dark);

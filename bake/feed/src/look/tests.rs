@@ -203,3 +203,11 @@ fn increase_contrast_forces_readability_and_the_stronger_colours() {
     assert_eq!(look.role("muted", true), hex("#b0b0b4"));
     assert_eq!(look.role("muted", false), hex("#4b4c51"));
 }
+
+#[test]
+fn roles_on_the_system_accent_are_named() {
+    let view: View = serde_json::from_str(r##"{"colors":{"accent":{"systemAccent":true},"body":{"systemAccent":true},"link":{"systemAccent":true},"muted":{"dark":"#a3a3a8","light":"#55565c"}}}"##).unwrap();
+    let mut roles = Look::from_view(&view).accent_roles;
+    roles.sort();
+    assert_eq!(roles, vec!["body".to_string(), "link".to_string()]);
+}
