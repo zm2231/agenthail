@@ -33,6 +33,10 @@ pub fn shortcut(id: &str) -> Option<Shortcut> {
     with_bound(|b| b.saved.spec(id)?.parse().ok())
 }
 
+pub fn any_app() -> Option<Shortcut> {
+    with_bound(|b| b.saved.any_app()?.spec()?.parse().ok())
+}
+
 pub fn generation() -> u64 {
     with_bound(|b| b.generation)
 }
@@ -54,7 +58,7 @@ pub fn change<T>(f: impl FnOnce(&mut Shortcuts) -> T) -> T {
     let mut saved = fresh.clone();
     let out = f(&mut saved);
     if saved != fresh {
-        store::save(&saved);
+        store::save(&fresh, &saved);
     }
     let generation = with_bound(|b| b.generation);
     if read(|now| *now != saved) {
@@ -93,7 +97,7 @@ mod store {
         Shortcuts::load(data.as_deref(), any_app.as_deref())
     }
 
-    pub fn save(saved: &Shortcuts) {
+    pub fn save(before: &Shortcuts, saved: &Shortcuts) {
         let Some(defaults) = defaults() else {
             eprintln!("agenthail: keyboard shortcuts not saved: the {DOMAIN} settings couldn't be opened");
             return;
@@ -107,6 +111,18 @@ mod store {
             }
             None => defaults.removeObjectForKey(&key),
         }
+        if before.any_app() == saved.any_app() {
+            return;
+        }
+        let key = NSString::from_str(ANY_APP_KEY);
+        match saved.any_app_json() {
+            Some(json) => {
+                let value = NSString::from_str(&json);
+                let object: &AnyObject = &value;
+                unsafe { defaults.setObject_forKey(Some(object), &key) };
+            }
+            None => defaults.removeObjectForKey(&key),
+        }
     }
 }
 
@@ -116,22 +132,34 @@ mod store {
 
     use feed::shortcuts::Shortcuts;
 
-    fn path() -> Option<PathBuf> {
-        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".agenthail/keyboard-shortcuts.json"))
+    fn path(name: &str) -> Option<PathBuf> {
+        std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".agenthail").join(name))
     }
+
+    const COMMANDS: &str = "keyboard-shortcuts.json";
+    const ANY_APP: &str = "keyboard-shortcut-any-app.json";
 
     pub fn load() -> Shortcuts {
-        Shortcuts::load(path().and_then(|p| std::fs::read(p).ok()).as_deref(), None)
+        let read = |name| path(name).and_then(|p| std::fs::read(p).ok());
+        let any_app = read(ANY_APP).and_then(|b| String::from_utf8(b).ok());
+        Shortcuts::load(read(COMMANDS).as_deref(), any_app.as_deref())
     }
 
-    pub fn save(saved: &Shortcuts) {
-        let Some(path) = path() else { return };
-        let result = match saved.data() {
+    fn write(name: &str, bytes: Option<Vec<u8>>) {
+        let Some(path) = path(name) else { return };
+        let result = match bytes {
             Some(bytes) => std::fs::write(&path, bytes),
             None => std::fs::remove_file(&path).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }),
         };
         if let Err(e) = result {
             eprintln!("agenthail: keyboard shortcuts not saved: {e}");
+        }
+    }
+
+    pub fn save(before: &Shortcuts, saved: &Shortcuts) {
+        write(COMMANDS, saved.data());
+        if before.any_app() != saved.any_app() {
+            write(ANY_APP, saved.any_app_json().map(String::into_bytes));
         }
     }
 }
@@ -150,7 +178,7 @@ mod store {
         SAVED.with_borrow(Clone::clone)
     }
 
-    pub fn save(saved: &Shortcuts) {
+    pub fn save(_: &Shortcuts, saved: &Shortcuts) {
         SAVED.with_borrow_mut(|s| *s = saved.clone());
     }
 }
@@ -178,13 +206,13 @@ mod tests {
     #[test]
     fn a_change_starts_from_what_the_mac_app_saved_since() {
         assert_eq!(chord("refresh").map(|c| c.to_string()), Some("mod+r".parse::<Chord>().unwrap().to_string()));
-        store::save(&Shortcuts::load(Some(br#"{"refresh":{"carbonKeyCode":15,"carbonModifiers":768}}"#), None));
+        store::save(&Shortcuts::default(), &Shortcuts::load(Some(br#"{"refresh":{"carbonKeyCode":15,"carbonModifiers":768}}"#), None));
         assert_eq!(change(|s| s.set("stop", Stored::parse("mod+g"))), Ok(()));
         let saved = store::load();
         assert_eq!(saved.spec("refresh").as_deref(), Some("shift+mod+r"), "the other app's change survives");
         assert_eq!(saved.spec("stop").as_deref(), Some("mod+g"));
         assert_eq!(shortcut("refresh").map(|s| s.to_string()), "shift+mod+r".parse::<Shortcut>().ok().map(|s| s.to_string()));
-        store::save(&Shortcuts::default());
+        store::save(&Shortcuts::default(), &Shortcuts::default());
         let before = generation();
         refresh();
         assert!(generation() > before);

@@ -6,6 +6,7 @@ pub const DOMAIN: &str = "com.agenthail.app";
 pub const KEY: &str = "keyboardShortcuts";
 pub const ANY_APP_KEY: &str = "KeyboardShortcuts_openPalette";
 pub const ANY_APP: &str = "Open sessions from any app";
+pub const ANY_APP_ID: &str = "openPalette";
 
 const CMD: i64 = 0x100;
 const SHIFT: i64 = 0x200;
@@ -238,14 +239,30 @@ impl Shortcuts {
     }
 
     pub fn any_customized(&self) -> bool {
-        COMMANDS.iter().any(|c| self.customized(c.id))
+        self.any_app.is_some() || COMMANDS.iter().any(|c| self.customized(c.id))
+    }
+
+    pub fn any_app(&self) -> Option<Stored> {
+        self.any_app
+    }
+
+    pub fn any_app_json(&self) -> Option<String> {
+        self.any_app.and_then(|s| serde_json::to_string(&s).ok())
+    }
+
+    pub fn set_any_app(&mut self, shortcut: Option<Stored>) -> Result<(), &'static str> {
+        if let Some(owner) = shortcut.and_then(|s| self.owner(s, ANY_APP_ID)) {
+            return Err(owner);
+        }
+        self.any_app = shortcut;
+        Ok(())
     }
 
     pub fn owner(&self, shortcut: Stored, except: &str) -> Option<&'static str> {
         if let Some(c) = COMMANDS.iter().find(|c| c.id != except && self.get(c.id) == Some(shortcut)) {
             return Some(c.title);
         }
-        if self.any_app == Some(shortcut) {
+        if except != ANY_APP_ID && self.any_app == Some(shortcut) {
             return Some(ANY_APP);
         }
         let mac_app = |(id, _, default): &&(&str, &str, Option<&str>)| match self.overrides.get(*id) {
@@ -284,6 +301,7 @@ impl Shortcuts {
 
     pub fn reset_all(&mut self) -> Vec<(&'static str, &'static str)> {
         let before = self.overrides.clone();
+        self.any_app = None;
         for c in COMMANDS {
             self.overrides.remove(c.id);
         }
@@ -434,6 +452,24 @@ mod tests {
         let mut sc = Shortcuts::load(None, Some(r#"{"carbonKeyCode":40,"carbonModifiers":2304}"#));
         assert_eq!(sc.set("refresh", Some(s("alt+mod+k"))), Err(ANY_APP));
         assert_eq!(Shortcuts::load(None, Some("false")).set("refresh", Some(s("alt+mod+k"))), Ok(()));
+    }
+
+    #[test]
+    fn the_shortcut_from_any_app_is_chosen_like_a_command_and_saved_as_the_mac_app_does() {
+        let mut sc = Shortcuts::default();
+        assert_eq!(sc.any_app(), None, "the Mac app ships it unset");
+        assert!(!sc.any_customized());
+        assert_eq!(sc.set_any_app(Some(s("mod+k"))), Err("Go to session"));
+        assert_eq!(sc.set_any_app(Some(s("mod+q"))), Err("Quit Agenthail"));
+        assert_eq!(sc.set_any_app(Some(s("alt+mod+k"))), Ok(()));
+        assert_eq!(sc.set_any_app(Some(s("alt+mod+k"))), Ok(()), "its own shortcut is not a clash");
+        assert_eq!(sc.any_app_json().as_deref(), Some(r#"{"carbonKeyCode":40,"carbonModifiers":2304}"#));
+        assert_eq!(Shortcuts::load(None, sc.any_app_json().as_deref()).any_app(), Some(s("alt+mod+k")));
+        assert!(sc.any_customized(), "Restore Defaults clears it");
+        sc.reset_all();
+        assert_eq!(sc.any_app(), None);
+        assert_eq!(sc.any_app_json(), None);
+        assert_eq!(sc.set_any_app(None), Ok(()));
     }
 
     #[test]
