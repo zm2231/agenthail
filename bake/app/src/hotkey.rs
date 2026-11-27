@@ -33,7 +33,7 @@ impl Registrar for Live<'_> {
 }
 
 fn chord(shortcut: Stored) -> Option<Shortcut> {
-    shortcut.spec()?.parse().ok()
+    shortcut.global_spec()?.parse().ok()
 }
 
 fn refusal(error: ShortcutError) -> Refusal {

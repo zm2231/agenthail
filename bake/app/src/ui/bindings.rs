@@ -34,7 +34,7 @@ pub fn shortcut(id: &str) -> Option<Shortcut> {
 }
 
 pub fn any_app() -> Option<Shortcut> {
-    with_bound(|b| b.saved.any_app()?.spec()?.parse().ok())
+    with_bound(|b| b.saved.any_app()?.global_spec()?.parse().ok())
 }
 
 pub fn generation() -> u64 {
@@ -110,13 +110,16 @@ mod store {
             return Err(format!("the {DOMAIN} settings couldn't be opened"));
         };
         let key = NSString::from_str(KEY);
-        match saved.data() {
-            Some(bytes) => {
-                let data = NSData::from_vec(bytes);
-                let object: &AnyObject = &data;
-                unsafe { defaults.setObject_forKey(Some(object), &key) };
+        let commands = saved.data();
+        if commands != before.data() {
+            match commands {
+                Some(bytes) => {
+                    let data = NSData::from_vec(bytes);
+                    let object: &AnyObject = &data;
+                    unsafe { defaults.setObject_forKey(Some(object), &key) };
+                }
+                None => defaults.removeObjectForKey(&key),
             }
-            None => defaults.removeObjectForKey(&key),
         }
         if before.any_app() == saved.any_app() {
             return Ok(());

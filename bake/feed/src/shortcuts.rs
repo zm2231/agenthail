@@ -69,6 +69,14 @@ impl Stored {
     }
 
     pub fn spec(&self) -> Option<String> {
+        self.spec_with("mod")
+    }
+
+    pub fn global_spec(&self) -> Option<String> {
+        self.spec_with("super")
+    }
+
+    fn spec_with(&self, command: &str) -> Option<String> {
         let (_, key) = KEYS.iter().find(|(code, _)| *code == self.carbon_key_code)?;
         if self.carbon_modifiers & !(CMD | SHIFT | OPTION | CONTROL) != 0 {
             return None;
@@ -76,7 +84,7 @@ impl Stored {
         let mut out = String::new();
         for (bit, name) in MODS {
             if self.carbon_modifiers & bit != 0 {
-                out.push_str(name);
+                out.push_str(if bit == CMD { command } else { name });
                 out.push('+');
             }
         }
@@ -350,6 +358,14 @@ mod tests {
         assert_eq!(s("cmd+shift+ctrl+a").spec().as_deref(), Some("ctrl+shift+mod+a"));
         assert_eq!(Stored { carbon_key_code: 0x7F, carbon_modifiers: 256 }.spec(), None, "an unknown key binds nothing here");
         assert_eq!(Stored { carbon_key_code: 0, carbon_modifiers: 0x8000 }.spec(), None, "an unknown modifier binds nothing here");
+    }
+
+    #[test]
+    fn the_shortcut_from_any_app_names_the_super_key_on_every_desktop() {
+        assert_eq!(s("super+alt+k").global_spec().as_deref(), Some("alt+super+k"));
+        assert_eq!(s("ctrl+super+k").global_spec().as_deref(), Some("ctrl+super+k"));
+        assert_eq!(s("ctrl+alt+space").global_spec().as_deref(), Some("ctrl+alt+space"));
+        assert_eq!(s("mod+k").spec().as_deref(), Some("mod+k"), "in-app shortcuts keep the platform's primary key");
     }
 
     #[test]
