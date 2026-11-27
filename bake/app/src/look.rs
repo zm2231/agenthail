@@ -52,6 +52,7 @@ struct State {
     increased: bool,
     screen: u32,
     zoom: f32,
+    held_scale: Option<f32>,
 }
 
 thread_local! {
@@ -66,10 +67,13 @@ pub fn text_scale() -> Option<f32> {
     STATE.with_borrow(|s| s.view.is_some().then_some(s.look.text_scale))
 }
 
-pub fn preview_text_scale(scale: f32) {
+pub fn hold_text_scale(scale: Option<f32>) {
     STATE.with_borrow_mut(|s| {
-        s.look.text_scale = scale;
-        s.generation += 1;
+        s.held_scale = scale;
+        if let Some(scale) = scale.filter(|scale| *scale != s.look.text_scale) {
+            s.look.text_scale = scale;
+            s.generation += 1;
+        }
     });
 }
 
@@ -282,6 +286,9 @@ impl Picture {
 fn relook(s: &mut State) {
     if let Some(v) = &s.view {
         s.look = if s.increased { Look::with_increased_contrast(v) } else { Look::from_view(v) };
+        if let Some(scale) = s.held_scale {
+            s.look.text_scale = scale;
+        }
     }
 }
 

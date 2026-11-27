@@ -30,7 +30,7 @@ pub fn step(s: &mut App, steps: Option<i32>) {
         return;
     };
     let next = fl::text_scale_step(scale, steps);
-    crate::look::preview_text_scale(next);
+    crate::look::hold_text_scale(Some(next));
     STATE.with_borrow_mut(|st| {
         st.due = Some((next, Instant::now() + WRITE_AFTER));
         st.latest = Some(next);
@@ -58,11 +58,7 @@ pub fn pump(s: &mut App) -> bool {
         }
         (due.zip(st.tx.clone()), wrote, st.latest, st.due.is_some())
     });
-    if let Some(latest) = latest
-        && crate::look::text_scale().is_some_and(|shown| shown != latest)
-    {
-        crate::look::preview_text_scale(latest);
-    }
+    crate::look::hold_text_scale(latest);
     let changed = !wrote.is_empty();
     for (ticket, result) in wrote {
         match result {
