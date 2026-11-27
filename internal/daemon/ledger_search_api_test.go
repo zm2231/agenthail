@@ -80,6 +80,24 @@ func TestLedgerSearchFindsWorkInEveryLedgerWithItsProject(t *testing.T) {
 			t.Errorf("%s = %+v, want only %s", query, items, want)
 		}
 	}
+	described, err := store.Work(ledger.WorkRequest{ProjectKey: "repo:github.com/acme/widget", SessionID: "worker", Action: ledger.WorkAdd, Text: "speed up startup",
+		Fields: ledger.WorkFields{Description: "profiling shows the tokenizer dominates"}}, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := ledgerGet(t, handler, "/api/v1/ledger/search?q=tokenizer", "")
+	var wire struct {
+		Items []map[string]any `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &wire); w.Code != http.StatusOK || err != nil || len(wire.Items) != 1 {
+		t.Fatalf("q=tokenizer = %d %s (%v)", w.Code, w.Body, err)
+	}
+	got := wire.Items[0]
+	updated, _ := got["updatedAt"].(string)
+	if at, err := time.Parse(time.RFC3339Nano, updated); err != nil || at.IsZero() || got["id"] != described.Item.ID ||
+		got["matched"] != "description" || got["snippet"] != "profiling shows the tokenizer dominates" || got["rank"] != nil {
+		t.Errorf("a description hit on the wire = %v", got)
+	}
 	if items, truncated := search("q=parser&limit=1"); len(items) != 1 || !truncated {
 		t.Errorf("limit=1 = %+v truncated=%v", items, truncated)
 	}

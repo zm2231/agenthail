@@ -58,6 +58,7 @@ func TestSearchWorkRanksAcrossLedgers(t *testing.T) {
 		t.Fatalf("import = %+v, %v", imported, err)
 	}
 	carried := imported.Imported[0].ItemID
+	port := workAt(t, s, at(10), ledger.WorkRequest{ProjectKey: gadget, Action: ledger.WorkAdd, Text: "port td-50b9b1 to the ledger"})
 
 	got, result := searched(t, s, ledger.WorkSearch{Text: "PARSER"})
 	want := strings.Join([]string{timeout + ":title", crash + ":title", rewrite + ":title", noted + ":notes", docs + ":description"}, " ")
@@ -87,7 +88,7 @@ func TestSearchWorkRanksAcrossLedgers(t *testing.T) {
 		want string
 	}{
 		{"an exact id outranks a title naming it", ledger.WorkSearch{Text: strings.ToLower(docs)}, docs + ":id " + follow + ":title"},
-		{"an exact td id ranks first", ledger.WorkSearch{Text: "td-50b9b1"}, carried + ":tdId"},
+		{"an exact td id ranks first", ledger.WorkSearch{Text: "td-50b9b1"}, carried + ":tdId " + port + ":title"},
 		{"every word must match", ledger.WorkSearch{Text: "parser warms"}, noted + ":notes"},
 		{"a state filter", ledger.WorkSearch{Text: "parser", States: []ledger.WorkState{ledger.WorkDone}}, rewrite + ":title"},
 		{"deleted only when asked", ledger.WorkSearch{Text: "parser", States: []ledger.WorkState{ledger.WorkDeleted}}, gone + ":title"},
