@@ -92,7 +92,7 @@ pub fn refusal(e: &RespondError) -> String {
     }
 }
 
-pub const CHANGED_WORDS: &str = "The last send isn't confirmed yet. Changed words go as a new one, so check the timeline first.";
+pub const CHANGED_WORDS: &str = "The last send isn't settled yet, so only the same words can go now. Change them once it settles.";
 
 pub fn landed(w: &Work, m: Move, words: &str, since: OffsetDateTime) -> bool {
     match m {
