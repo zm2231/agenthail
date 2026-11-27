@@ -153,10 +153,24 @@ impl Signin {
     pub fn choices(&self) -> Vec<(String, String)> {
         const AUTO_LABEL: &str = "Automatic (system default browser)";
         const OFF_LABEL: &str = "Off";
+        let mut taken: Vec<String> = vec![AUTO_LABEL.into(), OFF_LABEL.into()];
+        taken.extend(self.profiles.iter().filter(|p| self.profiles.iter().filter(|o| o.label == p.label).count() == 1).map(|p| p.label.clone()));
         let mut out = vec![(AUTO_LABEL.to_string(), AUTO.to_string())];
         for p in &self.profiles {
-            let shared = p.label == AUTO_LABEL || p.label == OFF_LABEL || self.profiles.iter().filter(|o| o.label == p.label).count() > 1;
-            let label = if shared { format!("{} ({})", p.label, self.pinned_detail(p)) } else { p.label.clone() };
+            let alone = p.label != AUTO_LABEL && p.label != OFF_LABEL && self.profiles.iter().filter(|o| o.label == p.label).count() == 1;
+            let label = if alone {
+                p.label.clone()
+            } else {
+                let base = format!("{} ({})", p.label, self.pinned_detail(p));
+                let mut label = base.clone();
+                let mut n = 2;
+                while taken.contains(&label) {
+                    label = format!("{base} {n}");
+                    n += 1;
+                }
+                taken.push(label.clone());
+                label
+            };
             out.push((label, p.id.clone()));
         }
         out.push((OFF_LABEL.into(), OFF.into()));
@@ -235,10 +249,12 @@ mod tests {
             {"id": "a", "label": "Off", "browser": "chrome", "profile": "Default"},
             {"id": "b", "label": "Automatic (system default browser)", "browser": "arc", "profile": "Default"},
             {"id": "c", "label": "Work", "browser": "chrome", "profile": "Profile 1"},
-            {"id": "d", "label": "Work", "browser": "brave", "profile": "Default"}],
+            {"id": "d", "label": "Work", "browser": "brave", "profile": "Default"},
+            {"id": "e", "label": "Off (Chrome · Default)", "browser": "safari", "profile": "default"},
+            {"id": "f", "label": "Work", "browser": "brave", "profile": "Default"}],
             "browsers": [{"browser": "chrome", "label": "Chrome"}]})).unwrap();
         let labels: Vec<String> = clash.choices().into_iter().map(|(l, _)| l).collect();
-        assert_eq!(labels, vec!["Automatic (system default browser)", "Off (Chrome · Default)", "Automatic (system default browser) (arc · Default)", "Work (Chrome · Profile 1)", "Work (brave · Default)", "Off"]);
+        assert_eq!(labels, vec!["Automatic (system default browser)", "Off (Chrome · Default) 2", "Automatic (system default browser) (arc · Default)", "Work (Chrome · Profile 1)", "Work (brave · Default)", "Off (Chrome · Default)", "Work (brave · Default) 2", "Off"]);
         let mut unique = labels.clone();
         unique.sort();
         unique.dedup();
