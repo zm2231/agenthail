@@ -19,7 +19,7 @@ enum Done {
     Inbox(Instant, Inbox),
     Acted(String, Handled, bool, String, Result<(), (RespondError, String)>),
     Brief(String, Result<Brief, RespondError>),
-    Replied(String, String, String, Result<(), RespondError>),
+    Replied(String, String, String, Result<String, RespondError>),
     Version(Option<String>, Option<String>),
 }
 
@@ -190,13 +190,13 @@ pub fn drain(s: &mut crate::App) -> bool {
             Done::Replied(id, who, words, result) => {
                 st.replying.remove(&id);
                 match result {
-                    Ok(()) => {
+                    Ok(outcome) => {
                         st.notes.remove(&id);
                         if st.replies.get(&id).is_some_and(|t| t.text.trim() == words) {
                             st.replies.remove(&id);
                         }
                         st.reply_keys.remove(&id);
-                        st.replied.insert(id, who);
+                        st.replied.insert(id, outcome);
                     }
                     Err(e) => {
                         let hold = st.inbox.as_ref().and_then(|i| i.decisions.iter().find(|d| d.id() == id)).map(Decision::hold_key).unwrap_or_default();
@@ -293,6 +293,7 @@ pub fn reply(s: &mut crate::App, d: &Decision) {
     };
     s.ov.inbox.replying.insert(id.clone());
     s.ov.inbox.notes.remove(&id);
+    s.ov.inbox.replied.remove(&id);
     let message = d.parked_reply(&words);
     let key = match s.ov.inbox.reply_keys.get(&id) {
         Some((sent, key)) if *sent == message => key.clone(),
@@ -303,7 +304,9 @@ pub fn reply(s: &mut crate::App, d: &Decision) {
     std::thread::spawn(move || {
         let result = client.send_as(&session, &message, &[], None, None, &key).and_then(|delivered| match delivered {
             Delivered::Unconfirmed => Err(RespondError { message: "the daemon took it but hasn't confirmed it ran".into(), code: "submitted".into(), maybe_delivered: true, answered: false, reply: serde_json::Value::Null, status: 0 }),
-            _ => Ok(()),
+            Delivered::Queued(_) => Ok(format!("Queued for {who}")),
+            Delivered::QueuedUntilAnswer(_) => Ok(format!("Queued for {who} until it answers")),
+            Delivered::Sent | Delivered::Steered | Delivered::NotSteered => Ok(format!("Sent to {who}")),
         });
         let _ = tx.send(Done::Replied(id, who, words, result));
     });

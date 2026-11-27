@@ -227,7 +227,8 @@ pub(crate) fn compound_answer(s: &App, request: &OpenRequest) -> Option<Response
 fn compound_el(s: &App, request: &OpenRequest, route: &Route, busy: bool) -> El {
     let picks = s.picks.get(&request.id).cloned().unwrap_or_default();
     let questions = request.questions.clone().unwrap_or_default();
-    let step = s.asks.step.get(&request.id).copied().unwrap_or(0).min(questions.len().saturating_sub(1));
+    let step = s.asks.step.get(&request.id).copied().unwrap_or(0);
+    let reviewing = questions.len() > 1 && step >= questions.len();
     let mut list = col().w_full().gap(12.0).pt(4.0);
     let typed_for = |qi: usize| s.typed.get(&format!("{}|{qi}", request.id)).map(|t| t.text.trim().to_string()).unwrap_or_default();
     for (qi, q) in questions.iter().enumerate() {
@@ -263,6 +264,7 @@ fn compound_el(s: &App, request: &OpenRequest, route: &Route, busy: bool) -> El 
     }
     let response = if busy { None } else { compound_answer(s, request) };
     let submit = Button::new("Send answers").variant(if response.is_some() { ButtonVariant::Submit } else { ButtonVariant::Neutral }).icon(&icons::ARROW_UP).build(theme::kit()).key("pick-submit");
+    let submit = if reviewing { row().radius(10.0).border(1.0, attention().alpha(0.6)).child(submit) } else { submit };
     let (id, to) = (request.id.clone(), route.clone());
     let submit = match response {
         Some(response) => submit.on_press(move |s: &mut App| to.answer(s, &id, response.clone())),
@@ -586,10 +588,9 @@ pub(crate) fn pager_key(s: &mut App, ev: &KeyEvent) -> bool {
     let questions = request.questions.clone().unwrap_or_default();
     let step = s.asks.step.get(&request.id).copied().unwrap_or(0);
     let mut picks = s.picks.get(&request.id).cloned().unwrap_or_default();
-    let at = step.min(questions.len().saturating_sub(1));
     if let PagerKey::Pick(n) = key
-        && let Some(q) = questions.get(at).filter(|q| n <= q.options.len())
-        && s.typed.remove(&format!("{}|{at}", request.id)).is_some_and(|t| !t.text.trim().is_empty())
+        && let Some(q) = questions.get(step).filter(|q| n <= q.options.len())
+        && s.typed.remove(&format!("{}|{step}", request.id)).is_some_and(|t| !t.text.trim().is_empty())
     {
         picks.retain(|p| !q.options.iter().any(|o| &o.id == p));
     }

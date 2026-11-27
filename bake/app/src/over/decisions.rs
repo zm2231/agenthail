@@ -151,7 +151,7 @@ fn reply_panel(s: &App, i: usize, d: &Decision, who: &str) -> El {
     let send = Button::new(if sending { "Sending…".to_string() } else { format!("Send to {}", ui::short_title(who, 24)) }).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(!ready).on_press(move |s: &mut App| inbox::reply(s, &dd)).build(k).key(format!("decision-{i}-reply-send"));
     let mut c = col().key(format!("decision-reply-{id}")).w_full().gap(8.0).pl(4.0);
     if let Some(sent) = st.replied.get(&id) {
-        c = c.child(row().gap(6.0).items_center().child(icon(&icons::CIRCLE_CHECK, 12.0).color(base())).child(text(format!("Sent to {sent}")).font(META_MED).color(base())));
+        c = c.child(row().gap(6.0).items_center().child(icon(&icons::CIRCLE_CHECK, 12.0).color(base())).child(text(sent.clone()).font(META_MED).color(base())));
     }
     c.child(field).child(row().gap(8.0).items_center().child(send).child(text("It goes to the session holding the work, as your message.".to_string()).font(META).color(weak()).wrap().shrink()))
 }

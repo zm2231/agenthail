@@ -272,13 +272,14 @@ pub struct Paged {
 }
 
 pub fn page(questions: &[RequestQuestion], step: usize, key: PagerKey, picks: &mut Vec<String>, one_tap: bool) -> Paged {
-    let last = questions.len().saturating_sub(1);
-    let step = step.min(last);
+    let single = questions.len() <= 1;
+    let review = if single { 0 } else { questions.len() };
+    let step = step.min(review);
     match key {
         PagerKey::Back => Paged { step: step.saturating_sub(1), send: false },
-        PagerKey::Forward => Paged { step: (step + 1).min(last), send: false },
-        PagerKey::Send if step < last => Paged { step: step + 1, send: false },
-        PagerKey::Send => Paged { step, send: true },
+        PagerKey::Forward => Paged { step: (step + 1).min(review), send: false },
+        PagerKey::Send if single || step == review => Paged { step, send: true },
+        PagerKey::Send => Paged { step: step + 1, send: false },
         PagerKey::Pick(n) => {
             let Some(q) = questions.get(step) else { return Paged { step, send: false } };
             let Some(option) = n.checked_sub(1).and_then(|i| q.options.get(i)) else { return Paged { step, send: false } };
@@ -292,7 +293,7 @@ pub fn page(questions: &[RequestQuestion], step: usize, key: PagerKey, picks: &m
             }
             picks.retain(|p| !q.options.iter().any(|o| &o.id == p));
             picks.push(option.id.clone());
-            Paged { step: (step + 1).min(last), send: one_tap && questions.len() == 1 }
+            Paged { step: (step + 1).min(review), send: one_tap && single }
         }
     }
 }
@@ -421,16 +422,20 @@ mod tests {
         assert_eq!(page(&qs, 1, PagerKey::Pick(9), &mut picks, true), Paged { step: 1, send: false }, "a number past the options does nothing");
         assert_eq!(page(&qs, 1, PagerKey::Back, &mut picks, true).step, 0);
         assert_eq!(page(&qs, 0, PagerKey::Back, &mut picks, true).step, 0);
-        assert_eq!(page(&qs, 2, PagerKey::Forward, &mut picks, true).step, 2);
+        assert_eq!(page(&qs, 2, PagerKey::Forward, &mut picks, true).step, 3, "past the last question is the review");
+        assert_eq!(page(&qs, 3, PagerKey::Forward, &mut picks, true).step, 3);
         page(&qs, 0, PagerKey::Pick(1), &mut picks, true);
         assert_eq!(picks, vec!["b-r", "a-x"], "a new single pick replaces the old one");
-        assert_eq!(page(&qs, 2, PagerKey::Pick(1), &mut picks, true), Paged { step: 2, send: false }, "the last question never sends on its own");
-        assert_eq!(page(&qs, 0, PagerKey::Send, &mut picks, true), Paged { step: 1, send: false }, "Return moves on until the last question");
-        assert_eq!(page(&qs, 2, PagerKey::Send, &mut picks, true), Paged { step: 2, send: true });
+        assert_eq!(page(&qs, 2, PagerKey::Pick(1), &mut picks, true), Paged { step: 3, send: false }, "the last pick goes to the review, never sends");
+        assert_eq!(page(&qs, 0, PagerKey::Send, &mut picks, true), Paged { step: 1, send: false }, "Return moves on");
+        assert_eq!(page(&qs, 2, PagerKey::Send, &mut picks, true), Paged { step: 3, send: false }, "Return on the last question goes to the review");
+        assert_eq!(page(&qs, 3, PagerKey::Send, &mut picks, true), Paged { step: 3, send: true }, "Return on the review sends");
+        assert_eq!(page(&qs, 3, PagerKey::Pick(1), &mut picks, true), Paged { step: 3, send: false }, "the review has no options");
         let one = vec![question("solo", &["yes", "no"], false)];
         let mut picks = Vec::new();
         assert!(page(&one, 0, PagerKey::Pick(1), &mut picks, true).send, "one question answers on a tap");
         assert!(!page(&one, 0, PagerKey::Pick(1), &mut picks, false).send, "an ask that takes a note waits for Return");
+        assert!(page(&one, 0, PagerKey::Send, &mut picks, false).send, "one question sends on Return");
         assert!(!page(&[], 0, PagerKey::Pick(1), &mut Vec::new(), true).send);
     }
 
