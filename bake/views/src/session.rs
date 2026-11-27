@@ -269,8 +269,7 @@ fn clip(t: &str, n: usize) -> String {
 
 pub fn transcript(s: &App, id: &str, max_blocks: usize, k: &Kit) -> El {
     let busy = s.d.session(id).is_some_and(busy);
-    let empty: Vec<Item> = Vec::new();
-    let items = s.d.transcripts.get(id).unwrap_or(&empty);
+    let items: &[Item] = s.d.transcripts.get(id).map_or(&[], |t| &t[..]);
     let all = blocks(items);
     let start = all.len().saturating_sub(max_blocks);
     let n = all.len();
