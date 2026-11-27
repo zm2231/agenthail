@@ -61,6 +61,7 @@ fn act_icon(act: &Act) -> &'static rune::Icon {
         Act::Snooze(_) | Act::Wake => &icons::CLOCK,
         Act::MakeLead => &icons::CORNER,
         Act::Process(_) => &icons::TERMINAL,
+        Act::Fork => &icons::BRANCH,
     }
 }
 

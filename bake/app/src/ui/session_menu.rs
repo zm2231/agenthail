@@ -251,6 +251,7 @@ fn verb(act: &Act) -> &'static str {
         Act::Wake => "Waking",
         Act::MakeLead => "Making it the project's lead",
         Act::Process(_) => "Running it",
+        Act::Fork => "Forking",
     }
 }
 
@@ -270,6 +271,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
         Act::Move => super::session_ops::open_move(s, id),
         Act::MakeLead => crate::over::projects::make_lead(s, id),
         Act::Process(act) => super::inspect::run(s, id, act, true),
+        Act::Fork => super::complete::fork_session(s, id),
         Act::Call => {
             let name = super::gone::shown(s, id).map(|x| x.title()).unwrap_or_default();
             crate::voice::open(id, &name);
@@ -298,7 +300,7 @@ pub fn run(s: &mut App, id: &str, act: Act) {
                     Act::Archive(on) => c.session_archive(&id, *on).map(|_| Some(Patch::Archived(*on))),
                     Act::Snooze(_) => c.session_snooze(&id, until).map(|snooze| Some(Patch::Snoozed(snooze))),
                     Act::Wake => c.session_wake(&id).map(|_| Some(Patch::Snoozed(None))),
-                    Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink | Act::Call | Act::Adopt | Act::Move | Act::MakeLead | Act::Process(_) => Ok(None),
+                    Act::Rename | Act::Pr(_) | Act::PrWatch(..) | Act::PrUnlink(_) | Act::PrLink | Act::Call | Act::Adopt | Act::Move | Act::MakeLead | Act::Process(_) | Act::Fork => Ok(None),
                 };
                 Some(Done::Acted(id, act, result))
             });

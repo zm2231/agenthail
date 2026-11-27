@@ -19,6 +19,7 @@ pub enum Act {
     Wake,
     MakeLead,
     Process(crate::inspect::LifecycleAct),
+    Fork,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -135,6 +136,10 @@ impl Session {
         matches!(self.surface.as_str(), "codex" | "claude")
     }
 
+    pub fn forkable(&self) -> bool {
+        self.surface == "codex" && !self.read_only
+    }
+
     pub fn focusable(&self) -> bool {
         self.runtime.as_ref().is_some_and(|r| r.focusable)
     }
@@ -159,6 +164,9 @@ pub fn offered(x: &Session, offer: Offer) -> Vec<Vec<Entry>> {
     }
     if offer.paired_hosts && !offer.moving && x.movable() {
         open.push(Entry::on(Act::Move, "Move to Another Computer…"));
+    }
+    if x.forkable() {
+        open.push(Entry::on(Act::Fork, "Fork"));
     }
     if x.focusable() {
         let mut terminal = Entry::on(Act::Terminal, "Open in terminal");
@@ -397,6 +405,16 @@ mod tests {
         assert_eq!(keep.iter().map(|e| (e.label.as_str(), e.act.clone())).collect::<Vec<_>>(), vec![("Unpin", Act::Pin(false)), ("Mark as read", Act::Read(true)), ("Unarchive", Act::Archive(false))]);
         x.read_state = Some(ReadState { first_unread: String::new(), revision: "r1".into() });
         assert_eq!(entries(&x)[2][1], Entry::on(Act::Read(false), "Mark as unread"));
+    }
+
+    #[test]
+    fn a_codex_session_offers_fork_unless_read_only() {
+        let mut x = session();
+        assert!(!labels(&x)[0].contains(&"Fork".to_string()));
+        x.surface = "codex".into();
+        assert_eq!(entries(&x)[0][1], Entry::on(Act::Fork, "Fork"));
+        x.read_only = true;
+        assert!(!entries(&x).concat().iter().any(|e| e.act == Act::Fork));
     }
 
     #[test]
