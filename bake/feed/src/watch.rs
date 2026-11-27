@@ -56,6 +56,7 @@ pub struct Wants {
     pub extensions: bool,
     pub reset: bool,
     pub session: Option<String>,
+    pub native_queue: Option<String>,
 }
 
 impl Wants {
@@ -68,6 +69,9 @@ impl Wants {
         if other.session.is_some() {
             self.session = other.session;
         }
+        if other.native_queue.is_some() {
+            self.native_queue = other.native_queue;
+        }
     }
 }
 
@@ -77,8 +81,9 @@ pub fn wants(event: &Event) -> Wants {
     let hosts = matches!(kind, "host.paired" | "host.removed" | "host.state");
     let snapshot = reset || hosts || matches!(kind, "state.changed" | "settings.updated" | "signin.changed");
     let extensions = reset || hosts || matches!(kind, "extension.changed" | "extension.badge");
-    let session = event.data["entityId"].as_str().filter(|e| !e.is_empty()).map(String::from);
-    Wants { snapshot, overview: snapshot, hosts, extensions, reset, session }
+    let entity = event.data["entityId"].as_str().filter(|e| !e.is_empty()).map(String::from);
+    let (session, native_queue) = if kind == "native.queue.changed" { (None, entity) } else { (entity, None) };
+    Wants { snapshot, overview: snapshot, hosts, extensions, reset, session, native_queue }
 }
 
 #[derive(Debug, Clone, PartialEq)]

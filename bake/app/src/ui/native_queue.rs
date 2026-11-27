@@ -27,7 +27,6 @@ pub struct NativeQueue {
     queue: Queue,
     keys: Keys,
     ops: u64,
-    seen: Option<(String, String)>,
     menu: Option<String>,
     pub editor: Option<Editor>,
     tx: Sender<Done>,
@@ -37,7 +36,7 @@ pub struct NativeQueue {
 impl NativeQueue {
     pub fn new() -> NativeQueue {
         let (tx, rx) = channel();
-        NativeQueue { queue: Queue::default(), keys: Keys::default(), ops: 0, seen: None, menu: None, editor: None, tx, rx }
+        NativeQueue { queue: Queue::default(), keys: Keys::default(), ops: 0, menu: None, editor: None, tx, rx }
     }
 }
 
@@ -61,26 +60,16 @@ fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'sta
     });
 }
 
-fn status(s: &App, id: &str) -> Option<(String, String)> {
-    session(s, id).map(|x| (x.id.clone(), x.status.clone()))
-}
-
 pub fn load(s: &mut App, id: &str) {
     if !session(s, id).is_some_and(nq::shown) {
         return;
     }
-    s.native_queue.seen = status(s, id);
     s.native_queue.queue.reset(id);
     s.native_queue.menu = None;
     fetch(s, false);
 }
 
 pub fn changed(s: &mut App, id: &str) {
-    let now = status(s, id);
-    if now.is_none() || now == s.native_queue.seen {
-        return;
-    }
-    s.native_queue.seen = now;
     if s.native_queue.queue.invalidate(id) {
         fetch(s, false);
     }

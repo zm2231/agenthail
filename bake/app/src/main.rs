@@ -539,7 +539,6 @@ fn selected_changed(s: &mut App, id: &str) {
         ui::queue::fetch(s, id);
     }
     ui::subagents::refresh(s, id);
-    ui::native_queue::changed(s, id);
     if let Some(work) = session(s, id).and_then(|x| x.primary_work(s.work_pick.get(id)).cloned()) {
         fetch_item(s, &work.key());
     }
@@ -568,6 +567,9 @@ fn changed_elsewhere(s: &mut App, wants: feed::watch::Wants) {
     if wants.extensions {
         over::extensions::changed(s);
     }
+    if let Some(id) = wants.native_queue {
+        ui::native_queue::changed(s, &id);
+    }
     if let Some(id) = wants.session
         && s.selected.as_deref() == Some(id.as_str())
     {
@@ -595,6 +597,7 @@ fn reopened(s: &mut App) {
     if let Some(id) = s.selected.clone() {
         selected_changed(s, &id);
         selected_moved(s, &id);
+        ui::native_queue::changed(s, &id);
     }
 }
 
