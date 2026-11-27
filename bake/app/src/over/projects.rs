@@ -31,13 +31,13 @@ pub enum Job {
 impl Job {
     fn run(&self, c: &Client) -> Result<Settled, RespondError> {
         if let Job::Clean { session, ignored } = self {
-            return c.work_clean(session, ignored).map(|w| Settled { note: w.outcome(), held: w.cleanup != "removed", open: None });
+            return c.work_clean(session, ignored).map(|w| Settled { note: w.outcome(), held: w.cleanup != "removed" });
         }
         if let Job::Message { project, lead, text } = self {
-            return c.lead_send(project, text).map(|d| Settled { note: projects::lead_sent(lead, &d), held: d == feed::composer::Delivered::Unconfirmed, open: None });
+            return c.lead_send(project, text).map(|d| Settled { note: projects::lead_sent(lead, &d), held: d == feed::composer::Delivered::Unconfirmed });
         }
         if let Job::Add { path, title, host } = self {
-            return c.project_add(path, title, host).map(|a| Settled { note: a.notice(), held: false, open: Some(a.id).filter(|id| !id.is_empty()) });
+            return c.project_add(path, title, host).map(|a| Settled { note: a.notice(), held: false });
         }
         let message = match self {
             Job::Add { .. } => Ok(String::new()),
@@ -51,7 +51,7 @@ impl Job {
             Job::Message { .. } => Ok(String::new()),
             Job::Clean { .. } => Ok(String::new()),
         }?;
-        Ok(Settled { note: message, held: false, open: None })
+        Ok(Settled { note: message, held: false })
     }
 
     fn replacing(&self) -> Option<Job> {
@@ -86,7 +86,6 @@ impl Job {
 pub struct Settled {
     note: String,
     held: bool,
-    open: Option<String>,
 }
 
 pub enum Done {
@@ -122,7 +121,6 @@ pub struct State {
     seen_at: Option<time::OffsetDateTime>,
     pub lead_drafts: HashMap<String, TextEdit>,
     sending_to: HashSet<String>,
-    open_when_listed: Option<(String, std::time::Instant)>,
     more_menu: Option<Vec<String>>,
     hosts: Vec<Host>,
     folders: HashMap<String, Vec<String>>,
@@ -148,7 +146,6 @@ impl Default for State {
             seen_at: None,
             lead_drafts: HashMap::new(),
             sending_to: HashSet::new(),
-            open_when_listed: None,
             more_menu: None,
             hosts: Vec::new(),
             folders: HashMap::new(),
@@ -381,10 +378,7 @@ fn settled(s: &mut App, job: Job, from_sheet: Option<u64>, result: Result<Settle
         }
     }
     match result {
-        Ok(Settled { note: message, held: kept, open }) => {
-            if let Some(id) = open {
-                s.ov.projects.open_when_listed = Some((id, std::time::Instant::now()));
-            }
+        Ok(Settled { note: message, held: kept }) => {
             if let Job::Clean { session, .. } = &job
                 && kept
             {
@@ -425,15 +419,6 @@ pub fn drain(s: &mut App) -> bool {
     {
         crate::over::go(s, crate::Screen::Now);
         changed = true;
-    }
-    if let Some((id, at)) = s.ov.projects.open_when_listed.clone() {
-        if s.ov.d.project(&id).is_some() {
-            s.ov.projects.open_when_listed = None;
-            crate::over::go(s, crate::Screen::Project(id));
-            changed = true;
-        } else if at.elapsed() > std::time::Duration::from_secs(30) {
-            s.ov.projects.open_when_listed = None;
-        }
     }
     let gone = match &s.ov.projects.sheet {
         Some(Sheet::Rename { project, .. } | Sheet::Lead { project, .. }) => s.ov.d.record(project).is_none(),

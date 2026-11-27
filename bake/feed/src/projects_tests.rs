@@ -227,7 +227,6 @@ fn each_project_action_sends_the_body_its_handler_reads() {
     let ok = r#"{"ok":true,"coordinator":{"name":"lead","projectRoot":"/w/app"},"project":{"id":"p9","displayName":"App"},"created":false,"worktree":{"cleanup":"removed","branch":"x"}}"#;
     let (client, seen) = daemon(replies(&[(200, ok); 15]));
     let added = client.project_add("/w/app", "", "").unwrap();
-    assert_eq!(added.id, "p9");
     assert_eq!(added.notice(), "App is already a project.");
     client.project_add("/w/app", "App", "h2").unwrap();
     client.project_rename("p1", "New").unwrap();
