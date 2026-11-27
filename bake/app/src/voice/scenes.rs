@@ -21,7 +21,77 @@ pub const SCENES: &[(&str, fn(&mut Win))] = &[
     ("details", details),
     ("route-typed", route_typed),
     ("setup-stuck", setup_stuck),
+    ("picker", picker),
+    ("transfer-lead", transfer_lead),
+    ("operator-busy", operator_busy),
+    ("interrupt", interrupt),
+    ("tools-notice", tools_notice),
+    ("tools-after-failure", tools_after_failure),
 ];
+
+const TOOLS: &str = "This voice conversation was created before Agenthail's current tools: it still works sessions through the agenthail command line. Choose New conversation to use Agenthail's MCP tools; Codex cannot change an existing conversation's tools.";
+
+fn roster(w: &mut Win) {
+    let session = |id: &str, name: &str, extra: Value| {
+        let mut s = json!({"id": id, "name": name, "surface": "codex", "lastActive": "2026-11-24T11:00:00Z", "project": {"id": "shop", "name": "Shop"}, "display": {"kind": "idle", "label": "Idle"}});
+        if let (Some(s), Some(extra)) = (s.as_object_mut(), extra.as_object()) {
+            s.extend(extra.clone());
+        }
+        s
+    };
+    let raw = json!({
+        "updatedAt": "2026-11-24T12:00:00Z",
+        "projects": [{"id": "shop", "displayName": "Shop", "coordinators": [{"name": "lead", "sessionId": "shop-lead", "surface": "claude"}]}],
+        "sessions": [
+            session("shop-lead", "Shop lead", json!({"surface": "claude", "alias": "lead", "lastActive": "2026-11-24T10:00:00Z"})),
+            session("builder", "Builder", json!({"alias": "builder", "lastActive": "2026-11-24T11:30:00Z", "status": "busy", "display": {"kind": "working", "label": "Working"}})),
+            session("tester", "Checkout tests", json!({"lastActive": "2026-11-24T11:20:00Z"})),
+        ]
+    });
+    if let Ok(world) = feed::derive::World::from_json(&raw.to_string()) {
+        w.picks = world.voice_picks();
+    }
+}
+
+fn picker(w: &mut Win) {
+    connected(w);
+    roster(w);
+    w.route_edit = rune::TextEdit::new("sh");
+    w.route_typed = "sh".into();
+    w.picking = Some(1);
+}
+
+fn transfer_lead(w: &mut Win) {
+    connected(w);
+    roster(w);
+    if let Some(lead) = w.picks.first().cloned() {
+        w.pick(&lead);
+    }
+}
+
+fn operator_busy(w: &mut Win) {
+    connected(w);
+    w.activity = Some(feed::voice::Activity { busy: true, state: Some("Working".into()), latest: Some("Asking the builder to rerun the checkout tests".into()) });
+}
+
+fn interrupt(w: &mut Win) {
+    operator_busy(w);
+    w.ask = Some(Ask::Interrupt);
+}
+
+fn tools_notice(w: &mut Win) {
+    w.call = Call::new("");
+    w.call.peer("ready", "", 0.0);
+    let refresh = w.call.tick(0.0);
+    answer(&mut w.call, refresh, json!({"phase": "ready", "session": {"id": "operator", "name": "Agenthail orchestrator"}, "message": TOOLS}));
+}
+
+fn tools_after_failure(w: &mut Win) {
+    w.call = Call::new("");
+    w.call.peer("ready", "", 0.0);
+    let refresh = w.call.tick(0.0);
+    answer(&mut w.call, refresh, json!({"phase": "ended", "session": {"id": "operator", "name": "Agenthail orchestrator"}, "message": format!("Realtime audio failed.\n\n{TOOLS}")}));
+}
 
 fn state(mut value: Value) -> State {
     value["protocol"] = json!(1);

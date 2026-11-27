@@ -1007,3 +1007,381 @@ fn voice_details_list_the_connection_call_log_and_orchestrator() {
     assert!(orchestrator.contains(&("Session".into(), "Operator".into())));
     assert!(orchestrator.contains(&("Skill digest".into(), "abc123".into())));
 }
+
+fn typed(call: &mut Call, words: &str) -> Job {
+    let job = only_job(&call.send_text(words));
+    assert_eq!(named(&job), "text");
+    job
+}
+
+fn sent_words(call: &mut Call) -> Vec<String> {
+    call.take_sent().into_iter().map(|(_, words)| words).collect()
+}
+
+fn message_id(job: &Job) -> String {
+    job.action.as_ref().and_then(|a| a.message_id.clone()).unwrap()
+}
+
+#[test]
+fn a_retried_text_carries_the_message_id_of_the_failed_try() {
+    let mut call = ready();
+    connected(&mut call);
+    let first = typed(&mut call, "check the build");
+    let id = message_id(&first);
+    call.reply(first, Err("timed out".into()), 1.0);
+    assert_eq!(call.unsent(), ["check the build"]);
+    assert!(sent_words(&mut call).is_empty());
+    let again = typed(&mut call, "  check the build ");
+    assert_eq!(message_id(&again), id, "the same words keep their id");
+    call.reply(again, Ok(state(json!({"phase": "connected", "textReceipt": format!("accepted:{id}")}))), 2.0);
+    assert_eq!(call.unsent(), Vec::<&str>::new());
+    assert_eq!(sent_words(&mut call), ["check the build"]);
+    let next = typed(&mut call, "check the build");
+    assert_ne!(message_id(&next), id, "a sent message's id is never reused");
+}
+
+#[test]
+fn edited_text_after_a_failure_is_a_new_message() {
+    let mut call = ready();
+    connected(&mut call);
+    let first = typed(&mut call, "check the build");
+    let id = message_id(&first);
+    call.reply(first, Err("timed out".into()), 1.0);
+    let edited = typed(&mut call, "check the tests");
+    assert_ne!(message_id(&edited), id);
+}
+
+#[test]
+fn a_failed_text_the_host_accepted_counts_as_sent() {
+    let mut call = ready();
+    let attempt = connected(&mut call);
+    let first = typed(&mut call, "check the build");
+    let id = message_id(&first);
+    let host = state(json!({"phase": "connected", "attemptId": attempt, "textReceipt": format!("accepted:{id}")}));
+    call.reply(first, Err(Failure { message: "message already submitted".into(), host: Some(host) }), 1.0);
+    assert_eq!(call.unsent(), Vec::<&str>::new());
+    assert_eq!(sent_words(&mut call), ["check the build"]);
+    assert!(call.error.is_none());
+}
+
+#[test]
+fn a_refresh_showing_the_text_accepted_clears_the_unknown_outcome() {
+    let mut call = ready();
+    let attempt = connected(&mut call);
+    let first = typed(&mut call, "check the build");
+    let id = message_id(&first);
+    call.reply(first, Err("timed out".into()), 1.0);
+    assert!(call.error.as_deref().unwrap().starts_with("Text outcome is unknown"));
+    let poll = refresh(&call.tick(5.0));
+    call.reply(poll, Ok(state(json!({"phase": "connected", "attemptId": attempt, "textReceipt": format!("unknown:{id}")}))), 5.0);
+    assert_eq!(call.unsent(), ["check the build"], "an unknown receipt settles nothing");
+    let poll = refresh(&call.tick(10.0));
+    call.reply(poll, Ok(state(json!({"phase": "connected", "attemptId": attempt, "textReceipt": format!("accepted:{id}")}))), 10.0);
+    assert_eq!(call.unsent(), Vec::<&str>::new());
+    assert_eq!(sent_words(&mut call), ["check the build"]);
+    assert!(call.error.is_none());
+}
+
+#[test]
+fn a_new_call_starts_texts_afresh() {
+    let mut call = ready();
+    connected(&mut call);
+    let attempt = call.attempt().unwrap().to_string();
+    let first = typed(&mut call, "check the build");
+    call.reply(first, Err("timed out".into()), 1.0);
+    let stop = only_job(&call.hangup());
+    call.reply(stop, Ok(state(json!({"phase": "ended", "attemptId": attempt}))), 2.0);
+    let poll = refresh(&call.tick(3.0));
+    call.reply(poll, Ok(state(json!({"phase": "ended", "attemptId": attempt}))), 3.0);
+    assert!(call.can_call(), "{:?}", call.unavailable());
+    dialed(&mut call);
+    assert_eq!(call.unsent(), Vec::<&str>::new());
+}
+
+#[test]
+fn the_orchestrator_turn_can_be_interrupted_with_or_without_a_call() {
+    let mut call = Call::new("");
+    assert!(!call.can_interrupt(), "nothing to interrupt before the host names an orchestrator");
+    assert!(call.interrupt().is_empty());
+    call.peer("ready", "", 0.0);
+    let poll = only_job(&call.tick(0.0));
+    call.reply(poll, Ok(state(json!({"phase": "ready", "session": {"id": "op", "name": "Orchestrator"}}))), 0.0);
+    assert!(call.can_interrupt());
+    let stop = only_job(&call.interrupt());
+    assert_eq!(named(&stop), "interrupt");
+    assert!(call.working());
+    assert!(call.interrupt().is_empty(), "one action at a time");
+    call.reply(stop, Err("there is no turn to interrupt".into()), 1.0);
+    assert!(!call.working());
+    assert_eq!(call.error.as_deref(), Some("there is no turn to interrupt"));
+}
+
+#[test]
+fn another_devices_call_cannot_be_interrupted_from_here() {
+    let mut call = Call::new("");
+    call.peer("ready", "", 0.0);
+    let poll = only_job(&call.tick(0.0));
+    call.reply(poll, Ok(state(json!({"phase": "connected", "occupied": true, "session": {"id": "op", "name": "Orchestrator"}}))), 0.0);
+    assert!(!call.can_interrupt());
+}
+
+fn world() -> crate::derive::World {
+    let session = |id: &str, extra: Value| {
+        let mut s = json!({"id": id, "name": id, "surface": "codex", "lastActive": "2026-11-24T11:00:00Z", "project": {"id": "p", "name": "Shop"}, "display": {"kind": "idle", "label": "Idle"}});
+        s.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        s
+    };
+    let raw = json!({
+        "updatedAt": "2026-11-24T12:00:00Z",
+        "projects": [{"id": "p", "displayName": "Shop", "coordinators": [{"name": "lead", "sessionId": "lead-1", "surface": "claude"}]}],
+        "sessions": [
+            session("lead-1", json!({"surface": "claude", "alias": "lead", "lastActive": "2026-11-24T10:00:00Z"})),
+            session("builder", json!({"alias": "builder", "lastActive": "2026-11-24T11:30:00Z", "status": "busy", "display": {"kind": "working", "label": "Working"}})),
+            session("tester", json!({"lastActive": "2026-11-24T11:20:00Z"})),
+            session("away", json!({"host": {"id": "h2", "name": "Studio", "state": "connected"}})),
+            session("notes", json!({"surface": "notion"})),
+            session("watcher", json!({"readOnly": true})),
+            session("old", json!({"archived": true})),
+            session("helper", json!({"subagent": {}})),
+        ],
+        "transcripts": {"builder": [{"id": "m1", "kind": "message", "role": "assistant", "text": "Running the checkout tests now. Then the cart.", "timestamp": "2026-11-24T11:29:00Z"}]}
+    });
+    crate::derive::World::from_json(&raw.to_string()).unwrap()
+}
+
+#[test]
+fn transfer_picks_list_project_leads_then_local_writable_sessions() {
+    let picks = world().voice_picks();
+    let rows: Vec<(&str, &str)> = picks.iter().map(|p| (p.group, p.id.as_str())).collect();
+    assert_eq!(rows, [(LEADS, "lead-1"), (SESSIONS, "builder"), (SESSIONS, "tester")]);
+    assert_eq!(picks[0].label(), "Shop's lead");
+    assert_eq!(picks[0].status, "@lead");
+    assert_eq!(picks[1].status, "Working · Shop");
+}
+
+#[test]
+fn transfer_picks_match_title_alias_or_id_and_leave_out_the_current_route() {
+    let picks = world().voice_picks();
+    let ids = |q: &str, skip: &[&str]| matching(&picks, q, skip).iter().map(|p| p.id.clone()).collect::<Vec<_>>();
+    assert_eq!(ids("BUILD", &[]), ["builder"]);
+    assert_eq!(ids("lead", &[]), ["lead-1"]);
+    assert_eq!(ids("shop", &["lead-1"]), ["builder", "tester"]);
+    assert_eq!(ids("", &["builder"]), ["lead-1", "tester"]);
+    assert!(ids("nobody", &[]).is_empty());
+}
+
+#[test]
+fn operator_activity_names_a_busy_state_and_the_latest_words() {
+    let w = world();
+    let busy = w.voice_activity("builder").unwrap();
+    assert!(busy.busy);
+    assert_eq!(busy.state.as_deref(), Some("Working"));
+    assert_eq!(busy.latest.as_deref(), Some("Running the checkout tests now"));
+    let idle = w.voice_activity("tester").unwrap();
+    assert_eq!((idle.busy, idle.state, idle.latest), (false, None, None));
+    assert!(w.voice_activity("missing").is_none());
+}
+
+#[test]
+fn the_tools_notice_is_split_from_a_failure_it_follows() {
+    let notice = "This voice conversation was created before Agenthail's current tools: it still works sessions through the agenthail command line. Choose New conversation to use Agenthail's MCP tools; Codex cannot change an existing conversation's tools.";
+    assert_eq!(without_tools_notice(notice), (None, Some(notice.to_string())));
+    assert_eq!(without_tools_notice(&format!("Realtime audio failed.\n\n{notice}")), (Some("Realtime audio failed.".into()), Some(notice.to_string())));
+    assert_eq!(without_tools_notice("Realtime audio failed."), (Some("Realtime audio failed.".into()), None));
+    assert_eq!(without_tools_notice("  "), (None, None));
+}
+
+#[test]
+fn a_project_with_leads_on_two_hosts_offers_no_lead_pick() {
+    let raw = json!({
+        "updatedAt": "2026-11-24T12:00:00Z",
+        "projects": [{"id": "p", "displayName": "Shop", "coordinators": [{"name": "lead", "sessionId": "lead-1"}, {"name": "lead", "sessionId": "lead-2", "host": {"id": "h2", "state": "connected"}}]}],
+        "sessions": [{"id": "lead-1", "name": "lead-1", "surface": "claude", "project": {"id": "p", "name": "Shop"}, "display": {"kind": "idle"}}]
+    });
+    let picks = crate::derive::World::from_json(&raw.to_string()).unwrap().voice_picks();
+    let rows: Vec<(&str, &str)> = picks.iter().map(|p| (p.group, p.id.as_str())).collect();
+    assert_eq!(rows, [(SESSIONS, "lead-1")], "the conflict is the daemon's to resolve, never a pick");
+}
+
+#[test]
+fn a_routed_text_counts_as_sent_once_its_delegation_shows_up() {
+    let mut call = ready();
+    let attempt = connected(&mut call);
+    let moved = only_job(&call.transfer("builder"));
+    call.reply(moved, Ok(state(json!({"phase": "connected", "attemptId": attempt, "target": {"id": "builder"}}))), 0.5);
+    let first = typed(&mut call, "rerun the tests");
+    let id = message_id(&first);
+    call.reply(first, Err("timed out".into()), 1.0);
+    let poll = refresh(&call.tick(5.0));
+    let event = json!({"sequence": 9, "method": "voice/delegation/dispatched", "params": {"messageId": id, "targetId": "builder"}});
+    call.reply(poll, Ok(state(json!({"phase": "connected", "attemptId": attempt, "target": {"id": "builder"}, "events": [event]}))), 5.0);
+    assert_eq!(call.unsent(), Vec::<&str>::new());
+    assert_eq!(sent_words(&mut call), ["rerun the tests"]);
+    assert!(call.error.is_none());
+}
+
+#[test]
+fn a_text_reply_after_hangup_neither_confirms_nor_clears_the_words() {
+    let mut call = ready();
+    connected(&mut call);
+    let first = typed(&mut call, "check the build");
+    call.hangup();
+    call.reply(first, Ok(state(json!({"phase": "connected"}))), 1.0);
+    assert!(sent_words(&mut call).is_empty());
+    assert_eq!(call.unsent(), ["check the build"]);
+}
+
+#[test]
+fn an_earlier_unsettled_text_keeps_its_id_after_another_is_typed() {
+    let mut call = ready();
+    connected(&mut call);
+    let first = typed(&mut call, "check the build");
+    let a = message_id(&first);
+    call.reply(first, Err("timed out".into()), 1.0);
+    let second = typed(&mut call, "check the tests");
+    let b = message_id(&second);
+    call.reply(second, Err("timed out".into()), 2.0);
+    assert_ne!(a, b);
+    assert_eq!(message_id(&typed(&mut call, "check the build")), a);
+    assert_eq!(call.unsent(), ["check the build", "check the tests"]);
+}
+
+#[test]
+fn a_failed_reply_follow_up_is_not_proof_the_text_was_sent() {
+    let mut call = ready();
+    let attempt = connected(&mut call);
+    let first = typed(&mut call, "rerun the tests");
+    let id = message_id(&first);
+    call.reply(first, Err("timed out".into()), 1.0);
+    let poll = refresh(&call.tick(5.0));
+    let event = json!({"sequence": 9, "method": "voice/delegation/failed", "params": {"messageId": id, "targetId": "builder"}});
+    call.reply(poll, Ok(state(json!({"phase": "connected", "attemptId": attempt, "target": {"id": "builder"}, "events": [event]}))), 5.0);
+    assert_eq!(call.unsent(), ["rerun the tests"]);
+    assert!(sent_words(&mut call).is_empty());
+}
+
+#[test]
+fn two_texts_settled_in_one_refresh_are_both_reported_sent() {
+    let mut call = ready();
+    let attempt = connected(&mut call);
+    let moved = only_job(&call.transfer("builder"));
+    call.reply(moved, Ok(state(json!({"phase": "connected", "attemptId": attempt, "target": {"id": "builder"}}))), 0.5);
+    let first = typed(&mut call, "check the build");
+    let a = message_id(&first);
+    call.reply(first, Err("timed out".into()), 1.0);
+    let second = typed(&mut call, "check the tests");
+    let b = message_id(&second);
+    call.reply(second, Err("timed out".into()), 2.0);
+    let poll = refresh(&call.tick(5.0));
+    let events = json!([
+        {"sequence": 8, "method": "voice/delegation/dispatched", "params": {"messageId": a}},
+        {"sequence": 9, "method": "voice/delegation/held", "params": {"messageId": b}},
+    ]);
+    call.reply(poll, Ok(state(json!({"phase": "connected", "attemptId": attempt, "target": {"id": "builder"}, "events": events}))), 5.0);
+    assert_eq!(sent_words(&mut call), ["check the build", "check the tests"]);
+    assert_eq!(call.unsent(), Vec::<&str>::new());
+    assert!(call.error.is_none());
+}
+
+#[test]
+fn a_successful_retry_clears_the_unknown_outcome() {
+    let mut call = ready();
+    connected(&mut call);
+    let first = typed(&mut call, "check the build");
+    call.reply(first, Err("timed out".into()), 1.0);
+    assert!(call.error.is_some());
+    let again = typed(&mut call, "check the build");
+    let id = message_id(&again);
+    call.reply(again, Ok(state(json!({"phase": "connected", "textReceipt": format!("accepted:{id}")}))), 2.0);
+    assert!(call.error.is_none());
+    assert_eq!(sent_words(&mut call), ["check the build"]);
+}
+
+#[test]
+fn a_text_reply_without_acceptance_keeps_the_words_unsettled() {
+    let mut call = ready();
+    connected(&mut call);
+    let first = typed(&mut call, "check the build");
+    let id = message_id(&first);
+    call.reply(first, Ok(state(json!({"phase": "connected", "textReceipt": format!("unknown:{id}")}))), 1.0);
+    assert_eq!(call.unsent(), ["check the build"]);
+    assert!(sent_words(&mut call).is_empty());
+    assert!(call.error.as_deref().unwrap().starts_with("Text outcome is unknown"));
+}
+
+#[test]
+fn operator_activity_prefers_newer_words_over_an_earlier_headline() {
+    let raw = json!({
+        "updatedAt": "2026-11-24T12:00:00Z",
+        "sessions": [{"id": "op", "name": "op", "surface": "codex", "status": "busy", "display": {"kind": "working", "label": "Working"},
+            "turnCompletion": {"headline": "Shipped the cart fix", "at": "2026-11-24T10:00:00Z"}}],
+        "transcripts": {"op": [{"id": "m1", "kind": "message", "role": "assistant", "text": "Asking the builder to rerun checkout. More soon.", "timestamp": "2026-11-24T11:59:00Z"}]}
+    });
+    let w = crate::derive::World::from_json(&raw.to_string()).unwrap();
+    assert_eq!(w.voice_activity("op").unwrap().latest.as_deref(), Some("Asking the builder to rerun checkout"));
+}
+
+#[test]
+fn operator_activity_shows_a_headline_newer_than_the_last_words() {
+    let raw = json!({
+        "updatedAt": "2026-11-24T12:00:00Z",
+        "sessions": [{"id": "op", "name": "op", "surface": "codex", "display": {"kind": "idle", "label": "Idle"},
+            "turnCompletion": {"headline": "Shipped the cart fix", "at": "2026-11-24T11:59:00Z"}}],
+        "transcripts": {"op": [{"id": "m1", "kind": "message", "role": "assistant", "text": "Asking the builder to rerun checkout.", "timestamp": "2026-11-24T10:00:00Z"}]}
+    });
+    let w = crate::derive::World::from_json(&raw.to_string()).unwrap();
+    assert_eq!(w.voice_activity("op").unwrap().latest.as_deref(), Some("Shipped the cart fix"));
+}
+
+#[test]
+fn unsettled_words_retried_after_a_transfer_are_a_new_message() {
+    let mut call = ready();
+    let attempt = connected(&mut call);
+    let first = typed(&mut call, "rerun the tests");
+    let id = message_id(&first);
+    call.reply(first, Err("timed out".into()), 1.0);
+    let moved = only_job(&call.transfer("builder"));
+    call.reply(moved, Ok(state(json!({"phase": "connected", "attemptId": attempt, "target": {"id": "builder"}}))), 2.0);
+    assert_ne!(message_id(&typed(&mut call, "rerun the tests")), id);
+}
+
+
+
+
+
+
+#[test]
+fn a_settled_text_reports_its_own_id_not_a_later_retry_on_another_route() {
+    let mut call = ready();
+    let attempt = connected(&mut call);
+    let first = typed(&mut call, "rerun the tests");
+    let a = message_id(&first);
+    call.reply(first, Err("timed out".into()), 1.0);
+    let stale = refresh(&call.tick(5.0));
+    let moved = only_job(&call.transfer("builder"));
+    call.reply(moved, Ok(state(json!({"phase": "connected", "attemptId": attempt, "target": {"id": "builder"}}))), 5.0);
+    let retry = typed(&mut call, "rerun the tests");
+    let b = message_id(&retry);
+    assert_ne!(a, b, "the same words on another route are another message");
+    call.reply(stale, Ok(state(json!({"phase": "connected", "attemptId": attempt, "textReceipt": format!("accepted:{a}")}))), 6.0);
+    assert_eq!(call.take_sent(), [(a, "rerun the tests".to_string())]);
+    assert_eq!(call.unsent(), ["rerun the tests"], "the retry is still waiting");
+}
+
+#[test]
+fn a_refresh_sent_before_a_transfer_lands_does_not_bring_the_old_route_back() {
+    let mut call = ready();
+    let attempt = connected(&mut call);
+    let first = typed(&mut call, "rerun the tests");
+    let a = message_id(&first);
+    call.reply(first, Err("timed out".into()), 1.0);
+    let stale = refresh(&call.tick(5.0));
+    let moved = only_job(&call.transfer("builder"));
+    call.reply(moved, Ok(state(json!({"phase": "connected", "attemptId": attempt, "target": {"id": "builder"}}))), 5.0);
+    call.reply(stale, Ok(state(json!({"phase": "connected", "attemptId": attempt}))), 6.0);
+    assert_eq!(call.state.as_ref().and_then(|s| s.target.as_ref()).map(|t| t.id.as_str()), Some("builder"));
+    assert_ne!(message_id(&typed(&mut call, "rerun the tests")), a);
+    let fresh = refresh(&call.tick(10.0));
+    call.reply(fresh, Ok(state(json!({"phase": "connected", "attemptId": attempt}))), 10.0);
+    assert!(call.state.as_ref().is_some_and(|s| s.target.is_none()), "a later refresh is believed");
+}

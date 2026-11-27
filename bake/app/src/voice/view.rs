@@ -1,5 +1,5 @@
-use feed::voice::{ELSEWHERE, MIC_SETTINGS, OCCUPIED, Role};
-use rune::{Cx, El, ScrollSpec, Tx, col, el, icon, row, text, text_input};
+use feed::voice::{ELSEWHERE, MIC_SETTINGS, OCCUPIED, Pick, Role, matching, without_tools_notice};
+use rune::{Cx, El, Key, KeyEvent, ScrollSpec, Tx, col, el, icon, row, text, text_input};
 use rune_kit::{Button, ButtonVariant, ControlSize};
 use rune_theme_opencode::icons as theme_icons;
 
@@ -112,14 +112,21 @@ fn body(w: &Win) -> El {
                 .child(note("Turn on Agenthail in System Settings, Privacy & Security, Microphone, then call again.", theme::text()))
                 .child(row().child(settings)),
         );
-    } else if let Some(error) = &w.call.error {
-        b = b.child(note(error.clone(), failed()).key("voice-error"));
+    }
+    let (error, from_error) = w.call.error.as_deref().filter(|_| !w.call.mic_denied).map(without_tools_notice).unwrap_or_default();
+    if let Some(error) = error {
+        b = b.child(note(error, failed()).key("voice-error"));
     }
     if let Some(error) = &w.call.connection_error {
         b = b.child(note(error.clone(), failed()));
     }
-    if let Some(message) = w.call.state.as_ref().and_then(|s| s.message.clone()).filter(|m| !m.is_empty() && w.call.error.as_ref() != Some(m)) {
+    let raw = w.call.state.as_ref().and_then(|s| s.message.clone()).filter(|m| !m.is_empty() && w.call.error.as_ref() != Some(m));
+    let (message, from_message) = raw.as_deref().map(without_tools_notice).unwrap_or_default();
+    if let Some(message) = message {
         b = b.child(note(message, failed()));
+    }
+    if let Some(notice) = from_message.or(from_error) {
+        b = b.child(tools_notice(w, notice));
     }
     if w.call.state.as_ref().is_some_and(|s| s.occupied) {
         b = b.child(note(OCCUPIED, muted()).key("voice-occupied"));
@@ -131,17 +138,7 @@ fn body(w: &Win) -> El {
         b = b.child(brief);
     }
     if let Some(session) = w.call.state.as_ref().and_then(|s| s.session.clone()) {
-        let id = session.id.clone();
-        b = b.child(
-            row()
-                .w_full()
-                .items_center()
-                .gap(8.0)
-                .child(icon(&icons::TERMINAL, 13.0).color(muted()))
-                .child(text("Orchestrator").font(META).color(muted()))
-                .child(el().grow(1.0))
-                .child(small("Open timeline", ButtonVariant::GhostMuted).on_press(move |_: &mut Win| open_timeline(&id)).build(kit()).key("voice-timeline")),
-        );
+        b = b.child(operator(w, session.id));
     }
     if let Some(id) = w.call.attempt() {
         b = b.child(text(format!("Call ID {id}")).font(META).color(faint()).selectable(true));
@@ -155,6 +152,69 @@ fn body(w: &Win) -> El {
         b = b.child(details(w));
     }
     b
+}
+
+fn tools_notice(w: &Win, notice: String) -> El {
+    let new = small("New conversation", ButtonVariant::Neutral)
+        .icon(&icons::PENCIL)
+        .disabled(!w.call.can_start_new())
+        .on_press(|w: &mut Win| w.ask = Some(Ask::NewConversation))
+        .build(kit())
+        .key("voice-tools-new");
+    col()
+        .key("voice-tools-notice")
+        .w_full()
+        .gap(8.0)
+        .padding(12.0)
+        .radius(10.0)
+        .fill(accent().alpha(0.08))
+        .border(1.0, accent().alpha(0.3))
+        .child(row().gap(8.0).items_center().child(icon(&icons::SPARKLES, 15.0).color(accent())).child(text("Newer voice tools are available").font(BODY_BOLD).color(theme::text())))
+        .child(note(notice, muted()))
+        .child(row().child(new))
+}
+
+fn operator(w: &Win, id: String) -> El {
+    let label = match w.activity.as_ref().and_then(|a| a.state.as_deref()) {
+        Some(state) => format!("Orchestrator · {state}"),
+        None => "Orchestrator".to_string(),
+    };
+    let mut head = row()
+        .w_full()
+        .items_center()
+        .gap(8.0)
+        .child(icon(&icons::TERMINAL, 13.0).color(muted()))
+        .child(text(label).font(META).color(muted()).truncate().shrink().key("voice-operator-state"))
+        .child(el().grow(1.0));
+    if w.activity.as_ref().is_some_and(|a| a.busy) {
+        head = head.child(
+            small("Interrupt turn", ButtonVariant::Ghost)
+                .icon(&icons::STOP)
+                .help("Interrupt the orchestrator's current turn")
+                .disabled(!w.call.can_interrupt())
+                .on_press(|w: &mut Win| w.ask = Some(Ask::Interrupt))
+                .build(kit())
+                .key("voice-interrupt"),
+        );
+    }
+    head = head.child(small("Open timeline", ButtonVariant::GhostMuted).on_press(move |_: &mut Win| open_timeline(&id)).build(kit()).key("voice-timeline"));
+    let mut block = col().key("voice-operator").w_full().gap(6.0).child(head);
+    if let Some(latest) = w.activity.as_ref().and_then(|a| a.latest.clone()) {
+        block = block.child(text(latest).font(META).color(faint()).wrap().w_full().key("voice-operator-latest"));
+    }
+    if w.ask == Some(Ask::Interrupt) {
+        block = block.child(confirm(
+            "Interrupt the orchestrator's current turn?",
+            "This interrupts the orchestrator only, not the agents it has already messaged.",
+            "Interrupt orchestrator",
+            |w: &mut Win| {
+                w.ask = None;
+                let effects = w.call.interrupt();
+                w.run(effects);
+            },
+        ));
+    }
+    block
 }
 
 fn briefing(w: &Win) -> Option<El> {
@@ -201,19 +261,95 @@ fn route_field(w: &Win) -> El {
         .grow(1.0)
         .min_w(0.0)
         .color(theme::text())
-        .placeholder("Exact session ID or alias", faint())
-        .on_edit(|w: &mut Win| &mut w.route_edit);
+        .placeholder("Find a session or project lead, or type an ID or alias", faint())
+        .on_edit(|w: &mut Win| {
+            w.picking.get_or_insert(0);
+            &mut w.route_edit
+        })
+        .on_input_key(|w: &mut Win, ev: &KeyEvent, _: &mut Tx| pick_key(w, ev));
     let hint = if w.route_edit.text.trim().is_empty() {
         "Leave blank to use Agenthail's normal orchestration workflow."
     } else {
         "This routes work only to that exact existing session."
     };
-    col()
+    let mut field = col()
         .w_full()
         .gap(4.0)
+        .on_focus_within_change(|w: &mut Win, within, _: &mut Tx| {
+            if !within {
+                w.picking = None;
+            }
+        })
         .child(text("Session route (optional)").font(META_BOLD).color(muted()))
-        .child(row().w_full().px(10.0).py(7.0).radius(8.0).fill(wash()).border(1.0, line()).child(input))
-        .child(text(hint).font(META).color(faint()).wrap().w_full())
+        .child(row().w_full().px(10.0).py(7.0).radius(8.0).fill(wash()).border(1.0, line()).child(input));
+    if let Some(list) = pick_list(w) {
+        field = field.child(list);
+    }
+    field.child(text(hint).font(META).color(faint()).wrap().w_full())
+}
+
+fn shown_picks(w: &Win) -> Vec<&Pick> {
+    if w.picking.is_none() {
+        return Vec::new();
+    }
+    let on = w.call.state.as_ref().and_then(|s| s.target.as_ref()).map_or("", |t| t.id.as_str());
+    let operator = w.call.state.as_ref().and_then(|s| s.session.as_ref()).map_or("", |s| s.id.as_str());
+    let typed = w.route_edit.text.trim();
+    matching(&w.picks, typed, &[on, operator]).into_iter().filter(|p| p.id != typed).collect()
+}
+
+fn pick_key(w: &mut Win, ev: &KeyEvent) -> bool {
+    if w.picking.is_none() {
+        if ev.key != Key::Down {
+            return false;
+        }
+        w.picking = Some(0);
+        return true;
+    }
+    let count = shown_picks(w).len();
+    let Some(at) = w.picking else { return false };
+    match ev.key {
+        Key::Escape => w.picking = None,
+        Key::Down if count > 0 => w.picking = Some((at + 1).min(count - 1)),
+        Key::Up if count > 0 => w.picking = Some(at.saturating_sub(1)),
+        Key::Enter if count > 0 => {
+            let pick = shown_picks(w)[at.min(count - 1)].clone();
+            w.pick(&pick);
+        }
+        _ => return false,
+    }
+    true
+}
+
+fn pick_list(w: &Win) -> Option<El> {
+    let picks = shown_picks(w);
+    if picks.is_empty() {
+        return None;
+    }
+    let at = w.picking.unwrap_or(0).min(picks.len() - 1);
+    let mut list = col().key("voice-picks").w_full().gap(2.0).padding(6.0).radius(8.0).fill(theme::card_deep()).border(1.0, line());
+    let mut last = "";
+    for (i, pick) in picks.into_iter().enumerate() {
+        if pick.group != last {
+            list = list.child(text(pick.group.to_string()).font(META_BOLD).color(faint()).px(8.0).pt(if last.is_empty() { 2.0 } else { 8.0 }).pb(2.0));
+            last = pick.group;
+        }
+        let chosen = pick.clone();
+        let mut r = col()
+            .key(format!("voice-pick-{}", pick.id))
+            .w_full()
+            .gap(1.0)
+            .px(8.0)
+            .py(5.0)
+            .radius(6.0)
+            .focusable(true)
+            .on_press(move |w: &mut Win| w.pick(&chosen))
+            .child(text(pick.label()).font(BODY).color(theme::text()).truncate())
+            .child(text(pick.status.clone()).font(META).color(muted()).truncate());
+        r = if i == at { r.fill(wash()) } else { r.hover(wash()) };
+        list = list.child(r);
+    }
+    Some(list)
 }
 
 fn transcript(w: &Win) -> El {
@@ -278,6 +414,7 @@ fn controls(w: &Win) -> El {
                 .icon(&icons::PHONE)
                 .disabled(!call.can_call())
                 .on_press(|w: &mut Win| {
+                    w.picking = None;
                     w.sync_route();
                     let effects = w.call.call();
                     w.run(effects);
@@ -320,6 +457,7 @@ fn controls(w: &Win) -> El {
                 small(label, ButtonVariant::Neutral)
                     .disabled(call.working())
                     .on_press(|w: &mut Win| {
+                        w.picking = None;
                         w.sync_route();
                         let target = w.route_typed.clone();
                         let effects = w.call.transfer(&target);
@@ -369,7 +507,10 @@ fn controls(w: &Win) -> El {
             .min_w(0.0)
             .color(theme::text())
             .placeholder("Type to the call", faint())
-            .on_edit(|w: &mut Win| &mut w.typed)
+            .on_edit(|w: &mut Win| {
+                w.typed_id = None;
+                &mut w.typed
+            })
             .on_submit(|w: &mut Win, _: &mut Tx| send_typed(w));
         dock = dock.child(row().w_full().px(10.0).py(7.0).radius(8.0).fill(wash()).border(1.0, line()).child(input));
     }
@@ -379,8 +520,12 @@ fn controls(w: &Win) -> El {
 fn send_typed(w: &mut Win) {
     let words = w.typed.text.clone();
     let effects = w.call.send_text(&words);
-    if !effects.is_empty() {
-        w.typed = rune::TextEdit::new("");
-        w.run(effects);
+    let sent = effects.iter().find_map(|e| match e {
+        feed::voice::Effect::Fetch(job) => job.action.as_ref().and_then(|a| a.message_id.clone()),
+        _ => None,
+    });
+    if sent.is_some() {
+        w.typed_id = sent;
     }
+    w.run(effects);
 }

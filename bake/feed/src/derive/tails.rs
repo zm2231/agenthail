@@ -74,6 +74,7 @@ pub struct Tails {
     held: HashMap<String, (String, Tail)>,
     fetching: HashSet<String>,
     failed: HashMap<String, Instant>,
+    followed: Option<String>,
 }
 
 impl Tails {
@@ -82,6 +83,11 @@ impl Tails {
         let mut recent: Vec<&Session> = sessions.iter().filter(|s| !s.archived && age(s) < TAIL_HOURS).collect();
         recent.sort_by(|a, b| age(a).total_cmp(&age(b)));
         recent.truncate(TAIL_SESSIONS);
+        if let Some(x) = self.followed.as_deref().and_then(|id| sessions.iter().find(|s| s.id == id && !s.archived)) {
+            if !recent.iter().any(|s| s.id == x.id) {
+                recent.push(x);
+            }
+        }
         let keep: HashSet<&str> = recent.iter().map(|s| s.id.as_str()).collect();
         self.held.retain(|id, _| keep.contains(id.as_str()));
         let now_i = Instant::now();
@@ -95,6 +101,13 @@ impl Tails {
             .collect();
         self.fetching.extend(due.iter().map(|(id, _)| id.clone()));
         due
+    }
+
+    pub fn follow(&mut self, session: Option<String>) -> bool {
+        let session = session.filter(|id| !id.is_empty());
+        let moved = self.followed != session;
+        self.followed = session;
+        moved
     }
 
     pub fn take(&mut self, session: &str, last_active: String, result: Result<Tail, String>) {

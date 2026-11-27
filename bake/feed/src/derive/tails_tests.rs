@@ -232,3 +232,20 @@ fn a_tail_read_returns_at_the_live_point_while_the_stream_stays_open() {
     assert_eq!(tail.items.len(), 1);
     assert!(start.elapsed() < Duration::from_millis(500), "took {:?}", start.elapsed());
 }
+
+#[test]
+fn a_followed_session_is_read_even_when_it_is_not_among_the_recent_ones() {
+    let now = parse_time("2026-11-24T12:00:00Z").unwrap();
+    let sessions = vec![session("fresh", "2026-11-24T11:50:00Z"), session("operator", "2026-11-20T11:00:00Z")];
+    let mut tails = Tails::default();
+    assert!(tails.follow(Some("operator".into())), "a newly followed session asks for a read");
+    assert!(!tails.follow(Some("operator".into())));
+    let mut due: Vec<String> = tails.due(&sessions, now, &HashSet::new()).into_iter().map(|(id, _)| id).collect();
+    due.sort();
+    assert_eq!(due, ["fresh", "operator"]);
+    tails.take("operator", "2026-11-20T11:00:00Z".into(), Ok(tail(vec![])));
+    assert!(tails.due(&sessions, now, &HashSet::new()).is_empty(), "read again only when it moves");
+    assert!(tails.follow(None));
+    tails.due(&sessions, now, &HashSet::new());
+    assert!(tails.held().all(|(id, _)| id != "operator"), "an unfollowed old session is let go");
+}

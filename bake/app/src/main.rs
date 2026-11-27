@@ -1328,6 +1328,10 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         tx.scroll_into_view_in("sidebar-scroll", over::ui::session_key(&id));
         s.revealed = Some(id);
     }
+    voice::share(s.built_at, &s.ov.d);
+    if s.ov.live.follow_tail(voice::operator()) {
+        fetch_tails(s);
+    }
     if let Some(id) = voice::take_opened_session() {
         menubar::front(s);
         over::open_session(s, &id);
