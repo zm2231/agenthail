@@ -511,6 +511,8 @@ pub struct WorkItem {
     pub acceptance: String,
     #[serde(default)]
     pub timeline: Vec<TimelineEntry>,
+    #[serde(default, rename = "phaseLabels")]
+    pub steps: crate::derive::phase::Steps,
 }
 
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
@@ -777,8 +779,9 @@ impl Client {
         }
     }
 
-    pub(crate) fn ledger_rows(&self, project: &str) -> Result<Vec<Value>> {
+    pub(crate) fn ledger_rows(&self, project: &str) -> Result<(Vec<Value>, crate::derive::phase::Steps)> {
         let mut rows = Vec::new();
+        let mut steps = crate::derive::phase::Steps::default();
         let mut cursor: Option<String> = None;
         for _ in 0..20 {
             let mut path = format!("/api/v1/ledger?projectKey={}&view=work&limit=100", enc(project));
@@ -786,13 +789,16 @@ impl Client {
                 path.push_str(&format!("&cursor={}", enc(c)));
             }
             let value = self.get(&path)?;
+            if cursor.is_none() {
+                steps = crate::derive::phase::Steps::from_reply(&value);
+            }
             rows.extend(value["work"].as_array().cloned().unwrap_or_default());
             cursor = value["nextCursor"].as_str().filter(|c| !c.is_empty()).map(String::from);
             if cursor.is_none() {
                 break;
             }
         }
-        Ok(rows)
+        Ok((rows, steps))
     }
 
     pub(crate) fn event_stream(&self, after: u64, idle: Duration) -> Result<impl std::io::BufRead + use<>> {
@@ -854,7 +860,8 @@ impl Client {
 
     pub fn work_item(&self, project: &str, id: &str) -> Result<WorkItem> {
         let value = self.get(&format!("/api/v1/ledger?projectKey={}&view=item&id={}", enc(project), enc(id)))?;
-        Ok(serde_json::from_value(value["item"]["item"].clone())?)
+        let item: WorkItem = serde_json::from_value(value["item"]["item"].clone())?;
+        Ok(WorkItem { steps: crate::derive::phase::Steps::from_reply(&value), ..item })
     }
 
     pub fn board(&self, project: &str) -> Result<Vec<BoardRow>> {

@@ -45,6 +45,8 @@ pub struct Work {
     pub acceptance: String,
     #[serde(default)]
     pub timeline: Vec<Entry>,
+    #[serde(default, rename = "phaseLabels")]
+    pub steps: super::phase::Steps,
     #[serde(skip)]
     pub project: String,
     #[serde(skip)]

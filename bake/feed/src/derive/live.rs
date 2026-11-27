@@ -296,8 +296,8 @@ fn hours(now: OffsetDateTime, at: &str) -> f64 {
 }
 
 fn rows(client: &Client, project: &str, now: OffsetDateTime) -> Result<Vec<Work>, String> {
-    let rows = client.ledger_rows(project).map_err(|e| e.to_string())?;
-    trim(rows, now - time::Duration::days(RECENT_DAYS)).into_iter().map(|r| serde_json::from_value(r).map_err(|e| e.to_string())).collect()
+    let (rows, steps) = client.ledger_rows(project).map_err(|e| e.to_string())?;
+    trim(rows, now - time::Duration::days(RECENT_DAYS)).into_iter().map(|r| serde_json::from_value(r).map(|w| Work { steps: steps.clone(), ..w }).map_err(|e| e.to_string())).collect()
 }
 
 fn trim(rows: Vec<Value>, cutoff: OffsetDateTime) -> Vec<Value> {

@@ -74,7 +74,7 @@ impl Client {
     pub fn found_work(&self, ledger: &str, id: &str) -> Result<Work, String> {
         let path = format!("/api/v1/ledger?projectKey={}&view=item&id={}", enc(ledger), enc(id));
         match self.timed(TIMEOUT).get_reply(&path) {
-            Ok(value) => serde_json::from_value(value["item"]["item"].clone()).map_err(|e| format!("This work item came back in a form Agenthail can't read: {e}")),
+            Ok(value) => serde_json::from_value::<Work>(value["item"]["item"].clone()).map(|w| Work { steps: crate::derive::phase::Steps::from_reply(&value), ..w }).map_err(|e| format!("This work item came back in a form Agenthail can't read: {e}")),
             Err((code, body)) => Err(failure("this work item", code, &body)),
         }
     }
@@ -107,7 +107,7 @@ impl World {
             .iter()
             .filter(|f| !listed(f))
             .map(|f| {
-                let mut status = vec![crate::derive::phase::step_word(&f.phase, &f.state)];
+                let mut status = vec![crate::derive::phase::step_word(&f.phase, &f.state, &self.steps_of(&f.key().ledger))];
                 let alias = f.assignee_alias.trim().trim_start_matches('@');
                 if !alias.is_empty() {
                     status.push(format!("@{alias}"));

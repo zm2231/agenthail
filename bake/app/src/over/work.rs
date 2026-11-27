@@ -14,17 +14,17 @@ use feed::derive::phase::{CHECK, SHIP, phase, shown_step, step_word};
 use feed::derive::proof::proof;
 use feed::derive::work::{commit, pr, unchecked};
 
-use crate::over::{PHASES, WorkKey, plain, short_id};
+use crate::over::{WorkKey, plain, short_id};
 use crate::over::ui::{self, BODY, BODY_MED, HEAD, META, META_MED, TITLE, base, strong, weak};
 use crate::over::go;
 use crate::{App, Screen};
 
 fn phase_badge(w: &feed::derive::Work, k: &Kit) -> El {
     let Some(phase) = shown_step(&w.phase, &w.state) else {
-        return ui::pill(&icons::STATUS, &step_word(&w.phase, &w.state), weak(k), k);
+        return ui::pill(&icons::STATUS, &step_word(&w.phase, &w.state, &w.steps), weak(k), k);
     };
     let color = if phase == CHECK { k.c.warning.icon } else if phase == SHIP { k.c.success.icon } else { k.c.text_accent };
-    ui::pill(&icons::STATUS, PHASES[phase], color, k)
+    ui::pill(&icons::STATUS, w.steps.name(phase), color, k)
 }
 
 fn tile(i: usize, expected: &str, observed: &str, passed: Option<bool>, k: &Kit) -> El {
