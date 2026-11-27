@@ -712,3 +712,22 @@ fn a_quiet_session_turning_active_asks_for_its_project_work() {
     assert!(ov.wants("old"));
     assert!(ov.missing_ledgers().is_empty(), "asked for once");
 }
+
+#[test]
+fn a_project_unarchived_by_its_session_comes_back_with_the_session_list() {
+    let mut ov = Overview::default();
+    let row = |archived: bool, last: &str| {
+        let mut x = session("s", "old", last, "idle");
+        x.project.as_mut().unwrap().archived = Some(archived);
+        x
+    };
+    let mut first = fetched("2026-11-24T12:00:00Z", vec![row(true, "2026-11-01T11:00:00Z")], vec![]);
+    first.recorded.projects.iter_mut().filter(|p| p.id == "old").for_each(|p| p.archived = true);
+    ov.refresh(first);
+    assert!(ov.missing_ledgers().is_empty());
+    let _ = ov.world(&[]);
+    assert!(ov.take_sessions("2026-11-24T12:00:05Z", "", 0, vec![row(false, "2026-11-24T12:00:04Z")]));
+    assert!(ov.stale());
+    assert_eq!(ov.missing_ledgers().into_iter().collect::<Vec<_>>(), ["old"], "the session's word on its project is taken at once");
+    assert!(ov.world(&[]).projects.iter().any(|p| p.key == "old"));
+}

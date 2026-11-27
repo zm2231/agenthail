@@ -388,8 +388,21 @@ impl Overview {
         self.base.catalog_seq = seq;
         let before = std::mem::replace(&mut self.base.sessions, sessions);
         self.reconcile();
-        self.stale |= ticked || self.base.sessions != before;
+        let filed = self.follow_archive();
+        self.stale |= ticked || filed || self.base.sessions != before;
         true
+    }
+
+    fn follow_archive(&mut self) -> bool {
+        let mut moved = false;
+        for x in &self.base.sessions {
+            let Some((id, archived)) = x.project.as_ref().and_then(|p| Some((&p.id, p.archived?))) else { continue };
+            if let Some(record) = self.base.projects.iter_mut().find(|r| &r.id == id && r.archived != archived) {
+                record.archived = archived;
+                moved = true;
+            }
+        }
+        moved
     }
 
     pub fn stale(&self) -> bool {

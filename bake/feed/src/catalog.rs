@@ -19,6 +19,8 @@ pub struct Named {
     #[serde(default)]
     pub state: String,
     #[serde(default)]
+    pub archived: Option<bool>,
+    #[serde(default)]
     pub root_path: String,
 }
 
