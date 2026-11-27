@@ -151,3 +151,12 @@ fn project_choices_keep_ids_and_tell_apart_projects_with_one_name() {
 fn status_labels_read_like_the_mac_app() {
     assert_eq!((status_label("waiting"), status_label("limited"), status_label("new")), ("Waiting on you".into(), "Usage limit".into(), "new".into()));
 }
+
+#[test]
+fn working_chips_count_by_project_and_merge_names_in_count_order() {
+    let busy = |id: &str, project: &str, name: &str| -> Session { serde_json::from_value(json!({"id": id, "status": "busy", "project": {"id": project, "name": name}})).unwrap() };
+    let list = vec![busy("1", "a1", "A"), busy("2", "a1", "A"), busy("3", "a1", "A"), busy("4", "b", "B"), busy("5", "b", "B"), busy("6", "b", "B"), busy("7", "b", "B"), busy("8", "a2", "A"), busy("9", "a2", "A"), busy("10", "a2", "A")];
+    let by_project = crate::derive::sessions::busy_by_project(&list);
+    assert_eq!(by_project.iter().map(|b| (b.0.as_str(), b.2)).collect::<Vec<_>>(), vec![("b", 4), ("a1", 3), ("a2", 3)]);
+    assert_eq!(crate::derive::sessions::busy_by_group(&list), vec![("A".to_string(), 6), ("B".to_string(), 4)]);
+}

@@ -65,13 +65,15 @@ pub fn groups<'a>(list: &[&'a Session], needy: &HashSet<String>) -> Vec<Group<'a
 }
 
 pub fn busy_by_group(sessions: &[Session]) -> Vec<(String, usize)> {
-    busy_by_project(sessions).into_iter().fold(Vec::new(), |mut by: Vec<(String, usize)>, (_, name, n)| {
+    let mut by: Vec<(String, usize)> = Vec::new();
+    for (_, name, n) in busy_by_project(sessions) {
         match by.iter_mut().find(|b| b.0 == name) {
             Some(b) => b.1 += n,
             None => by.push((name, n)),
         }
-        by
-    })
+    }
+    by.sort_by_key(|b| Reverse(b.1));
+    by
 }
 
 pub fn busy_by_project(sessions: &[Session]) -> Vec<(String, String, usize)> {
