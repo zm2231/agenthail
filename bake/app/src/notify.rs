@@ -191,10 +191,7 @@ fn clicked(s: &mut App, click: Click) {
     }
     let (Some(choice), Some(request)) = (choice_of(&action).map(str::to_string), click.get("request").map(str::to_string)) else { return };
     std::thread::spawn(move || {
-        let result = match feed::notice::reply_refusal(&client.session_row(&session)) {
-            Some(why) => Err(feed::notice::refused(why)),
-            None => client.respond(&session, &request, vec![choice], Default::default()),
-        };
+        let result = client.respond(&session, &request, vec![choice], Default::default());
         let _ = tx.send(Done::Acted(session, request, result));
     });
 }
