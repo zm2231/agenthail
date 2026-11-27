@@ -68,7 +68,9 @@ pub(crate) fn composer(s: &App, x: &Session) -> El {
     let busy = crate::busy_delivery(s, &x.id);
     let unsent = s.unsent.has(&x.id);
     let status = match crate::composer_note(s, &x.id) {
-        Some(note) => text(note).font(META).color(if unsent { attention() } else { muted() }),
+        Some(note) if unsent => text(note).font(META).color(attention()),
+        _ if x.moving.is_some() => text(feed::moves::COMPOSER_NOTE).font(META).color(muted()).key("move-note"),
+        Some(note) => text(note).font(META).color(muted()),
         None if x.capabilities.reaches_as_note => text(feed::notice::SENDS_AS_NOTE).font(META).color(faint()),
         None => text(crate::send_busy(s, &x.id).map(|b| b.hint()).unwrap_or("Return to send · Shift-Return for a new line")).font(META).color(faint()),
     };
