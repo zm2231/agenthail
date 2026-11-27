@@ -298,8 +298,8 @@ fn role_list(s: &Prefs, r: &Roles, k: &Kit) -> El {
         let chosen = s.agents.selected.as_deref() == Some(role.name.as_str());
         let name = role.name.clone();
         let kind = if s.agents.kept.contains_key(&role.name) { format!("{} · not saved", agents::role_kind(role)) } else { agents::role_kind(role).to_string() };
-        let note = text(kind).font(k.text(META)).color(if role.edited { accent() } else { muted() });
-        let mut item = col().w_full().gap(2.0).px(12.0).py(7.0).radius(7.0).child(text(role.name.clone()).font(k.text(BODY)).color(theme::text())).child(note);
+        let note = text(kind).font(k.text(META)).color(if role.edited { accent() } else { muted() }).wrap();
+        let mut item = col().w_full().gap(2.0).px(12.0).py(7.0).radius(7.0).child(text(role.name.clone()).font(k.text(BODY)).color(theme::text()).wrap_anywhere()).child(note);
         if chosen {
             item = item.fill(theme::wash());
         }
