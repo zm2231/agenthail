@@ -177,7 +177,8 @@ fn take(s: &mut App, done: Done) {
     match &done {
         Done::Hosts(result) => {
             s.ov.ext.hosts_pending = false;
-            let hosts: Vec<Host> = result.iter().flatten().filter(|h| h.available() && !h.is_local() && wanted(s, h)).cloned().collect();
+            let resting = |h: &Host| s.ov.ext.catalogs.iter().any(|c| c.key() == host_key(h) && c.failed_at.is_some_and(|t| t.elapsed() < FAILED_AT_LEAST));
+            let hosts: Vec<Host> = result.iter().flatten().filter(|h| h.available() && !h.is_local() && wanted(s, h) && !resting(h)).cloned().collect();
             for host in &hosts {
                 list(s, host);
             }
