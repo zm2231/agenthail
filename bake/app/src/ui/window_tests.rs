@@ -861,3 +861,27 @@ fn a_rekey_onto_a_shown_session_without_values_doesn_t_show_the_old_id_s() {
     assert_eq!(crate::ui::inspect::goal_of(&s, "b").as_deref(), Some("b's goal"));
     assert!(!crate::ui::inspect::missed(&s, "b"), "a read asked after the rekey catches b up");
 }
+
+#[test]
+fn a_rekey_onto_a_shown_session_closes_the_old_id_s_goal_edit_and_logs() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    s.inspect.editing = Some(crate::ui::inspect::Editing { session: "a".into(), act: feed::inspect::GoalAct::Set, text: rune::TextEdit::new("for a") });
+    s.inspect.logs = Some(("a".into(), "a's output".into()));
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "b".to_string())]));
+    assert!(s.inspect.editing.is_none() && s.inspect.logs.is_none());
+}
+
+#[test]
+fn a_later_unrelated_rekey_doesn_t_count_an_earlier_one_again() {
+    use crate::ui::inspect::{Done, busy, settle, start};
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    let life = start(&mut s, "a", Some(feed::inspect::LifecycleAct::Status));
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "a2".to_string())]));
+    assert_eq!(s.selected.as_deref(), Some("a2"));
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "a2".to_string()), ("x".to_string(), "y".to_string())]));
+    settle(&mut s, Done::Status("a".into(), life, Ok(feed::inspect::LifecycleResult { state: Some("running".into()), ..Default::default() })));
+    assert_eq!(busy(&s, "a2"), (false, false));
+    assert_eq!(crate::ui::inspect::status_of(&s, "a2").as_deref(), Some("running"), "the status asked under a still lands on a2");
+}

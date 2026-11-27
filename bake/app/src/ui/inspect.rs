@@ -113,9 +113,15 @@ pub(crate) fn rekey(s: &mut App, old: &str, new: &str) {
     }
     if let Some(editing) = s.inspect.editing.as_mut().filter(|e| e.session == old) {
         editing.session = new.to_string();
+        if collided {
+            s.inspect.editing = None;
+        }
     }
     if let Some(logs) = s.inspect.logs.as_mut().filter(|(id, _)| id == old) {
         logs.0 = new.to_string();
+        if collided {
+            s.inspect.logs = None;
+        }
     }
     super::session_menu::rekey_context(s, old, new, collided);
     if collided {
