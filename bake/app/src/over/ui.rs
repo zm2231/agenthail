@@ -555,13 +555,12 @@ pub fn project_for(s: &App, x: &feed::catalog::Session) -> Option<String> {
 
 pub fn sidebar_order(s: &App, current_project: Option<&str>, selected: Option<&str>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    if !matches!(s.screen, Screen::Now) {
-        for slot in need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), 4) {
-            if let Slot::Need(_, n) = slot
-                && let Target::Session(id) = &n.target
-            {
-                out.push(id.clone());
-            }
+    let per_group = if matches!(s.screen, Screen::Now) { usize::MAX } else { 4 };
+    for slot in need_slots(&s.ov.needs, s.ov.looked_now.as_deref(), per_group) {
+        if let Slot::Need(_, n) = slot
+            && let Target::Session(id) = &n.target
+        {
+            out.push(id.clone());
         }
     }
     if let Some(p) = current_project.and_then(|k| s.ov.d.project(k)) {
