@@ -949,6 +949,11 @@ pub fn send_as_new(s: &mut App, id: &str, tx: &mut Tx) {
         note(s, id, feed::composer::STEER_TURN_OPTIONS.into());
         pending.busy = Some(Busy::Queue);
     }
+    if waiting_earlier(s, id) {
+        s.unsent.add(id, Unsent { maybe_delivered: false, error: "an earlier message isn't confirmed yet".into(), ..pending });
+        over::layout::save(s);
+        return;
+    }
     dispatch(s, id, pending, false, tx);
 }
 

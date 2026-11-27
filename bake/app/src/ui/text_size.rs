@@ -9,7 +9,7 @@ use crate::App;
 
 const WRITE_AFTER: Duration = Duration::from_secs(1);
 
-type Wrote = (u64, Result<View, Failure>);
+type Wrote = Result<View, Failure>;
 
 #[derive(Default)]
 struct State {
@@ -60,9 +60,9 @@ pub fn pump(s: &mut App) -> bool {
     });
     crate::look::hold_text_scale(latest);
     let changed = !wrote.is_empty();
-    for (ticket, result) in wrote {
+    for result in wrote {
         match result {
-            Ok(view) if !newer && due.is_none() => crate::look::take_view(ticket, view),
+            Ok(view) if !newer && due.is_none() => crate::look::take_view(crate::look::ticket(), view),
             Ok(_) => {}
             Err(failure) => s.ov.notice = Some(format!("Couldn't save the text size: {}", failure.message)),
         }
@@ -73,10 +73,9 @@ pub fn pump(s: &mut App) -> bool {
         return changed;
     };
     let device = crate::look::device();
-    let ticket = crate::look::ticket();
     std::thread::spawn(move || {
         let result = client.ui_change(fl::device_class(), &device, &Change::text_scale(scale, &device));
-        let _ = tx.send((ticket, result));
+        let _ = tx.send(result);
     });
     changed
 }
