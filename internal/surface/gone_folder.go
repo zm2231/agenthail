@@ -47,8 +47,8 @@ func FallbackFolder(gone, home string, roots []string) (FolderMove, error) {
 		into = filepath.Dir(into)
 	}
 	checkout := false
-	if filepath.Base(into) == worktreesDir {
-		into, checkout = filepath.Dir(into), true
+	if holder, ok := worktreeCheckout(gone); ok && (into == holder || into == filepath.Join(holder, worktreesDir)) {
+		into, checkout = holder, true
 	}
 	refused := func(why string) (FolderMove, error) {
 		return FolderMove{}, fmt.Errorf("its folder %s is gone and %s; recreate %s, or archive the session", gone, why, gone)
@@ -65,17 +65,22 @@ func FallbackFolder(gone, home string, roots []string) (FolderMove, error) {
 func checkoutRoots(roots []string) []string {
 	out := make([]string, 0, len(roots))
 	for _, root := range roots {
-		root = filepath.Clean(root)
-		parts := strings.Split(root, string(filepath.Separator))
-		for i := len(parts) - 2; i > 0; i-- {
-			if parts[i] == worktreesDir {
-				root = strings.Join(parts[:i], string(filepath.Separator))
-				break
-			}
+		if holder, ok := worktreeCheckout(root); ok {
+			root = holder
 		}
-		out = append(out, root)
+		out = append(out, filepath.Clean(root))
 	}
 	return out
+}
+
+func worktreeCheckout(path string) (string, bool) {
+	parts := strings.Split(filepath.Clean(path), string(filepath.Separator))
+	for i := len(parts) - 2; i > 0; i-- {
+		if parts[i] == worktreesDir {
+			return strings.Join(parts[:i], string(filepath.Separator)), true
+		}
+	}
+	return "", false
 }
 
 func withinAny(path string, roots []string) bool {

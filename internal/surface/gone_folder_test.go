@@ -57,3 +57,25 @@ func TestAFolderWhoseOnlyRemainingParentIsHomeIsRefused(t *testing.T) {
 		t.Fatal("a folder above home was offered")
 	}
 }
+
+func TestAWorktreeWhoseWorktreesFolderIsAlsoGoneStillResumesInItsCheckoutAsShared(t *testing.T) {
+	home, checkout, worktree := removedWorktree(t)
+	if err := os.RemoveAll(filepath.Dir(worktree)); err != nil {
+		t.Fatal(err)
+	}
+	move, err := FallbackFolder(worktree, home, nil)
+	if err != nil || move.Into != checkout || !move.Checkout {
+		t.Fatalf("move=%+v err=%v, want the checkout %s as shared", move, err, checkout)
+	}
+}
+
+func TestAFolderGoneInsideARemainingWorktreeResumesInThatWorktree(t *testing.T) {
+	home, _, worktree := removedWorktree(t)
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	move, err := FallbackFolder(filepath.Join(worktree, "sub"), home, []string{worktree})
+	if err != nil || move.Into != worktree || move.Checkout {
+		t.Fatalf("move=%+v err=%v, want the worktree %s", move, err, worktree)
+	}
+}
