@@ -7,8 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/zm2231/agenthail/internal/surface"
+	"github.com/zm2231/agenthail/internal/testkit"
 )
 
 func removedWorktreeSession(t *testing.T, roots func(worktree string) []string) (checkout, worktree string, session surface.Session, c *Claude, spawns func() int, hooks func() string) {
@@ -87,4 +90,30 @@ func TestAMessageToASessionWhoseFolderIsGoneAndWhoseRootsAreElsewhereIsRefusedWi
 	if spawns() != 0 {
 		t.Fatalf("spawns=%d, want none", spawns())
 	}
+}
+
+func TestAMessageToASessionWhoseFolderIsGoneResumesItInTheFolderAboveWithItsTranscript(t *testing.T) {
+	fixture, host, c := hostResume(t)
+	parent := t.TempDir()
+	gone := filepath.Join(parent, "removed")
+	if err := os.Mkdir(gone, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	session := exitedSession(fixture)
+	session.Cwd = gone
+	session.Transcript = fixture.Transcript(fixtureConversation, gone)
+	if err := os.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+	result, err := c.SendHumanTurn(surface.WithMessageUUID(context.Background(), uuid.NewString()), &session, "are you there", nil)
+	if err != nil || !result.Accepted || result.Notice != "Its folder "+gone+" is gone, so it resumed in "+parent+"." {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if spawns := host.Spawns(t, fixtureConversation); len(spawns) != 1 || !samePath(t, spawns[0].Cwd, parent) {
+		t.Fatalf("spawns=%+v, want one resume in %s", spawns, parent)
+	}
+	testkit.Eventually(t, "the turn", 15*time.Second, func() bool {
+		turns := host.Turns(t, fixtureConversation)
+		return len(turns) == 1 && turns[0].Text == "are you there"
+	})
 }
