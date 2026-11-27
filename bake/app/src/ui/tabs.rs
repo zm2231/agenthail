@@ -208,7 +208,8 @@ pub fn strip_part<'a>(s: &'a App, k: &'a Kit, sizes: bool) -> Option<Part<'a>> {
         if closed.is_none() && archived.is_none() {
             return None;
         }
-        return Some(Part::row("tab-strip", crate::over::rows::hash(&(&closed, &archived)), move || notice(s, k).unwrap_or_else(row)));
+        let id = if closed.is_some() { "tab-reopen" } else { "tab-archived" };
+        return Some(Part::row(id, crate::over::rows::hash(&(&closed, &archived)), move || notice(s, k).unwrap_or_else(row)));
     }
     let label = crate::look::tabs().label;
     let shown: Vec<Shown> = s
