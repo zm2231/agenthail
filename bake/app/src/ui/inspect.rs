@@ -24,6 +24,7 @@ struct Process {
     status: Option<LifecycleResult>,
     busy: Option<LifecycleAct>,
     outcome: Option<String>,
+    logs: Option<String>,
     error: Option<String>,
 }
 
@@ -196,6 +197,7 @@ fn settled(s: &mut App, done: Done) {
                 let line = match &result {
                     Ok(r) if act == LifecycleAct::Status => Some(r.line()).filter(|l| !l.is_empty()),
                     Ok(r) if act == LifecycleAct::Resume && r.unchanged == Some(true) => Some(inspect::RESUME_UNCHANGED.to_string()),
+                    Ok(_) if act == LifecycleAct::Logs && elsewhere.is_some() => Some("Logs are ready in its Process section.".to_string()),
                     Ok(_) => act.done().map(str::to_string),
                     Err(error) => Some(format!("{} didn't work: {}", act.label(), failure(error))),
                 };
@@ -212,6 +214,7 @@ fn settled(s: &mut App, done: Done) {
                     p.outcome = if act == LifecycleAct::Resume && result.unchanged == Some(true) { Some(inspect::RESUME_UNCHANGED.to_string()) } else { act.done().map(str::to_string) };
                     match act {
                         LifecycleAct::Status => p.status = Some(result),
+                        LifecycleAct::Logs if elsewhere.is_some() => p.logs = Some(result.output.unwrap_or_default()),
                         LifecycleAct::Logs => s.inspect.logs = Some((id.clone(), result.output.unwrap_or_default())),
                         _ if session(s, &id).is_some_and(|x| inspect::lifecycle(x).status) => {
                             if let Some(p) = s.inspect.process.get_mut(&id) {
@@ -301,6 +304,12 @@ fn goal_section(s: &App, x: &Session) -> Option<El> {
     Some(rail_section("Goal", &icons::TARGET, body))
 }
 
+fn show_logs(s: &mut App, id: &str) {
+    if let Some(output) = s.inspect.process.get_mut(id).and_then(|p| p.logs.take()) {
+        s.inspect.logs = Some((id.to_string(), output));
+    }
+}
+
 fn local_offset(at: OffsetDateTime) -> i32 {
     super::session_ops::offset(at).whole_seconds()
 }
@@ -319,6 +328,10 @@ fn process_section(s: &App, x: &Session) -> Option<El> {
     }
     if let Some(outcome) = p.and_then(|p| p.outcome.clone()) {
         body = body.child(text(outcome).font(META).color(muted()));
+    }
+    if p.is_some_and(|p| p.logs.is_some()) {
+        let id = x.id.clone();
+        body = body.child(small("Show logs", "process-show-logs".into(), ButtonVariant::Ghost, false, move |s: &mut App| show_logs(s, &id)));
     }
     let buttons = row().w_full().flex_wrap().gap(6.0).items_center().children(LifecycleAct::ALL.into_iter().filter(|a| a.offered(lifecycle)).map(|act| {
         let id = x.id.clone();
