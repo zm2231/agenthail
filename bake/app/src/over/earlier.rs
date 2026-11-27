@@ -19,14 +19,18 @@ struct Shown {
     asked: Option<u64>,
     error: Option<String>,
     removed: Vec<String>,
+    pages: usize,
+    reread: bool,
 }
+
+type Got = (String, u64, bool, Result<Page, String>);
 
 pub struct Earlier {
     pub activity_missing: bool,
     projects: HashMap<String, Shown>,
     seq: u64,
-    tx: Sender<(String, u64, Result<Page, String>)>,
-    rx: Receiver<(String, u64, Result<Page, String>)>,
+    tx: Sender<Got>,
+    rx: Receiver<Got>,
 }
 
 impl Default for Earlier {
@@ -50,7 +54,39 @@ fn more(s: &mut App, key: &str) {
     let (tx, key, cursor) = (s.earlier.tx.clone(), key.to_string(), shown.next.clone());
     std::thread::spawn(move || {
         let got = client.earlier_page(&key, cursor.as_deref());
-        let _ = tx.send((key, seq, got));
+        let _ = tx.send((key, seq, false, got));
+    });
+}
+
+fn reread(s: &mut App, key: &str) {
+    let Some(client) = s.client.clone() else { return };
+    let Some(shown) = s.earlier.projects.get_mut(key) else { return };
+    if shown.asked.is_some() {
+        return;
+    }
+    s.earlier.seq += 1;
+    let seq = s.earlier.seq;
+    shown.reread = false;
+    shown.asked = Some(seq);
+    let (tx, key, pages) = (s.earlier.tx.clone(), key.to_string(), shown.pages.max(1));
+    std::thread::spawn(move || {
+        let mut all = Page { sessions: Vec::new(), next: None };
+        for _ in 0..pages {
+            match client.earlier_page(&key, all.next.as_deref()) {
+                Ok(page) => {
+                    all.sessions.extend(page.sessions);
+                    all.next = page.next;
+                }
+                Err(error) => {
+                    let _ = tx.send((key, seq, true, Err(error)));
+                    return;
+                }
+            }
+            if all.next.is_none() {
+                break;
+            }
+        }
+        let _ = tx.send((key, seq, true, Ok(all)));
     });
 }
 
@@ -69,10 +105,15 @@ pub fn removed(s: &mut App, gone: &[Removal]) {
                 continue;
             }
             shown.removed.retain(|o| *o != x.id);
+            shown.reread |= shown.open && shown.read && listed.as_ref().is_none_or(|r| r.project_key() == *key);
             if let Some(row) = listed.as_ref().filter(|r| r.project_key() == *key && !shown.sessions.iter().any(|o| o.id == r.id)) {
                 shown.sessions.push(row.clone());
             }
         }
+    }
+    let due: Vec<String> = s.earlier.projects.iter().filter(|(_, x)| x.reread).map(|(k, _)| k.clone()).collect();
+    for key in due {
+        reread(s, &key);
     }
 }
 
@@ -92,14 +133,20 @@ fn hide(s: &mut App, key: &str) {
 
 pub fn poll(s: &mut App) -> bool {
     let mut changed = false;
-    while let Ok((key, seq, got)) = s.earlier.rx.try_recv() {
+    while let Ok((key, seq, whole, got)) = s.earlier.rx.try_recv() {
         let Some(shown) = s.earlier.projects.get_mut(&key) else { continue };
         if shown.asked != Some(seq) {
             continue;
         }
         shown.asked = None;
         match got {
+            Ok(page) if whole => {
+                shown.sessions = page.sessions.into_iter().filter(|x| !shown.removed.contains(&x.id)).collect();
+                shown.pages = shown.pages.max(1);
+                shown.next = page.next;
+            }
             Ok(page) => {
+                shown.pages += 1;
                 for x in page.sessions.into_iter().filter(|x| !shown.removed.contains(&x.id)) {
                     shown.sessions.retain(|o| o.id != x.id);
                     shown.sessions.push(x);
@@ -108,6 +155,9 @@ pub fn poll(s: &mut App) -> bool {
                 shown.read = true;
             }
             Err(error) => shown.error = Some(error),
+        }
+        if shown.reread {
+            reread(s, &key);
         }
         changed = true;
     }
@@ -212,11 +262,33 @@ pub(crate) fn asking(s: &mut App, key: &str) -> u64 {
 
 #[cfg(test)]
 pub(crate) fn answer(s: &mut App, key: &str, seq: u64, sessions: Vec<Session>) {
-    let _ = s.earlier.tx.send((key.to_string(), seq, Ok(Page { sessions, next: None })));
+    let _ = s.earlier.tx.send((key.to_string(), seq, false, Ok(Page { sessions, next: None })));
     poll(s);
 }
 
 #[cfg(test)]
 pub(crate) fn fetched(s: &App, key: &str) -> Vec<String> {
     s.earlier.projects.get(key).map(|x| x.sessions.iter().map(|o| o.id.clone()).collect()).unwrap_or_default()
+}
+
+#[cfg(test)]
+pub(crate) fn rereads(s: &App, key: &str) -> bool {
+    s.earlier.projects.get(key).is_some_and(|x| x.reread)
+}
+
+#[cfg(test)]
+pub(crate) fn answer_reread(s: &mut App, key: &str, sessions: Vec<Session>) {
+    s.earlier.seq += 1;
+    let seq = s.earlier.seq;
+    if let Some(shown) = s.earlier.projects.get_mut(key) {
+        shown.reread = false;
+        shown.asked = Some(seq);
+    }
+    let _ = s.earlier.tx.send((key.to_string(), seq, true, Ok(Page { sessions, next: None })));
+    poll(s);
+}
+
+#[cfg(test)]
+pub(crate) fn status(s: &App, key: &str, id: &str) -> Option<String> {
+    s.earlier.projects.get(key)?.sessions.iter().find(|x| x.id == id).map(|x| x.status.clone())
 }

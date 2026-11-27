@@ -386,6 +386,24 @@ fn earlier_keeps_a_session_dropped_from_the_list_and_blocks_one_removed() {
 }
 
 #[test]
+fn earlier_reads_its_pages_again_when_a_shown_session_leaves_the_list() {
+    if !isolated("earlier_reads_its_pages_again_when_a_shown_session_leaves_the_list") {
+        return;
+    }
+    let dir = Dir::new("earlier-reread");
+    let busy = session("kept", 0, json!({"status": "busy"}));
+    let mut s = app(vec![busy.clone()], &dir);
+    let seq = crate::over::earlier::asking(&mut s, "p1");
+    crate::over::earlier::answer(&mut s, "p1", seq, vec![busy]);
+    assert!(!crate::over::earlier::rereads(&s, "p1"));
+    crate::over::earlier::removed(&mut s, &[feed::watch::Removal { id: "kept".into(), unlisted: true }]);
+    assert!(crate::over::earlier::rereads(&s, "p1"), "a shown session leaving the list reads Earlier again");
+    crate::over::earlier::answer_reread(&mut s, "p1", vec![session("kept", 0, json!({})), session("other", 1, json!({}))]);
+    assert_eq!(crate::over::earlier::status(&s, "p1", "kept").as_deref(), Some("idle"), "the reread replaces the last listed row");
+    assert_eq!(crate::over::earlier::fetched(&s, "p1"), vec!["kept".to_string(), "other".to_string()]);
+}
+
+#[test]
 fn a_moved_ledger_key_drops_the_ready_count_and_its_old_read_and_follows_the_new_key() {
     if !isolated("a_moved_ledger_key_drops_the_ready_count_and_its_old_read_and_follows_the_new_key") {
         return;
