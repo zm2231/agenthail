@@ -24,6 +24,7 @@ pub enum Job {
     ClearLead { project: String, name: String },
     StartLead { surface: String, folder: String, host: String, name: String, project: String, replace: bool },
     SetLead { session: String, replace: bool },
+    Message { project: String, lead: String, text: String },
     Clean { session: String, ignored: Vec<String> },
 }
 
@@ -41,6 +42,7 @@ impl Job {
             Job::ClearLead { project, name } => c.lead_clear(project).map(|_| format!("{name} has no lead now.")),
             Job::StartLead { surface, folder, host, name, project, replace } => c.lead_start(surface, folder, host, name, *replace).map(|l| format!("@{} leads {project}; its first message starts it.", l.name)),
             Job::SetLead { session, replace } => c.lead_set(session, *replace).map(|l| format!("@{} leads {}.", l.name, l.project_root)),
+            Job::Message { project, lead, text } => c.lead_send(project, text).map(|_| format!("Sent to {lead}.")),
             Job::Clean { .. } => Ok(String::new()),
         }?;
         Ok((message, false))
@@ -69,13 +71,14 @@ impl Job {
             Job::Tools { .. } => "Changing the tools setting",
             Job::ClearLead { .. } => "Clearing the lead",
             Job::StartLead { .. } | Job::SetLead { .. } => "The lead change",
+            Job::Message { .. } => "The message to the lead",
             Job::Clean { .. } => "Removing the worktree",
         }
     }
 }
 
 pub enum Done {
-    Changed(Job, bool, Result<(String, bool), RespondError>),
+    Changed(Job, Option<u64>, Result<(String, bool), RespondError>),
     Tiles(TileReply),
     Hosts(Result<Vec<Host>, String>),
     Folders(String, Vec<String>),
@@ -96,14 +99,17 @@ pub enum Sheet {
 
 pub struct State {
     pub tiles: Tiles,
-    seen: Option<TileOrder>,
     menu: Option<(String, Option<PointerPress>)>,
     archived_menu: bool,
     sheet: Option<Sheet>,
+    sheet_id: u64,
     picking: Option<Pick>,
     saving: bool,
     error: Option<String>,
-    confirm: Option<(Confirm, Job, bool)>,
+    confirm: Option<(Confirm, Job, Option<u64>)>,
+    seen_at: Option<time::OffsetDateTime>,
+    pub lead_text: TextEdit,
+    sending_to: HashSet<String>,
     hosts: Vec<Host>,
     folders: HashMap<String, Vec<String>>,
     cleaning: HashSet<String>,
@@ -117,14 +123,17 @@ impl Default for State {
         let (tx, rx) = channel();
         State {
             tiles: Tiles::default(),
-            seen: None,
             menu: None,
             archived_menu: false,
             sheet: None,
+            sheet_id: 0,
             picking: None,
             saving: false,
             error: None,
             confirm: None,
+            seen_at: None,
+            lead_text: TextEdit::new(""),
+            sending_to: HashSet::new(),
             hosts: Vec::new(),
             folders: HashMap::new(),
             cleaning: HashSet::new(),
@@ -149,7 +158,7 @@ fn record<'a>(s: &'a App, key: &str) -> Option<&'a ProjectRecord> {
     s.ov.d.record(key)
 }
 
-fn run(s: &mut App, job: Job, from_sheet: bool) {
+fn run(s: &mut App, job: Job, from_sheet: Option<u64>) {
     let Some(client) = s.client.clone() else {
         s.ov.notice = Some("Fixture mode: not sent".into());
         return;
@@ -160,7 +169,12 @@ fn run(s: &mut App, job: Job, from_sheet: bool) {
         }
         s.ov.projects.kept.remove(session);
     }
-    if from_sheet {
+    if let Job::Message { project, .. } = &job
+        && !s.ov.projects.sending_to.insert(project.clone())
+    {
+        return;
+    }
+    if from_sheet.is_some() {
         s.ov.projects.saving = true;
         s.ov.projects.error = None;
     }
@@ -171,12 +185,15 @@ fn run(s: &mut App, job: Job, from_sheet: bool) {
     });
 }
 
-fn ask(s: &mut App, confirm: Confirm, job: Job, from_sheet: bool) {
+fn ask(s: &mut App, confirm: Confirm, job: Job, from_sheet: Option<u64>) {
     s.ov.projects.menu = None;
     s.ov.projects.confirm = Some((confirm, job, from_sheet));
 }
 
 fn change_tiles(s: &mut App, change: TileChange) {
+    if s.client.is_some() && !s.ov.projects.tiles.heard() {
+        s.ov.notice = Some("Agenthail hasn't sent the project order yet; this change is sent once it does.".into());
+    }
     let arranged = arranged(s);
     if let Some(order) = s.ov.projects.tiles.change(&change, &arranged) {
         send_tiles(s, order);
@@ -194,24 +211,25 @@ fn send_tiles(s: &mut App, order: TileOrder) {
     });
 }
 
-fn choose(s: &mut App, key: &str, item: Item) {
+fn choose(s: &mut App, key: &str, item: Item, tx: &mut Tx) {
     s.ov.projects.menu = None;
     let Some(p) = record(s, key).cloned() else { return };
     let name = p.name().to_string();
     match item {
+        Item::NewConversation { host, folder } => crate::ui::new_session::open(s, crate::ui::new_session::Prefill { host, folder }, tx),
         Item::Rename => open_sheet(s, Sheet::Rename { project: p.id.clone(), name: focused(&name) }),
         Item::Lead { .. } => {
             let first = p.lead_places().first().map(|c| p.checkouts.iter().position(|x| x == *c).unwrap_or(0)).unwrap_or(0);
             open_sheet(s, Sheet::Lead { project: p.id.clone(), checkout: first, surface: "claude", name: focused("") });
         }
-        Item::ClearLead => ask(s, projects::confirm_clear_lead(&name), Job::ClearLead { project: p.id.clone(), name }, false),
+        Item::ClearLead => ask(s, projects::confirm_clear_lead(&name), Job::ClearLead { project: p.id.clone(), name }, None),
         Item::Pin(on) => change_tiles(s, TileChange::Pin(p.id.clone(), on)),
         Item::Earlier => change_tiles(s, TileChange::Step(p.id.clone(), -1)),
         Item::Later => change_tiles(s, TileChange::Step(p.id.clone(), 1)),
-        Item::Tools { off } => run(s, Job::Tools { project: p.id.clone(), name, on: off }, false),
-        Item::Archive(true) => ask(s, projects::confirm_archive(&name), Job::Archive { project: p.id.clone(), name, archived: true }, false),
-        Item::Archive(false) => run(s, Job::Archive { project: p.id.clone(), name, archived: false }, false),
-        Item::Remove { project_id, place } => ask(s, projects::confirm_remove(&name, &place), Job::Remove { project: project_id }, false),
+        Item::Tools { off } => run(s, Job::Tools { project: p.id.clone(), name, on: off }, None),
+        Item::Archive(true) => ask(s, projects::confirm_archive(&name), Job::Archive { project: p.id.clone(), name, archived: true }, None),
+        Item::Archive(false) => run(s, Job::Archive { project: p.id.clone(), name, archived: false }, None),
+        Item::Remove { project_id, place } => ask(s, projects::confirm_remove(&name, &place), Job::Remove { project: project_id }, None),
     }
 }
 
@@ -230,6 +248,7 @@ fn open_sheet(s: &mut App, sheet: Sheet) {
     s.ov.projects.picking = None;
     let adding = matches!(sheet, Sheet::Add { .. });
     s.ov.projects.sheet = Some(sheet);
+    s.ov.projects.sheet_id += 1;
     if adding {
         load_hosts(s);
         load_folders(s, "");
@@ -240,16 +259,30 @@ pub fn add(s: &mut App) {
     open_sheet(s, Sheet::Add { host: String::new(), folder: focused(""), title: TextEdit::new("") });
 }
 
-pub fn set_lead(s: &mut App, key: &str) {
-    choose(s, key, Item::Lead { change: false });
+pub fn set_lead(s: &mut App, key: &str, tx: &mut Tx) {
+    choose(s, key, Item::Lead { change: false }, tx);
+}
+
+pub fn message_lead(s: &mut App, key: &str) {
+    let text = s.ov.projects.lead_text.text.trim().to_string();
+    let Some(p) = s.ov.d.project(key) else { return };
+    if text.is_empty() || s.ov.projects.sending_to.contains(key) {
+        return;
+    }
+    let lead = p.lead_name.clone();
+    run(s, Job::Message { project: key.to_string(), lead, text }, None);
+}
+
+pub fn messaging(s: &App, key: &str) -> bool {
+    s.ov.projects.sending_to.contains(key)
 }
 
 pub fn make_lead(s: &mut App, session: &str) {
-    run(s, Job::SetLead { session: session.to_string(), replace: false }, false);
+    run(s, Job::SetLead { session: session.to_string(), replace: false }, None);
 }
 
 pub fn leads(s: &App, session: &str) -> bool {
-    s.ov.d.records.iter().any(|p| p.coordinators.iter().any(|c| c.session_id.as_deref() == Some(session)))
+    s.ov.d.records.iter().any(|p| p.coordinators.iter().any(|c| projects::lead_session_id(c).as_deref() == Some(session)))
 }
 
 fn load_hosts(s: &mut App) {
@@ -304,18 +337,25 @@ fn save(s: &mut App) {
         return;
     }
     if let Some(job) = sheet_job(s) {
-        run(s, job, true);
+        let id = s.ov.projects.sheet_id;
+        run(s, job, Some(id));
     }
 }
 
-fn settled(s: &mut App, job: Job, from_sheet: bool, result: Result<(String, bool), RespondError>) {
-    if from_sheet {
+fn settled(s: &mut App, job: Job, from_sheet: Option<u64>, result: Result<(String, bool), RespondError>) {
+    let sheet_open = from_sheet.is_some_and(|id| id == s.ov.projects.sheet_id) && s.ov.projects.sheet.is_some();
+    if sheet_open {
         s.ov.projects.saving = false;
     }
     if let Job::Clean { session, .. } = &job {
         s.ov.projects.cleaning.remove(session);
     }
-    let sheet_open = from_sheet && s.ov.projects.sheet.is_some();
+    if let Job::Message { project, .. } = &job {
+        s.ov.projects.sending_to.remove(project);
+        if result.is_ok() && s.screen == crate::Screen::Project(project.clone()) {
+            s.ov.projects.lead_text = TextEdit::new("");
+        }
+    }
     match result {
         Ok((message, kept)) => {
             if let Job::Clean { session, .. } = &job
@@ -331,7 +371,7 @@ fn settled(s: &mut App, job: Job, from_sheet: bool, result: Result<(String, bool
                 let _ = poke.send(());
             }
         }
-        Err(error) if projects::needs_replace(&error) && job.replacing().is_some() => {
+        Err(error) if projects::needs_replace(&error) && job.replacing().is_some() && (from_sheet.is_none() || sheet_open) => {
             let again = job.replacing().unwrap_or(job);
             s.ov.projects.confirm = Some((projects::confirm_replace(&error), again, from_sheet));
         }
@@ -351,12 +391,11 @@ fn settled(s: &mut App, job: Job, from_sheet: bool, result: Result<(String, bool
 
 pub fn drain(s: &mut App) -> bool {
     let mut changed = false;
-    if s.ov.d.tile_order != s.ov.projects.seen {
-        s.ov.projects.seen = s.ov.d.tile_order.clone();
-        let seen = s.ov.projects.seen.clone();
-        if let Some(order) = s.ov.projects.tiles.adopt(seen.as_ref()) {
-            send_tiles(s, order);
-        }
+    let remote = s.ov.d.tile_order.clone().or_else(|| s.client.is_none().then(TileOrder::default));
+    let fresh = s.ov.projects.seen_at != Some(s.ov.d.now);
+    s.ov.projects.seen_at = Some(s.ov.d.now);
+    if let Some(order) = s.ov.projects.tiles.poll(remote.as_ref(), fresh) {
+        send_tiles(s, order);
         changed = true;
     }
     if let Some((key, _)) = &s.ov.projects.menu
@@ -412,7 +451,7 @@ fn entry_item(key: &str, entry: Entry, busy: bool) -> MenuItem {
     if let Some(note) = entry.note {
         m = m.description(note);
     }
-    m.on_select(move |s: &mut App| choose(s, &key, item.clone()))
+    m.on_select_tx(move |s: &mut App, tx: &mut Tx| choose(s, &key, item.clone(), tx))
 }
 
 fn project_menu(s: &App, key: &str, at: Option<PointerPress>, layer: &mut Vec<El>) {
@@ -452,7 +491,7 @@ fn archived_menu(s: &App, layer: &mut Vec<El>) {
         let (id, name) = (p.id.clone(), p.name().to_string());
         m = m.item(MenuItem::new(format!("Unarchive {name}")).on_select(move |s: &mut App| {
             s.ov.projects.archived_menu = false;
-            run(s, Job::Archive { project: id.clone(), name: name.clone(), archived: false }, false);
+            run(s, Job::Archive { project: id.clone(), name: name.clone(), archived: false }, None);
         }));
     }
     let _ = m.build(kit(), layer);
@@ -667,9 +706,10 @@ pub fn open(s: &App) -> bool {
 }
 
 pub fn close_top(s: &mut App) {
-    if s.ov.projects.confirm.take().is_none() {
-        close_sheet(s);
+    if s.ov.projects.picking.take().is_some() || s.ov.projects.confirm.take().is_some() {
+        return;
     }
+    close_sheet(s);
 }
 
 fn merged_row(s: &App, i: usize, x: &feed::catalog::Session, w: &Worktree) -> El {
@@ -703,7 +743,7 @@ fn merged_row(s: &App, i: usize, x: &feed::catalog::Session, w: &Worktree) -> El
             .variant(ButtonVariant::Ghost)
             .control_size(ControlSize::Small)
             .disabled(cleaning)
-            .on_press(move |s: &mut App| ask(s, confirm.clone(), job.clone(), false))
+            .on_press(move |s: &mut App| ask(s, confirm.clone(), job.clone(), None))
             .build(k)
             .key(key)
     };

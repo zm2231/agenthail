@@ -222,8 +222,22 @@ pub fn lead(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
         }
         None => {
             let pk = key.to_string();
-            let start = Button::new("Set Lead…").variant(ButtonVariant::Contrast).control_size(ControlSize::Small).on_press(move |s: &mut App| crate::over::projects::set_lead(s, &pk)).build(kit()).key("set-lead");
-            col().w_full().h_full().center().gap(8.0).child(text("This project has no lead yet.".to_string()).font(BODY_MED).color(weak())).child(start).children(crate::over::decisions::brief_note(s, key))
+            let label = if p.lead_pending.is_some() { "Change Lead…" } else { "Set Lead…" };
+            let start = Button::new(label).variant(if p.lead_pending.is_some() { ButtonVariant::Ghost } else { ButtonVariant::Contrast }).control_size(ControlSize::Small).on_press_tx(move |s: &mut App, tx: &mut Tx| crate::over::projects::set_lead(s, &pk, tx)).build(kit()).key("set-lead");
+            match &p.lead_pending {
+                Some((surface, note)) => col()
+                    .w_full()
+                    .h_full()
+                    .center()
+                    .gap(10.0)
+                    .child(ui::avatar(&p.lead_name, 28.0))
+                    .child(text(format!("{}, the lead", p.lead_name)).font(BODY_MED).color(strong()))
+                    .child(text(format!("{surface} · {note}")).font(META).color(weak()))
+                    .children(crate::over::decisions::brief_note(s, key))
+                    .child(pending_composer(s, key, &p.lead_name))
+                    .child(start),
+                None => col().w_full().h_full().center().gap(8.0).child(text("This project has no lead yet.".to_string()).font(BODY_MED).color(weak())).child(start).children(crate::over::decisions::brief_note(s, key)),
+            }
         }
     };
     ui::frame(cx, s, Some(ui::sidebar(s, Some(key), p.lead.as_deref())), main, Some(panel), toolbar(s, key))
@@ -314,6 +328,37 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>) -> El {
         );
     }
     ui::frame(cx, s, Some(ui::sidebar(s, Some(key), None)), main, None, toolbar(s, key))
+}
+
+fn pending_composer(s: &App, key: &str, lead: &str) -> El {
+    let k = kit();
+    let (to, to2) = (key.to_string(), key.to_string());
+    let sending = crate::over::projects::messaging(s, key);
+    let input = text_input(&s.ov.projects.lead_text, BODY.lh(21.0))
+        .key("lead-first-message")
+        .label("Message")
+        .w_full()
+        .min_h(44.0)
+        .color(strong())
+        .placeholder(format!("Tell {lead}…"), weak())
+        .on_edit(|s: &mut App| &mut s.ov.projects.lead_text)
+        .on_submit(move |s: &mut App, _: &mut Tx| crate::over::projects::message_lead(s, &to));
+    let send = IconButton::new(&icons::ARROW_UP).variant(IconButtonVariant::Submit).label("Send").on_press(move |s: &mut App| crate::over::projects::message_lead(s, &to2)).build(k);
+    col()
+        .w_full()
+        .max_w(620.0)
+        .px(28.0)
+        .child(
+            col()
+                .w_full()
+                .gap(8.0)
+                .padding(12.0)
+                .radius(14.0)
+                .fill(k.c.surface_raised)
+                .border(1.0, ui::edge())
+                .child(input)
+                .child(row().w_full().items_center().child(text(if sending { "Sending…" } else { "The first message starts its conversation" }.to_string()).font(META).color(weak())).child(ui::spacer()).child(send)),
+        )
 }
 
 fn lead_chat(s: &App, lead: &str) -> El {

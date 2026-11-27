@@ -101,6 +101,7 @@ fn encode(s: &App) -> String {
         "unsent": unsent(s),
         "queueTaking": feed::queue::Taking::to_json(&s.queue_taking),
         "backgroundDock": s.dock.to_json(),
+        "projectTiles": serde_json::to_value(s.ov.projects.tiles.saved()).unwrap_or(Value::Null),
     })
     .to_string()
 }
@@ -141,6 +142,9 @@ pub fn load(s: &mut App) {
     }
     s.queue_taking = feed::queue::Taking::from_json(&v["queueTaking"]);
     s.dock = feed::background::DockChoices::from_json(&v["backgroundDock"]);
+    if let Ok(saved) = serde_json::from_value(v["projectTiles"].clone()) {
+        s.ov.projects.tiles = feed::projects::Tiles::restore(saved);
+    }
     crate::ui::queue::recover(s);
     s.ov.arrange();
     *LAST.lock().expect("layout lock") = encode(s);

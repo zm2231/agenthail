@@ -26,7 +26,7 @@ fn an_added_project_with_one_lead_offers_the_mac_menu() {
     assert_eq!(
         labels(&got),
         vec![
-            vec!["Rename…", "Change Lead…", "Clear Lead"],
+            vec!["Rename…", "New conversation", "Change Lead…", "Clear Lead"],
             vec!["Pin to Front", "Move Earlier", "Move Later"],
             vec!["Keep the Agenthail Tools from Terminal Sessions", "Archive Project…", "Remove…"],
         ]
@@ -38,7 +38,7 @@ fn an_added_project_with_one_lead_offers_the_mac_menu() {
 fn a_project_found_from_sessions_can_be_archived_but_not_renamed_or_removed() {
     let p = record(json!({"id": "implicit:/w/x", "displayName": "x", "checkouts": [here("implicit:/w/x", false)]}));
     let got = labels(&entries(&p, &Arrangement::default(), &ids(&["implicit:/w/x"])));
-    assert_eq!(got, vec![vec!["Set Lead…"], vec!["Pin to Front", "Move Earlier", "Move Later"], vec!["Archive Project…"]]);
+    assert_eq!(got, vec![vec!["New conversation", "Set Lead…"], vec!["Pin to Front", "Move Earlier", "Move Later"], vec!["Archive Project…"]]);
 }
 
 #[test]
@@ -77,6 +77,15 @@ fn checkouts_on_several_computers_are_named_by_host() {
         vec![
             ("Remove on mac…".into(), Item::Remove { project_id: "p1".into(), place: " on mac".into() }),
             ("Remove on forge…".into(), Item::Remove { project_id: "h2::p9".into(), place: " on forge".into() }),
+        ]
+    );
+    let starts: Vec<Item> = entries(&p, &Arrangement::default(), &[]).into_iter().flatten().filter(|e| matches!(e.item, Item::NewConversation { .. })).map(|e| e.item).collect();
+    assert_eq!(
+        starts,
+        vec![
+            Item::NewConversation { host: "".into(), folder: "/w/app".into() },
+            Item::NewConversation { host: "h2".into(), folder: "/home/a/app".into() },
+            Item::NewConversation { host: "h3".into(), folder: "/a".into() },
         ]
     );
     assert_eq!(p.lead_places().len(), 2, "an unreachable computer can't start a lead");
@@ -215,7 +224,7 @@ fn merged_worktrees_offer_remove_check_or_delete_the_ignored_files() {
 #[test]
 fn each_project_action_sends_the_body_its_handler_reads() {
     let ok = r#"{"ok":true,"coordinator":{"name":"lead","projectRoot":"/w/app"},"project":{"displayName":"App"},"created":false,"worktree":{"cleanup":"removed","branch":"x"}}"#;
-    let (client, seen) = daemon(replies(&[(200, ok); 14]));
+    let (client, seen) = daemon(replies(&[(200, ok); 15]));
     let added = client.project_add("/w/app", "", "").unwrap();
     assert_eq!(added.notice(), "App is already a project.");
     client.project_add("/w/app", "App", "h2").unwrap();
@@ -229,6 +238,7 @@ fn each_project_action_sends_the_body_its_handler_reads() {
     client.lead_set("s1", false).unwrap();
     client.lead_set("s1", true).unwrap();
     client.lead_clear("p1").unwrap();
+    client.lead_send("p1", "hi").unwrap();
     assert_eq!(client.work_clean("s1", &[]).unwrap().outcome(), "Removed x.");
     client.work_clean("s1", &ids(&[".env"])).unwrap();
     let want = [
@@ -244,6 +254,7 @@ fn each_project_action_sends_the_body_its_handler_reads() {
         json!({"action": "coordinator-set", "sessionId": "s1"}),
         json!({"action": "coordinator-set", "sessionId": "s1", "replace": true}),
         json!({"action": "coordinator-clear", "projectId": "p1"}),
+        json!({"action": "coordinator-send", "project": "p1", "message": "hi", "author": "person"}),
         json!({"action": "work-clean", "sessionId": "s1"}),
         json!({"action": "work-clean", "sessionId": "s1", "removeIgnored": [".env"]}),
     ];
@@ -306,4 +317,57 @@ fn an_added_project_or_one_with_a_lead_is_listed_before_it_has_sessions() {
     assert_eq!(world.project("p1").unwrap().last_active, "2026-11-26T02:00:00Z");
     assert_eq!(world.record("implicit:/w/x").map(|r| r.name()), Some("x"));
     assert_eq!(world.tile_order.as_ref().map(|t| t.revision), Some(1));
+}
+
+#[test]
+fn a_remote_lead_is_found_under_its_hosts_session_id_and_a_new_one_waits_for_its_first_message() {
+    let world = crate::derive::World::from_json(
+        &json!({"updatedAt": "2026-11-27T02:00:00Z",
+            "sessions": [{"id": "h2::s9", "project": {"id": "p1"}, "lastActive": "2026-11-27T01:00:00Z"}],
+            "projects": [
+                {"id": "p1", "displayName": "Far", "coordinators": [{"name": "far", "surface": "codex", "sessionId": "s9", "host": {"id": "h2", "name": "forge", "state": "connected"}}]},
+                {"id": "p2", "displayName": "New", "coordinators": [{"name": "fresh", "surface": "claude"}]},
+                {"id": "p3", "displayName": "Gone", "coordinators": [{"name": "old", "surface": "claude", "sessionId": "s0"}]},
+            ]})
+        .to_string(),
+    )
+    .unwrap();
+    assert_eq!(world.project("p1").unwrap().lead.as_deref(), Some("h2::s9"));
+    assert_eq!(world.project("p1").unwrap().lead_pending, None);
+    assert_eq!(world.project("p2").unwrap().lead_pending, Some(("Claude".to_string(), "starts with the first message sent to it")));
+    assert_eq!(world.project("p3").unwrap().lead_pending, Some(("Claude".to_string(), "not running · the next message picks it up")));
+    let here = |id: &str, host: Option<Value>| serde_json::from_value::<crate::derive::world::Coordinator>(json!({"sessionId": id, "host": host})).unwrap();
+    assert_eq!(lead_session_id(&here("s1", None)).as_deref(), Some("s1"));
+    assert_eq!(lead_session_id(&here("s1", Some(json!({"id": "h1", "state": "local"})))).as_deref(), Some("s1"));
+    assert_eq!(lead_session_id(&here("h2::s1", Some(json!({"id": "h2", "state": "connected"})))).as_deref(), Some("h2::s1"));
+    assert_eq!(lead_session_id(&here("", None)), None);
+}
+
+#[test]
+fn a_saved_order_survives_a_restart_and_an_unsent_change_goes_out_first() {
+    let mut tiles = Tiles::default();
+    tiles.adopt(Some(&order(&["a", "b"], &[], 2)));
+    tiles.change(&TileChange::Pin("b".into(), true), &ids(&["a", "b"])).unwrap();
+    tiles.answered(TileReply::Failed("offline".into()));
+    let saved = tiles.saved();
+    assert!(saved.unsent);
+    let mut again = Tiles::restore(serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap());
+    assert!(again.arrangement.pinned.contains("b"));
+    assert_eq!(again.adopt(Some(&order(&["a", "b"], &[], 2))), Some(order(&["a", "b"], &["b"], 2)));
+    let mut first = Tiles::restore(Saved { order: ids(&["x"]), pinned: vec![], revision: 0, unsent: false });
+    assert_eq!(first.adopt(Some(&TileOrder::default())), Some(order(&["x"], &[], 0)), "an order kept here goes to a daemon that has none");
+}
+
+#[test]
+fn a_failed_change_is_sent_again_on_the_next_fresh_read_even_when_the_order_is_unchanged() {
+    let mut tiles = Tiles::default();
+    let daemon = order(&["a", "b"], &[], 1);
+    assert_eq!(tiles.poll(Some(&daemon), true), None);
+    tiles.change(&TileChange::Step("b".into(), -1), &ids(&["a", "b"])).unwrap();
+    tiles.answered(TileReply::Failed("timed out".into()));
+    assert_eq!(tiles.poll(Some(&daemon), false), None, "the same read again sends nothing");
+    assert_eq!(tiles.poll(Some(&daemon), true).map(|o| o.order), Some(ids(&["b", "a"])));
+    assert_eq!(tiles.poll(Some(&daemon), true), None, "nothing more while it is out");
+    tiles.answered(TileReply::Saved(order(&["b", "a"], &[], 2)));
+    assert_eq!(tiles.poll(Some(&daemon), true), None, "nothing is left to send");
 }

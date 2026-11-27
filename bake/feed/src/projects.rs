@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::catalog::{Client, RespondError};
-use crate::derive::world::ProjectRecord;
+use crate::derive::world::{Coordinator, ProjectRecord};
 
 type Outcome<T> = std::result::Result<T, RespondError>;
 
@@ -54,6 +54,7 @@ pub struct Checkout {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Item {
+    NewConversation { host: String, folder: String },
     Rename,
     Lead { change: bool },
     ClearLead,
@@ -116,6 +117,9 @@ pub fn entries(p: &ProjectRecord, tiles: &Arrangement, arranged: &[String]) -> V
         lead.push(Entry::on(Item::Rename, "Rename…"));
     }
     if !p.archived {
+        for c in p.checkouts.iter().filter(|c| !c.archived) {
+            lead.push(Entry::on(Item::NewConversation { host: c.host.target().to_string(), folder: c.root_path.clone() }, format!("New conversation{}", p.place(c))));
+        }
         let change = !p.coordinators.is_empty();
         lead.push(Entry::on(Item::Lead { change }, if change { "Change Lead…" } else { "Set Lead…" }));
         if p.coordinators.len() == 1 {
@@ -144,6 +148,26 @@ pub fn entries(p: &ProjectRecord, tiles: &Arrangement, arranged: &[String]) -> V
         keep.push(Entry::on(Item::Remove { project_id: c.project_id.clone(), place: place.clone() }, format!("Remove{place}…")));
     }
     [lead, order, keep].into_iter().filter(|g| !g.is_empty()).collect()
+}
+
+pub fn lead_session_id(c: &Coordinator) -> Option<String> {
+    let id = c.session_id.as_deref().filter(|id| !id.is_empty())?;
+    match &c.host {
+        Some(h) if !h.local() && !id.contains("::") => Some(format!("{}::{id}", h.id)),
+        _ => Some(id.to_string()),
+    }
+}
+
+pub fn lead_note(c: &Coordinator) -> &'static str {
+    if c.session_id.as_deref().is_none_or(str::is_empty) { "starts with the first message sent to it" } else { "not running · the next message picks it up" }
+}
+
+pub fn surface_label(surface: &str) -> String {
+    match surface {
+        "claude" => "Claude".into(),
+        "codex" => "Codex".into(),
+        other => crate::create::capitalized(other),
+    }
 }
 
 pub fn tools_changed(name: &str, on: bool) -> String {
@@ -384,6 +408,18 @@ pub enum TileReply {
     Failed(String),
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+pub struct Saved {
+    #[serde(default)]
+    pub order: Vec<String>,
+    #[serde(default)]
+    pub pinned: Vec<String>,
+    #[serde(default)]
+    pub revision: i64,
+    #[serde(default)]
+    pub unsent: bool,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct Tiles {
     pub arrangement: Arrangement,
@@ -392,17 +428,43 @@ pub struct Tiles {
     heard: bool,
     retried: bool,
     flight: Option<Arrangement>,
+    seen: Option<TileOrder>,
     pub error: Option<String>,
 }
 
 impl Tiles {
+    pub fn restore(saved: Saved) -> Tiles {
+        Tiles { arrangement: Arrangement { order: saved.order, pinned: saved.pinned.into_iter().collect() }, revision: saved.revision, unsent: saved.unsent, ..Tiles::default() }
+    }
+
+    pub fn saved(&self) -> Saved {
+        Saved { order: self.arrangement.order.clone(), pinned: self.arrangement.pinned.iter().cloned().collect(), revision: self.revision, unsent: self.unsent }
+    }
+
+    pub fn unsent(&self) -> bool {
+        self.unsent
+    }
+
+    pub fn heard(&self) -> bool {
+        self.heard
+    }
+
+    pub fn poll(&mut self, remote: Option<&TileOrder>, fresh: bool) -> Option<TileOrder> {
+        let retry = fresh && self.unsent && self.flight.is_none();
+        if remote == self.seen.as_ref() && !retry {
+            return None;
+        }
+        self.seen = remote.cloned();
+        self.adopt(remote)
+    }
+
     pub fn adopt(&mut self, remote: Option<&TileOrder>) -> Option<TileOrder> {
         let remote = remote?;
         self.heard = true;
         if self.flight.is_some() || !(self.unsent || remote.revision >= self.revision) {
             return None;
         }
-        if self.unsent {
+        if self.unsent || remote.revision == 0 && !self.arrangement.order.is_empty() {
             self.revision = remote.revision;
             return self.start();
         }
@@ -524,6 +586,10 @@ impl Client {
             payload["replace"] = json!(true);
         }
         lead(self.action("coordinator-set", payload)?)
+    }
+
+    pub fn lead_send(&self, project: &str, message: &str) -> Outcome<()> {
+        self.action("coordinator-send", json!({"project": project, "message": message, "author": "person"})).map(drop)
     }
 
     pub fn lead_clear(&self, project: &str) -> Outcome<()> {

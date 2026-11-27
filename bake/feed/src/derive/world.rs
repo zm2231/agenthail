@@ -153,6 +153,7 @@ pub struct Project {
     pub name: String,
     pub lead: Option<String>,
     pub lead_name: String,
+    pub lead_pending: Option<(String, &'static str)>,
     pub sessions: Vec<String>,
     pub last_active: String,
 }
@@ -268,12 +269,14 @@ fn projects(records: &[ProjectRecord], sessions: &[Session]) -> Vec<Project> {
         mine.sort_by(|a, b| b.last_active.cmp(&a.last_active));
         let latest = mine.first().map(|s| s.last_active.clone()).unwrap_or_default().max(p.last_active.clone());
         let coord = p.coordinators.first();
-        let lead = coord.and_then(|c| c.session_id.clone()).filter(|id| sessions.iter().any(|s| &s.id == id));
+        let lead = coord.and_then(crate::projects::lead_session_id).filter(|id| sessions.iter().any(|s| &s.id == id));
+        let lead_pending = coord.filter(|_| lead.is_none()).map(|c| (crate::projects::surface_label(&c.surface), crate::projects::lead_note(c)));
         out.push(Project {
             key: p.id.clone(),
             name: p.display_name.clone(),
             lead_name: coord.map(|c| format!("@{}", c.name)).unwrap_or_else(|| "no lead".into()),
             lead,
+            lead_pending,
             last_active: latest,
             sessions: mine.iter().map(|s| s.id.clone()).collect(),
         });
