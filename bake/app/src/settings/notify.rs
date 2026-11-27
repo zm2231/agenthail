@@ -22,12 +22,12 @@ fn desktop(s: &Prefs, status: &NotifyStatus, k: &Kit) -> El {
         buttons = buttons.child(Button::new("Open System Settings…").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).disabled(busy(s)).on_press(|s: &mut Prefs| notify(s, Notify::OpenSettings)).build(k));
     }
     let problem = status.problem().is_some() && !saving(s, Notify::Enable.action());
-    let mut rows = vec![line("Desktop notifications", (!problem).then_some(detail), switch)];
+    let mut rows = vec![line("Desktop notifications", (!problem).then_some(detail), switch, k)];
     if problem {
-        rows.push(parts::problem(status.detail()));
+        rows.push(parts::problem(status.detail(), k));
     }
     rows.push(buttons);
-    section("", rows, Some("Agenthail notifies when an agent finishes or fails, and when a message can't be delivered.".into()))
+    section("", rows, Some("Agenthail notifies when an agent finishes or fails, and when a message can't be delivered.".into()), k)
 }
 
 fn own(permission: Permission, k: &Kit) -> Option<El> {
@@ -37,7 +37,7 @@ fn own(permission: Permission, k: &Kit) -> Option<El> {
     } else {
         row()
     };
-    Some(line(head, Some(how.to_string()), control))
+    Some(line(head, Some(how.to_string()), control, k))
 }
 
 fn preferences(s: &Prefs, list: &[Preference], k: &Kit) -> El {
@@ -50,30 +50,30 @@ fn preferences(s: &Prefs, list: &[Preference], k: &Kit) -> El {
                 let id = id.clone();
                 write(s, format!("preference-{id}"), Section::Notify, &[Read::Preferences], move |c| c.set_notification_preference(&id, !value).map(|_| crate::notify::preference_saved(&id, !value)));
             }, k);
-            line(&p.title, Some(p.detail.clone()), control)
+            line(&p.title, Some(p.detail.clone()), control, k)
         })
         .collect();
-    section("What notifies", rows, None)
+    section("What notifies", rows, None, k)
 }
 
 pub fn page(s: &Prefs, k: &Kit) -> El {
     let mut out = parts::page();
     if let Some(f) = s.notes.get(&Section::Notify) {
-        out = out.child(parts::failure(s, f));
+        out = out.child(parts::failure(s, f, k));
     }
     match &s.settings {
-        None => out = out.child(parts::reading("notification access")),
-        Some(Err(f)) => out = out.child(parts::failure(s, f)),
+        None => out = out.child(parts::reading("notification access", k)),
+        Some(Err(f)) => out = out.child(parts::failure(s, f, k)),
         Some(Ok(st)) => out = out.child(desktop(s, &st.notifications, k)),
     }
     if !std::env::var_os("HOME").is_some_and(|home| daemon_posts(std::path::Path::new(&home)))
         && let Some(note) = s.permission.and_then(|p| own(p, k))
     {
-        out = out.child(section("", vec![note], None));
+        out = out.child(section("", vec![note], None, k));
     }
     match &s.preferences {
-        None => out.child(parts::reading("notification preferences")),
-        Some(Err(f)) => out.child(parts::failure(s, f)),
+        None => out.child(parts::reading("notification preferences", k)),
+        Some(Err(f)) => out.child(parts::failure(s, f, k)),
         Some(Ok(list)) if list.is_empty() => out,
         Some(Ok(list)) => out.child(preferences(s, list, k)),
     }

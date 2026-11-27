@@ -1,3 +1,4 @@
+use rune_kit::Kit;
 use std::collections::HashMap;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::{Duration, Instant};
@@ -144,7 +145,7 @@ pub fn count(s: &App, project: &str) -> i64 {
     s.readies.counts.get(project).and_then(|c| c.ready.as_ref()).map_or(0, |r| r.count)
 }
 
-pub fn link(s: &App, project: &str) -> Option<El> {
+pub fn link(s: &App, project: &str, k: &Kit) -> Option<El> {
     let label = ready_label(count(s, project))?;
     let key = project.to_string();
     Some(
@@ -159,7 +160,7 @@ pub fn link(s: &App, project: &str) -> Option<El> {
                 s.ov.boards.insert(key.clone(), true);
                 crate::over::go(s, Screen::Project(key.clone()));
             })
-            .child(text(label).font(META_BOLD).color(accent())),
+            .child(text(label).font(k.text(META_BOLD)).color(accent())),
     )
 }
 

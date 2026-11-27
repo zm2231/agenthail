@@ -13,8 +13,8 @@ pub(super) fn history(s: &Prefs, k: &Kit) -> El {
         _ => Vec::new(),
     };
     let last = match entries.first() {
-        Some(e) => col().gap(2.0).grow(1.0).min_w(0.0).child(text(e.message.clone()).font(BODY).color(theme::text()).truncate()).child(text(fl::describe(e, now)).font(META).color(muted())),
-        None => col().grow(1.0).child(text("No changes yet").font(BODY).color(muted())),
+        Some(e) => col().gap(2.0).grow(1.0).min_w(0.0).child(text(e.message.clone()).font(k.text(BODY)).color(theme::text()).truncate()).child(text(fl::describe(e, now)).font(k.text(META)).color(muted())),
+        None => col().grow(1.0).child(text("No changes yet").font(k.text(BODY)).color(muted())),
     };
     let busy = writing(s);
     let undo = Button::new("Undo").control_size(ControlSize::Small).disabled(busy || entries.len() < 2).on_press(|s: &mut Prefs| write(s, Change::undo(None))).build(k).key("appearance-undo");
@@ -35,7 +35,7 @@ pub(super) fn history(s: &Prefs, k: &Kit) -> El {
                 .px(14.0)
                 .py(10.0)
                 .key("appearance-reset-confirm")
-                .child(col().grow(1.0).min_w(0.0).gap(2.0).child(text("Reset appearance to the defaults?").font(BODY).color(theme::text())).child(text(message).font(META).color(muted()).wrap()))
+                .child(col().grow(1.0).min_w(0.0).gap(2.0).child(text("Reset appearance to the defaults?").font(k.text(BODY)).color(theme::text())).child(text(message).font(k.text(META)).color(muted()).wrap()))
                 .child(cancel.build(k).key("appearance-reset-cancel"))
                 .child(confirm.build(k).key("appearance-reset-go")),
         );
@@ -50,7 +50,7 @@ pub(super) fn history(s: &Prefs, k: &Kit) -> El {
                 .key("appearance-history-toggle")
                 .role("button")
                 .on_press(|s: &mut Prefs| s.appearance.history_open = !s.appearance.history_open)
-                .child(text(if open { "Hide History" } else { "Show History" }).font(BODY).color(theme::text())),
+                .child(text(if open { "Hide History" } else { "Show History" }).font(k.text(BODY)).color(theme::text())),
         );
         if open {
             for (i, e) in entries.iter().enumerate().skip(1) {
@@ -63,14 +63,14 @@ pub(super) fn history(s: &Prefs, k: &Kit) -> El {
                         .items_center()
                         .px(14.0)
                         .py(6.0)
-                        .child(col().grow(1.0).min_w(0.0).gap(2.0).child(text(e.message.clone()).font(BODY).color(theme::text()).truncate()).child(text(fl::describe(e, now)).font(META).color(muted())))
+                        .child(col().grow(1.0).min_w(0.0).gap(2.0).child(text(e.message.clone()).font(k.text(BODY)).color(theme::text()).truncate()).child(text(fl::describe(e, now)).font(k.text(META)).color(muted())))
                         .child(undo),
                 );
             }
         }
     }
     if let Some(Err(f)) = &s.appearance.history {
-        rows.push(parts::problem(format!("Couldn't read the change history: {}", f.message)));
+        rows.push(parts::problem(format!("Couldn't read the change history: {}", f.message), k));
     }
-    parts::section("", rows, None)
+    parts::section("", rows, None, k)
 }

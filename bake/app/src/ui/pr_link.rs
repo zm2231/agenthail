@@ -152,7 +152,7 @@ pub fn drain(s: &mut App) -> bool {
 fn dialog(s: &App, id: &str, layer: &mut Vec<El>, k: &Kit) {
     let typed = s.prs.text.text.clone();
     let problem = pr_problem(&typed);
-    let input = text_input(&s.prs.text, BODY)
+    let input = text_input(&s.prs.text, k.text(BODY))
         .single_line()
         .key("pr-link-input")
         .label("Pull request")
@@ -165,7 +165,7 @@ fn dialog(s: &App, id: &str, layer: &mut Vec<El>, k: &Kit) {
     let field = row().w_full().px(10.0).py(7.0).radius(8.0).fill(theme::wash()).border(1.0, theme::line()).child(input);
     let mut body = rune::col().w_full().gap(10.0).px(16.0).pb(16.0).child(field);
     if let Some(message) = s.prs.error.clone().or_else(|| (!typed.trim().is_empty()).then_some(problem).flatten().map(String::from)) {
-        body = body.child(text(message).font(META).color(failed()).wrap().w_full());
+        body = body.child(text(message).font(k.text(META)).color(failed()).wrap().w_full());
     }
     let buttons = row()
         .w_full()

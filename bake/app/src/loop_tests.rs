@@ -10,6 +10,9 @@ use serde_json::json;
 use crate::transcript::Pane;
 use crate::{App, Bg, Fixtures, Screen};
 
+#[path = "text_scale_tests.rs"]
+mod text_scale;
+
 const DT: f64 = 1.0 / 60.0;
 const EPOCH: &str = "e1";
 
@@ -733,4 +736,20 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     assert!(rt.state.ov.d.work.contains_key("p1-W1"));
     assert_eq!(highlighted_session(&rt), Some("exporter".into()), "a rebuild that adds a matching row above keeps the highlight");
     assert_eq!(crate::over::worksearch::note(&rt.state, "z-W9"), None);
+}
+
+#[test]
+fn showing_one_surface_opens_every_session_of_it_with_the_search_cleared() {
+    if !isolated("showing_one_surface_opens_every_session_of_it_with_the_search_cleared") {
+        return;
+    }
+    let dir = Dir::new("show-surface");
+    let mut s = app(sessions(&["a"]), &dir);
+    s.ov.sessions_query = rune::TextEdit::new("old search");
+    s.ov.list.scope = 0;
+    s.ov.list.status = Some("idle".into());
+    crate::over::sessions::show_surface(&mut s, "codex");
+    let want = crate::over::listing::request(&s);
+    assert!(matches!(s.screen, Screen::Sessions));
+    assert_eq!((want.scope.as_str(), want.surface.as_deref(), want.query.as_str(), want.status.as_deref()), ("all", Some("codex"), "", Some("idle")), "like the Mac app, the status filter stays");
 }

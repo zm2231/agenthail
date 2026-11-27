@@ -214,13 +214,13 @@ fn meter_row(s: &App, m: &Meter, k: &Kit) -> El {
         .w_full()
         .gap(8.0)
         .items_center()
-        .child(text(m.label.clone()).font(META).color(muted()).w(86.0).truncate())
+        .child(text(m.label.clone()).font(k.text(META)).color(muted()).w(86.0).truncate())
         .child(bar)
-        .child(text(format!("{pct:.0}%")).font(META).color(color).w(36.0))
-        .child(text(resets).font(META).color(faint()).w(110.0))
+        .child(text(format!("{pct:.0}%")).font(k.text(META)).color(color).w(36.0))
+        .child(text(resets).font(k.text(META)).color(faint()).w(110.0))
 }
 
-fn sessions_on(s: &App, set: &Set) -> Vec<El> {
+fn sessions_on(s: &App, set: &Set, k: &Kit) -> Vec<El> {
     s.sessions
         .iter()
         .filter(|x| !x.archived && set.runs(x))
@@ -239,7 +239,7 @@ fn sessions_on(s: &App, set: &Set) -> Vec<El> {
                     select(s, &id);
                 })
                 .child(el().size(6.0, 6.0).radius(3.0).fill(if x.limit(s.now).is_some() { attention() } else { faint() }))
-                .child(text(x.title()).font(META).color(muted()).truncate())
+                .child(text(x.title()).font(k.text(META)).color(muted()).truncate())
         })
         .collect()
 }
@@ -251,26 +251,26 @@ fn account_card(s: &App, set: &Set, k: &Kit) -> El {
         .padding(10.0)
         .radius(8.0)
         .fill(crate::theme::ink(0.04))
-        .child(row().gap(8.0).items_center().child(text(set.title()).font(BODY_BOLD).color(theme::text()).truncate()).child(el().grow(1.0)).child(text(set.host.clone()).font(META).color(faint())));
+        .child(row().gap(8.0).items_center().child(text(set.title()).font(k.text(BODY_BOLD)).color(theme::text()).truncate()).child(el().grow(1.0)).child(text(set.host.clone()).font(k.text(META)).color(faint())));
     c = c.children(set.meters.iter().map(|m| meter_row(s, m, k)));
     if !set.problem.is_empty() {
-        c = c.child(text(set.problem.clone()).font(META).color(attention()).wrap());
+        c = c.child(text(set.problem.clone()).font(k.text(META)).color(attention()).wrap());
     } else if let Some(proxy) = set.via() {
-        c = c.child(text(format!("Runs through the {proxy} proxy; its accounts are below")).font(META).color(muted()));
+        c = c.child(text(format!("Runs through the {proxy} proxy; its accounts are below")).font(k.text(META)).color(muted()));
     } else if set.meters.is_empty() {
-        c = c.child(text("No current reading").font(META).color(faint()));
+        c = c.child(text("No current reading").font(k.text(META)).color(faint()));
     }
-    c.children(sessions_on(s, set))
+    c.children(sessions_on(s, set, k))
 }
 
 fn proxy_account(s: &App, group: &ProxyGroup, a: &ProxyAccount, k: &Kit) -> El {
     let change = |set: Prefer| Change { proxy: group.proxy.id.clone(), account: a.id.clone(), label: a.label.clone(), set, now: false };
-    let mut head = row().gap(8.0).items_center().child(text(a.label.clone()).font(BODY_BOLD).color(theme::text()).truncate());
+    let mut head = row().gap(8.0).items_center().child(text(a.label.clone()).font(k.text(BODY_BOLD)).color(theme::text()).truncate());
     if a.routed {
-        head = head.child(text("in use").font(META).color(done()));
+        head = head.child(text("in use").font(k.text(META)).color(done()));
     }
     if !a.status.is_empty() && a.status != "active" {
-        head = head.child(text(a.status.clone()).font(META).color(attention()));
+        head = head.child(text(a.status.clone()).font(k.text(META)).color(attention()));
     }
     let mut c = col().w_full().gap(6.0).padding(10.0).radius(8.0).fill(crate::theme::ink(0.04)).child(head);
     c = c.children(a.meters.iter().map(|m| meter_row(s, m, k)));
@@ -299,7 +299,7 @@ fn proxy_account(s: &App, group: &ProxyGroup, a: &ProxyAccount, k: &Kit) -> El {
         );
     }
     if let Some(on) = a.set_on.as_ref().filter(|o| !o.is_empty()) {
-        actions = actions.child(text(format!("set on {on}")).font(META).color(faint()));
+        actions = actions.child(text(format!("set on {on}")).font(k.text(META)).color(faint()));
     }
     c.child(actions)
 }
@@ -307,26 +307,26 @@ fn proxy_account(s: &App, group: &ProxyGroup, a: &ProxyAccount, k: &Kit) -> El {
 fn panel(s: &App, layer: &mut Vec<El>, k: &Kit) {
     let mut body = col().w_full().gap(10.0);
     if let Some(error) = &s.accounts.refresh_error {
-        body = body.child(text(format!("Couldn't refresh usage, so these readings may be out of date: {error}")).font(META).color(failed()).wrap());
+        body = body.child(text(format!("Couldn't refresh usage, so these readings may be out of date: {error}")).font(k.text(META)).color(failed()).wrap());
     }
     match &s.accounts.sets {
-        None => body = body.child(text("Reading usage…").font(META).color(muted())),
-        Some(Err(error)) => body = body.child(text(error.clone()).font(META).color(failed()).wrap()),
+        None => body = body.child(text("Reading usage…").font(k.text(META)).color(muted())),
+        Some(Err(error)) => body = body.child(text(error.clone()).font(k.text(META)).color(failed()).wrap()),
         Some(Ok(sets)) => {
             let plain = prefer::accounts(sets);
             if !plain.is_empty() {
-                body = body.child(text("ACCOUNTS").font(LABEL).color(faint())).children(plain.into_iter().map(|set| account_card(s, set, k)));
+                body = body.child(text("ACCOUNTS").font(k.text(LABEL)).color(faint())).children(plain.into_iter().map(|set| account_card(s, set, k)));
             }
             for group in prefer::proxies(sets) {
                 let heading = if group.local { format!("{} PROXY", group.proxy.name.to_uppercase()) } else { format!("{} PROXY · READ FROM {}", group.proxy.name.to_uppercase(), group.host.to_uppercase()) };
-                body = body.child(text(heading).font(LABEL).color(faint()).pt(4.0));
+                body = body.child(text(heading).font(k.text(LABEL)).color(faint()).pt(4.0));
                 body = body.children(group.accounts.iter().map(|a| proxy_account(s, &group, a, k)));
                 if !group.problem.is_empty() {
-                    body = body.child(text(group.problem.clone()).font(META).color(attention()).wrap());
+                    body = body.child(text(group.problem.clone()).font(k.text(META)).color(attention()).wrap());
                 }
             }
             if sets.is_empty() {
-                body = body.child(text("No usage has been read yet.").font(META).color(muted()));
+                body = body.child(text("No usage has been read yet.").font(k.text(META)).color(muted()));
             }
         }
     }
@@ -347,22 +347,22 @@ fn sheet(p: &Planning, layer: &mut Vec<El>, k: &Kit) {
     let mut body = col().w_full().gap(6.0).px(16.0);
     let ready = match &p.plan {
         None => {
-            body = body.child(text("Reading the proxy…").font(META).color(muted()));
+            body = body.child(text("Reading the proxy…").font(k.text(META)).color(muted()));
             false
         }
         Some(Err(error)) => {
-            body = body.child(text(format!("Couldn't preview the change: {error}")).font(META).color(failed()).wrap());
+            body = body.child(text(format!("Couldn't preview the change: {error}")).font(k.text(META)).color(failed()).wrap());
             false
         }
         Some(Ok(plan)) => {
-            body = body.children(plan.change_lines().into_iter().map(|l| text(l).font(META).color(theme::text()).wrap()));
+            body = body.children(plan.change_lines().into_iter().map(|l| text(l).font(k.text(META)).color(theme::text()).wrap()));
             let affects = plan.affect_lines();
             if !affects.is_empty() {
-                body = body.child(text("AFFECTS").font(LABEL).color(faint()).pt(6.0)).children(affects.into_iter().map(|l| text(l).font(META).color(muted()).wrap()));
+                body = body.child(text("AFFECTS").font(k.text(LABEL)).color(faint()).pt(6.0)).children(affects.into_iter().map(|l| text(l).font(k.text(META)).color(muted()).wrap()));
             }
             if plan.changes_anything() {
-                body = body.children(plan.warnings.iter().map(|w| text(w.clone()).font(META).color(attention()).wrap()));
-                body = body.children(plan.confirm.clone().filter(|c| !c.is_empty()).map(|c| text(c).font(META).color(muted()).wrap()));
+                body = body.children(plan.warnings.iter().map(|w| text(w.clone()).font(k.text(META)).color(attention()).wrap()));
+                body = body.children(plan.confirm.clone().filter(|c| !c.is_empty()).map(|c| text(c).font(k.text(META)).color(muted()).wrap()));
             }
             plan.changes_anything()
         }
@@ -373,8 +373,8 @@ fn sheet(p: &Planning, layer: &mut Vec<El>, k: &Kit) {
     }
     if let Some(result) = &p.result {
         body = match result {
-            Ok(message) => body.child(text(message.clone()).font(META).color(done()).wrap()),
-            Err(message) => body.child(text(message.clone()).font(META).color(failed()).wrap()),
+            Ok(message) => body.child(text(message.clone()).font(k.text(META)).color(done()).wrap()),
+            Err(message) => body.child(text(message.clone()).font(k.text(META)).color(failed()).wrap()),
         };
     }
     let finished = matches!(p.result, Some(Ok(_)));

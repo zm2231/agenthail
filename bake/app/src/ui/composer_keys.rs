@@ -28,17 +28,19 @@ pub enum Edit {
     CycleMode,
     Interrupt,
     Stash,
+    SearchHistory,
 }
 
-pub const COMPOSER: [(Edit, &str); 8] = [
-    (Edit::Newline, "ctrl+j"),
-    (Edit::DeleteToLineStart, "ctrl+u"),
-    (Edit::DeleteWordBackward, "ctrl+w"),
-    (Edit::Paste, "ctrl+v"),
-    (Edit::SendNow, "ctrl+enter"),
-    (Edit::CycleMode, "shift+tab"),
-    (Edit::Interrupt, "escape"),
-    (Edit::Stash, "ctrl+s"),
+pub const COMPOSER: [(Edit, &str); 9] = [
+    (Edit::Newline, "composerNewline"),
+    (Edit::DeleteToLineStart, "composerDeleteToLineStart"),
+    (Edit::DeleteWordBackward, "composerDeleteWordBackward"),
+    (Edit::Paste, "composerPaste"),
+    (Edit::SendNow, "composerSendNow"),
+    (Edit::CycleMode, "composerCycleMode"),
+    (Edit::Interrupt, "composerInterrupt"),
+    (Edit::Stash, "composerStash"),
+    (Edit::SearchHistory, "composerSearchHistory"),
 ];
 
 #[derive(Default)]
@@ -77,7 +79,7 @@ impl State {
 }
 
 pub fn find(matches: impl Fn(&Chord) -> bool) -> Option<Edit> {
-    COMPOSER.iter().find(|(_, spec)| matches(&Chord::parse(spec).expect("a built-in shortcut parses"))).map(|(edit, _)| *edit)
+    COMPOSER.iter().find(|(_, id)| super::bindings::chord(id).is_some_and(|c| matches(&c))).map(|(edit, _)| *edit)
 }
 
 pub fn key(s: &mut App, x: &Session, ev: &KeyEvent, tx: &mut Tx) -> bool {
@@ -98,6 +100,7 @@ pub fn key(s: &mut App, x: &Session, ev: &KeyEvent, tx: &mut Tx) -> bool {
         Edit::CycleMode => return cycle_mode(s, id),
         Edit::Interrupt => interrupt(s, id),
         Edit::Stash => return stash(s, id),
+        Edit::SearchHistory => super::complete::open_search(s, id),
     }
     true
 }
@@ -189,6 +192,8 @@ mod tests {
         assert_eq!(press(Key::Tab, Mods { shift: true, ..Mods::default() }), Some(Edit::CycleMode));
         assert_eq!(press(Key::Escape, Mods::default()), Some(Edit::Interrupt));
         assert_eq!(press(Key::Text("s".into()), CTRL), Some(Edit::Stash));
+        assert_eq!(press(Key::Text("r".into()), CTRL), Some(Edit::SearchHistory));
+        assert_eq!(press(Key::Command('r'), CTRL), Some(Edit::SearchHistory));
     }
 
     #[test]
@@ -199,7 +204,6 @@ mod tests {
         assert_eq!(press(Key::Tab, Mods::default()), None, "Tab completes");
         assert_eq!(press(Key::Text("a".into()), CTRL), None, "Control-A stays the field's");
         assert_eq!(press(Key::Text("k".into()), CTRL), None, "Control-K stays the field's");
-        assert_eq!(press(Key::Text("r".into()), CTRL), None, "Control-R searches what was sent");
         assert_eq!(press(Key::Escape, Mods { shift: true, ..Mods::default() }), None);
     }
 

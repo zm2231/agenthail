@@ -16,6 +16,7 @@ use crate::{App, Screen};
 pub enum Asked {
     TakeBack(Queued),
     Answer { session: String, ask: String },
+    ShowSurface(String),
 }
 
 thread_local! {
@@ -108,6 +109,7 @@ fn take_asked(s: &mut App) -> bool {
                 let id = feed::composer::current(&s.rekeyed, session).to_string();
                 answer(s, &id, ask);
             }
+            Asked::ShowSurface(surface) => crate::over::sessions::show_surface(s, surface),
         }
     }
     !list.is_empty()
@@ -169,13 +171,13 @@ fn queued_row(s: &App, x: &Session, item: &Queued, k: &Kit) -> El {
         .radius(10.0)
         .fill(if problem { attention().alpha(0.08) } else { theme::ink(0.03) })
         .border(1.0, if problem { attention().alpha(0.35) } else { theme::ink(0.07) })
-        .child(row().w_full().gap(8.0).items_center().child(text(title).font(META_BOLD).color(theme::text()).truncate().grow(1.0).min_w(0.0)).child(text(item.status_label()).font(META).color(tone)))
-        .child(text(item.headline()).font(META).color(muted()).truncate())
-        .child(text(if working { "Working…".to_string() } else { item.summary(s.now) }).font(META).color(tone).wrap().max_lines(3))
+        .child(row().w_full().gap(8.0).items_center().child(text(title).font(k.text(META_BOLD)).color(theme::text()).truncate().grow(1.0).min_w(0.0)).child(text(item.status_label()).font(k.text(META)).color(tone)))
+        .child(text(item.headline()).font(k.text(META)).color(muted()).truncate())
+        .child(text(if working { "Working…".to_string() } else { item.summary(s.now) }).font(k.text(META)).color(tone).wrap().max_lines(3))
         .child(actions)
 }
 
-fn history_row(s: &App, e: &Entry) -> El {
+fn history_row(s: &App, e: &Entry, k: &Kit) -> El {
     let failed_row = e.is_error();
     let open = s.delivery.expanded.contains(&e.id);
     let id = e.id;
@@ -188,8 +190,8 @@ fn history_row(s: &App, e: &Entry) -> El {
                 s.delivery.expanded.insert(id);
             }
         })
-        .child(icon(if open { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, 11.0).color(accent()))
-        .child(text(if open { "Hide details" } else { "View details" }.to_string()).font(META).color(accent()));
+        .child(icon(if open { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, k.text_size(11.0)).color(accent()))
+        .child(text(if open { "Hide details" } else { "View details" }.to_string()).font(k.text(META)).color(accent()));
     let mut c = col()
         .key(format!("delivery-h-{id}"))
         .w_full()
@@ -201,19 +203,19 @@ fn history_row(s: &App, e: &Entry) -> El {
                 .gap(8.0)
                 .items_center()
                 .child(el().size(6.0, 6.0).radius(3.0).fill(if failed_row { failed() } else { faint() }))
-                .child(text(e.heading()).font(META_BOLD).color(theme::text()).truncate().grow(1.0).min_w(0.0))
-                .child(text(feed::catalog::ago(&e.created_at, s.now)).font(META).color(faint())),
+                .child(text(e.heading()).font(k.text(META_BOLD)).color(theme::text()).truncate().grow(1.0).min_w(0.0))
+                .child(text(feed::catalog::ago(&e.created_at, s.now)).font(k.text(META)).color(faint())),
         )
-        .child(text(e.route()).font(META).color(muted()).truncate())
+        .child(text(e.route()).font(k.text(META)).color(muted()).truncate())
         .child(toggle);
     if open {
-        c = c.child(text(e.content().to_string()).font(BODY).color(if failed_row { failed() } else { theme::text() }).wrap_anywhere().max_lines(20));
+        c = c.child(text(e.content().to_string()).font(k.text(BODY)).color(if failed_row { failed() } else { theme::text() }).wrap_anywhere().max_lines(20));
     }
     c
 }
 
-fn caption(label: &str) -> El {
-    text(label.to_uppercase()).font(crate::theme::LABEL).color(faint()).pt(4.0)
+fn caption(label: &str, k: &Kit) -> El {
+    text(label.to_uppercase()).font(k.text(crate::theme::LABEL)).color(faint()).pt(4.0)
 }
 
 pub(crate) fn section(s: &App, x: &Session, k: &Kit) -> Option<El> {
@@ -224,17 +226,17 @@ pub(crate) fn section(s: &App, x: &Session, k: &Kit) -> Option<El> {
     let queued = s.queue.get(&x.id).map(|rows| undelivered(rows, &s.rekeyed, &x.id)).unwrap_or_default();
     let history: &[Entry] = s.delivery.history.as_ref().and_then(|r| r.as_ref().ok()).map(Vec::as_slice).unwrap_or_default();
     if !queued.is_empty() {
-        body = body.child(caption("Undelivered")).children(queued.iter().map(|q| queued_row(s, x, q, k)));
+        body = body.child(caption("Undelivered", k)).children(queued.iter().map(|q| queued_row(s, x, q, k)));
     }
     let queue_failed = s.queue_note.get(&x.id).filter(|n| n.starts_with(feed::queue::READ_FAILED));
     for problem in queue_failed.into_iter().chain(s.delivery.history.as_ref().and_then(|r| r.as_ref().err())) {
-        body = body.child(text(problem.clone()).font(META).color(attention()).wrap());
+        body = body.child(text(problem.clone()).font(k.text(META)).color(attention()).wrap());
     }
     match &s.delivery.history {
-        None => body = body.child(text("Loading…".to_string()).font(META).color(faint())),
-        Some(Ok(_)) if queued.is_empty() && history.is_empty() && queue_failed.is_none() => body = body.child(text("No deliveries for this session yet.".to_string()).font(META).color(muted())),
-        _ if !history.is_empty() => body = body.child(caption("Recent")).children(history.iter().map(|e| history_row(s, e))),
+        None => body = body.child(text("Loading…".to_string()).font(k.text(META)).color(faint())),
+        Some(Ok(_)) if queued.is_empty() && history.is_empty() && queue_failed.is_none() => body = body.child(text("No deliveries for this session yet.".to_string()).font(k.text(META)).color(muted())),
+        _ if !history.is_empty() => body = body.child(caption("Recent", k)).children(history.iter().map(|e| history_row(s, e, k))),
         _ => {}
     }
-    Some(rail_section("Delivery", &icons::INBOX, body))
+    Some(rail_section("Delivery", &icons::INBOX, body, k))
 }

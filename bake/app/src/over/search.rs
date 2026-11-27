@@ -44,9 +44,13 @@ pub fn open_pinned(s: &mut App, row: Session) {
     crate::over::open_session(s, &id);
 }
 
+pub fn pin_read(s: &mut App, row: Session) {
+    s.ov.search.pins.pin_read(row);
+}
+
 pub fn open_read(s: &mut App, row: Session) {
     let id = row.id.clone();
-    s.ov.search.pins.pin_read(row);
+    pin_read(s, row);
     crate::over::open_session(s, &id);
 }
 
