@@ -194,6 +194,12 @@ pub struct Daemon {
     pub host: Option<Host>,
     #[serde(default)]
     pub hosts: Option<Vec<Host>>,
+    #[serde(default)]
+    pub running: bool,
+    #[serde(default)]
+    pub stale: Option<bool>,
+    #[serde(default, rename = "refreshError")]
+    pub refresh_error: Option<String>,
 }
 
 pub const NO_HOSTS: &str = "No other hosts are paired. Run agenthail hosts invite on the other host, then agenthail hosts add here.";
