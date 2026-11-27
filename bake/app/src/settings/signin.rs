@@ -70,17 +70,17 @@ fn consumer_row(s: &Prefs, data: &Signin, i: usize, c: &Consumer, layer: &mut Ve
     let id = c.id.clone();
     let picker = match CONSUMER_KEYS.get(i) {
         Some(key) => parts::select(s, key, &c.label, data.choices(), &c.choice(), busy(s) || s.client.is_none(), layer, move |s, choice| bind(s, id.clone(), choice), k),
-        None => text(c.choice()).font(META).color(muted()),
+        None => text(c.choice()).font(k.text(META)).color(muted()),
     };
-    let mut words = col().gap(3.0).grow(1.0).min_w(0.0).child(text(c.label.clone()).font(BODY).color(theme::text())).child(text(c.resolved()).font(META).color(theme::text()).wrap());
+    let mut words = col().gap(3.0).grow(1.0).min_w(0.0).child(text(c.label.clone()).font(k.text(BODY)).color(theme::text())).child(text(c.resolved()).font(k.text(META)).color(theme::text()).wrap());
     if let Some(p) = c.problem.clone().filter(|p| !p.is_empty()) {
-        words = words.child(text(p).font(META).color(failed()).wrap());
+        words = words.child(text(p).font(k.text(META)).color(failed()).wrap());
     }
     if let Some(u) = c.unavailable.clone().filter(|u| !u.is_empty()) {
-        words = words.child(text(u).font(META).color(muted()).wrap());
+        words = words.child(text(u).font(k.text(META)).color(muted()).wrap());
     }
     if !c.purpose.is_empty() {
-        words = words.child(text(c.purpose.clone()).font(META).color(muted()).wrap());
+        words = words.child(text(c.purpose.clone()).font(k.text(META)).color(muted()).wrap());
     }
     row().w_full().gap(16.0).items_start().px(14.0).py(10.0).child(words).child(picker)
 }
@@ -88,7 +88,7 @@ fn consumer_row(s: &Prefs, data: &Signin, i: usize, c: &Consumer, layer: &mut Ve
 fn pinned(s: &Prefs, data: &Signin, k: &Kit) -> El {
     let mut rows = Vec::new();
     if data.profiles.is_empty() {
-        rows.push(parts::words(si::NO_PROFILES));
+        rows.push(parts::words(si::NO_PROFILES, k));
     }
     for p in &data.profiles {
         let id = p.id.clone();
@@ -99,30 +99,30 @@ fn pinned(s: &Prefs, data: &Signin, k: &Kit) -> El {
             .on_press(move |s: &mut Prefs| remove(s, id.clone()))
             .build(k)
             .key(format!("settings-signin-remove-{}", p.id));
-        rows.push(line(&p.label, Some(data.pinned_detail(p)), button));
+        rows.push(line(&p.label, Some(data.pinned_detail(p)), button, k));
     }
-    section("Pinned profiles", rows, None)
+    section("Pinned profiles", rows, None, k)
 }
 
 fn adder(s: &Prefs, data: &Signin, layer: &mut Vec<El>, k: &Kit) -> El {
     let mut rows = Vec::new();
     let browsers = data.addable_browsers();
     if browsers.is_empty() {
-        rows.push(parts::words(si::ALL_ADDED));
+        rows.push(parts::words(si::ALL_ADDED, k));
     } else {
         let disabled = busy(s) || s.client.is_none();
         let browser_choices = browsers.iter().map(|b| (b.label.clone(), b.browser.clone())).collect();
-        rows.push(line("Browser", None, parts::select(s, "signin-browser", "Browser", browser_choices, &s.signin.browser, disabled, layer, pick_browser, k)));
+        rows.push(line("Browser", None, parts::select(s, "signin-browser", "Browser", browser_choices, &s.signin.browser, disabled, layer, pick_browser, k), k));
         let profiles = browsers.iter().find(|b| b.browser == s.signin.browser).map(|b| b.addable().into_iter().map(|p| (p.choice_label(), p.profile.clone())).collect()).unwrap_or_default();
-        rows.push(line("Profile", None, parts::select(s, "signin-profile", "Profile", profiles, &s.signin.profile, disabled, layer, |s, p| s.signin.profile = p, k)));
+        rows.push(line("Profile", None, parts::select(s, "signin-profile", "Profile", profiles, &s.signin.profile, disabled, layer, |s, p| s.signin.profile = p, k), k));
         let input = TextInput::new(&s.signin.label).label("Label (optional)").placeholder("Label (optional)").width(None).disabled(disabled).on_edit(|s: &mut Prefs| &mut s.signin.label).on_submit(|s: &mut Prefs, _: &mut Tx| add(s)).build(k);
         let button = Button::new("Add Profile").control_size(ControlSize::Small).disabled(disabled || !data.can_add(&s.signin.browser, &s.signin.profile)).on_press(add).build(k).key("settings-signin-add");
         rows.push(col().w_full().gap(10.0).px(14.0).py(12.0).child(input).child(row().child(button)));
     }
     for b in data.unavailable_browsers() {
-        rows.push(parts::words(b.unavailable_line()));
+        rows.push(parts::words(b.unavailable_line(), k));
     }
-    section("Add a browser profile", rows, None)
+    section("Add a browser profile", rows, None, k)
 }
 
 pub fn show(s: &mut Prefs) {
@@ -150,17 +150,17 @@ pub fn pages(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
 }
 
 fn page(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
-    let mut out = parts::page().child(section("", vec![parts::words(si::ABOUT)], None));
+    let mut out = parts::page().child(section("", vec![parts::words(si::ABOUT, k)], None, k));
     match &s.signin.data {
-        None => out = out.child(parts::reading("browser sign-in")),
-        Some(Err(f)) => out = out.child(parts::failure(s, f)),
+        None => out = out.child(parts::reading("browser sign-in", k)),
+        Some(Err(f)) => out = out.child(parts::failure(s, f, k)),
         Some(Ok(data)) => {
             let rows = data.consumers.iter().enumerate().map(|(i, c)| consumer_row(s, data, i, c, layer, k)).collect();
-            out = out.child(section("Used by", rows, None)).child(pinned(s, data, k)).child(adder(s, data, layer, k));
+            out = out.child(section("Used by", rows, None, k)).child(pinned(s, data, k)).child(adder(s, data, layer, k));
         }
     }
     if let Some(f) = s.notes.get(&Section::Signin) {
-        out = out.child(parts::failure(s, f));
+        out = out.child(parts::failure(s, f, k));
     }
     out
 }

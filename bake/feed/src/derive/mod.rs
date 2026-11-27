@@ -25,7 +25,7 @@ pub use jump::Hit;
 pub use needs::{GROUPS, Group, Need, NeedKind, Target};
 pub use phase::{PHASES, phase};
 pub use proof::Proof;
-pub use world::{Entry, Project, Recorded, Rows, Work, World};
+pub use world::{Entry, Project, Recorded, Rows, Work, WorkKey, World};
 
 #[cfg(test)]
 mod fixture_tests;

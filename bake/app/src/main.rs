@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use feed::catalog::{Client, OpenRequest, Session, WorkItem};
 use feed::composer::{Busy, Delivered, Drafts, Unconfirmed, Unsent};
-use feed::derive::Recorded;
+use feed::derive::{Recorded, WorkKey};
 use feed::derive::live::{Fetched, Ledger, Overview};
 use feed::derive::tails::{self, Tail};
 use feed::source::{Live, Message};
@@ -45,7 +45,7 @@ pub enum Bg {
     SessionNews,
     SessionsMoved,
     Removed(Vec<feed::watch::Removal>),
-    Item(String, WorkItem),
+    Item(WorkKey, WorkItem),
     Overview(Box<Fetched>),
     Ledger(String, std::time::Instant, Result<Ledger, String>),
     Tail(String, String, Result<Tail, String>),
@@ -91,7 +91,7 @@ pub enum Screen {
     Now,
     Session,
     Project(String),
-    Work(String),
+    Work(WorkKey),
     Sessions,
     Extensions,
     Extension(String),
@@ -137,7 +137,7 @@ pub struct App {
     pub busy_default: Option<Busy>,
     pub busy_pick: HashMap<String, Busy>,
     pub rekeyed: HashMap<String, String>,
-    pub items: HashMap<String, WorkItem>,
+    pub items: HashMap<WorkKey, WorkItem>,
     pub requests: HashMap<String, Vec<OpenRequest>>,
     pub answering: Option<String>,
     pub settled: HashMap<String, Option<std::time::Instant>>,
@@ -148,7 +148,7 @@ pub struct App {
     pub asks: ui::waiting::Asks,
     pub requests_at: HashMap<String, std::time::Instant>,
     pub tab: Tab,
-    pub work_pick: HashMap<String, String>,
+    pub work_pick: HashMap<String, WorkKey>,
     pub diff: rune_kit::diff::DiffState,
     pub diff_key: (String, usize),
     pub ov: Over,
@@ -465,8 +465,8 @@ pub fn select(s: &mut App, id: &str) {
     ui::tabs::shown(s, id);
     s.composer.focused = true;
     load_pane(s, id);
-    if let Some(work) = session(s, id).and_then(|x| x.primary_work(s.work_pick.get(id).map(String::as_str)).cloned()) {
-        fetch_item(s, &work.project_key, &work.item_id);
+    if let Some(work) = session(s, id).and_then(|x| x.primary_work(s.work_pick.get(id)).cloned()) {
+        fetch_item(s, &work.key());
     }
     fetch_requests(s, id);
     ui::session_menu::load(s, id);
@@ -506,8 +506,10 @@ pub fn load_pane(s: &mut App, id: &str) {
 }
 
 fn rebuild(s: &mut App) {
-    let panes: Vec<(&str, &[feed::Item])> = s.panes.iter().map(|(id, p)| (id.as_str(), p.transcript.items())).collect();
-    s.ov.rebuild(&panes);
+    over::jump::keep_highlight(s, |s| {
+        let panes: Vec<(&str, &[feed::Item])> = s.panes.iter().map(|(id, p)| (id.as_str(), p.transcript.items())).collect();
+        s.ov.rebuild(&panes);
+    });
     settings::sessions_changed(&s.sessions, s.ov.needs.len());
     s.panes_moved = false;
     s.built_at = s.clock;
@@ -543,8 +545,8 @@ fn selected_changed(s: &mut App, id: &str) {
     }
     ui::subagents::refresh(s, id);
     ui::native_queue::changed(s, id);
-    if let Some(work) = session(s, id).and_then(|x| x.primary_work(s.work_pick.get(id).map(String::as_str)).cloned()) {
-        fetch_item(s, &work.project_key, &work.item_id);
+    if let Some(work) = session(s, id).and_then(|x| x.primary_work(s.work_pick.get(id)).cloned()) {
+        fetch_item(s, &work.key());
     }
 }
 
@@ -681,11 +683,11 @@ fn settle_request(s: &mut App, request: &str, run: impl FnOnce(&Client, &str, &s
     });
 }
 
-pub fn pick_work(s: &mut App, item: &str) {
+pub fn pick_work(s: &mut App, item: &WorkKey) {
     let Some(id) = s.selected.clone() else { return };
-    s.work_pick.insert(id.clone(), item.to_string());
-    if let Some(work) = session(s, &id).and_then(|x| x.held_work.iter().find(|w| w.item_id == item).cloned()) {
-        fetch_item(s, &work.project_key, &work.item_id);
+    s.work_pick.insert(id.clone(), item.clone());
+    if session(s, &id).is_some_and(|x| x.held_work.iter().any(|w| w.key() == *item)) {
+        fetch_item(s, item);
     }
 }
 
@@ -723,22 +725,22 @@ pub fn send_text(s: &mut App, message: String, tx: &mut Tx) {
     send(s, tx);
 }
 
-fn fetch_item(s: &mut App, project: &str, item: &str) {
-    if s.items.contains_key(item) {
+fn fetch_item(s: &mut App, key: &WorkKey) {
+    if s.items.contains_key(key) {
         return;
     }
     if let Some(f) = &s.fixtures {
-        if let Ok(text) = std::fs::read_to_string(format!("{}/items/{item}.json", f.dir)) {
+        if let Ok(text) = std::fs::read_to_string(format!("{}/items/{}.json", f.dir, key.id)) {
             if let Ok(value) = serde_json::from_str(&text) {
-                s.items.insert(item.to_string(), value);
+                s.items.insert(key.clone(), value);
             }
         }
         return;
     }
     if let Some(client) = s.client.clone() {
-        let (tx, project, item) = (s.outbox.clone(), project.to_string(), item.to_string());
+        let (tx, item) = (s.outbox.clone(), key.clone());
         std::thread::spawn(move || {
-            if let Ok(work) = client.work_item(&project, &item) {
+            if let Ok(work) = client.work_item(&item.ledger, &item.id) {
                 let _ = tx.send(Bg::Item(item, work));
             }
         });
@@ -1349,10 +1351,12 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
             Bg::Reopened => reopened(s),
             Bg::LedgerChanged(key, at) => {
                 ui::ready::ledger_changed(s, &key);
+                over::worksearch::ledger_changed(s, Some(&key));
                 ask_overview(s, Ask::Ledger(key, at));
             }
             Bg::LedgersReopened => {
                 ui::ready::reopened(s);
+                over::worksearch::ledger_changed(s, None);
                 ask_overview(s, Ask::Reopened);
             }
             Bg::SessionNews => {
@@ -1552,6 +1556,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= over::inbox::drain(s);
     changed |= over::work::drain(s);
     changed |= over::search::drain(s);
+    changed |= over::worksearch::drain(s);
     changed |= notify::tick(s);
     changed |= ui::gone::watch(s);
     changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s) | ui::inspect::drain(s);
@@ -1583,6 +1588,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     menubar::sync_keys(s);
     menubar::warn(s);
     menubar::badge(s);
+    if let Some(due) = over::worksearch::wait(s) {
+        s.wake.after(tx, due);
+    }
     s.wake.after(tx, Duration::from_millis(if busy { 16 } else { 250 }));
     changed
 }

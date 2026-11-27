@@ -42,7 +42,7 @@ pub(super) fn tile(name: &str, key: String, fill: El, selected: bool, press: imp
         .checked(selected)
         .on_press_tx(press)
         .child(el().w_full().h(56.0).radius(10.0).padding(2.0).border(border.0, border.1).child(fill.w_full().h_full().radius(7.0)))
-        .child(text(name.to_string()).font(if selected { META_BOLD } else { META }).color(if selected { theme::text() } else { muted() }).truncate())
+        .child(text(name.to_string()).font(k.text(if selected { META_BOLD } else { META })).color(if selected { theme::text() } else { muted() }).truncate())
 }
 
 pub(super) fn grid(s: &Prefs, view: &View, k: &Kit) -> El {
@@ -75,13 +75,13 @@ pub(super) fn grid(s: &Prefs, view: &View, k: &Kit) -> El {
     }, k));
     let preset = presets.iter().any(|p| p.value == current);
     let custom = current.starts_with("mesh:") || current.starts_with("gradient:") && !preset;
-    let custom_fill = if custom { swatch_fill(s, &current) } else { el().fill(theme::wash()).center().child(text("Make…").font(META).color(muted())) };
+    let custom_fill = if custom { swatch_fill(s, &current) } else { el().fill(theme::wash()).center().child(text("Make…").font(k.text(META)).color(muted())) };
     tiles.push(tile("Custom…", "appearance-bg-custom".into(), custom_fill, custom, |s: &mut Prefs, _| {
         if !writing(s) {
             super::custom::open_mesh(s);
         }
     }, k));
-    let image_fill = if current.starts_with("image:") { swatch_fill(s, &current) } else { el().fill(theme::wash()).center().child(text("Choose…").font(META).color(muted())) };
+    let image_fill = if current.starts_with("image:") { swatch_fill(s, &current) } else { el().fill(theme::wash()).center().child(text("Choose…").font(k.text(META)).color(muted())) };
     tiles.push(tile("Image…", "appearance-bg-image".into(), image_fill, current.starts_with("image:"), super::choose_image, k));
     let mut grid = col().w_full().gap(12.0).px(14.0).py(12.0).key("appearance-backgrounds");
     let mut it = tiles.into_iter().peekable();
@@ -93,10 +93,10 @@ pub(super) fn grid(s: &Prefs, view: &View, k: &Kit) -> El {
         grid = grid.child(r);
     }
     if matches!(s.appearance.presets, None) {
-        grid = grid.child(text("Reading the built-in backgrounds…").font(META).color(muted()));
+        grid = grid.child(text("Reading the built-in backgrounds…").font(k.text(META)).color(muted()));
     }
     if let Some(Err(f)) = &s.appearance.presets {
-        grid = grid.child(text(format!("Couldn't read the built-in backgrounds: {}", f.message)).font(META).color(theme::failed()).wrap());
+        grid = grid.child(text(format!("Couldn't read the built-in backgrounds: {}", f.message)).font(k.text(META)).color(theme::failed()).wrap());
     }
     grid
 }

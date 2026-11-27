@@ -19,7 +19,7 @@ fn menu_key(item: &str) -> String {
 
 fn item_row(item: &nq::Submission, can_write: bool, busy: bool, k: &Kit) -> El {
     let shown = item.shown_text();
-    let mut r = row().key(format!("codex-queue-row-{}", item.id)).w_full().gap(6.0).items_start().child(text(shown.clone()).font(META).color(theme::text()).wrap_anywhere().max_lines(3).grow(1.0).min_w(0.0).help(shown));
+    let mut r = row().key(format!("codex-queue-row-{}", item.id)).w_full().gap(6.0).items_start().child(text(shown.clone()).font(k.text(META)).color(theme::text()).wrap_anywhere().max_lines(3).grow(1.0).min_w(0.0).help(shown));
     if can_write {
         let id = item.id.clone();
         let more = IconButton::new(&icons::MORE)
@@ -53,22 +53,22 @@ pub(crate) fn section(s: &App, x: &Session, k: &Kit) -> Option<El> {
         .on_press(move |s: &mut App| reload(s, &reload_id))
         .build(k)
         .key("codex-queue-reload");
-    let trailing: Vec<El> = busy.then(|| text("Working…").font(META).color(faint())).into_iter().chain([reload]).collect();
-    let section = |body: El| rail_section_with(nq::TITLE, &icons::INBOX, trailing, body);
+    let trailing: Vec<El> = busy.then(|| text("Working…").font(k.text(META)).color(faint())).into_iter().chain([reload]).collect();
+    let section = |body: El| rail_section_with(nq::TITLE, &icons::INBOX, trailing, body, k);
     let mut body = col().w_full().gap(8.0);
     if !current {
-        return Some(section(body.child(text(nq::LOADING).font(META).color(muted()))));
+        return Some(section(body.child(text(nq::LOADING).font(k.text(META)).color(muted()))));
     }
     if q.loaded && q.items.is_empty() {
-        body = body.child(text(nq::EMPTY).font(META).color(muted()));
+        body = body.child(text(nq::EMPTY).font(k.text(META)).color(muted()));
     } else if !q.loaded && let Some(error) = &q.error {
-        body = body.child(text(nq::UNAVAILABLE).font(META).color(muted()).wrap().help(error.clone()));
+        body = body.child(text(nq::UNAVAILABLE).font(k.text(META)).color(muted()).wrap().help(error.clone()));
     } else if !q.loaded {
-        body = body.child(text(nq::LOADING).font(META).color(muted()));
+        body = body.child(text(nq::LOADING).font(k.text(META)).color(muted()));
     }
     body = body.children(q.items.iter().map(|i| item_row(i, can_write, busy, k)));
     if q.next_cursor.is_some() {
-        let load = text("Load more").font(META).color(if busy { faint() } else { accent() }).key("codex-queue-more");
+        let load = text("Load more").font(k.text(META)).color(if busy { faint() } else { accent() }).key("codex-queue-more");
         body = body.child(if busy { load } else { load.on_press(|s: &mut App| fetch(s, true)) });
     }
     if can_write && q.loaded {
@@ -82,7 +82,7 @@ pub(crate) fn section(s: &App, x: &Session, k: &Kit) -> Option<El> {
         body = body.child(buttons);
     }
     if q.loaded && let Some(error) = &q.error {
-        body = body.child(text(error.clone()).font(META).color(failed()).wrap_anywhere());
+        body = body.child(text(error.clone()).font(k.text(META)).color(failed()).wrap_anywhere());
     }
     Some(section(body))
 }
@@ -122,11 +122,11 @@ fn row_menu(s: &App, item_id: &str, layer: &mut Vec<El>, k: &Kit) {
 fn editor(e: &Editor, layer: &mut Vec<El>, k: &Kit) {
     let saving = e.saving.is_some();
     let ok = !saving && nq::can_save(&e.original, &e.text.text);
-    let input = text_input(&e.text, BODY).key("codex-queue-editor-input").grow(1.0).min_w(0.0).min_h(100.0).color(theme::text()).label("Queued input").on_edit(|s: &mut App| &mut s.native_queue.editor.as_mut().expect("queue editor is open").text);
+    let input = text_input(&e.text, k.text(BODY)).key("codex-queue-editor-input").grow(1.0).min_w(0.0).min_h(100.0).color(theme::text()).label("Queued input").on_edit(|s: &mut App| &mut s.native_queue.editor.as_mut().expect("queue editor is open").text);
     let field = row().w_full().px(10.0).py(7.0).radius(8.0).fill(wash()).border(1.0, theme::line()).child(input);
-    let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0).child(text(nq::EDITOR_NOTE).font(META).color(muted()).wrap()).child(field);
+    let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0).child(text(nq::EDITOR_NOTE).font(k.text(META)).color(muted()).wrap()).child(field);
     if let Some(error) = &e.error {
-        body = body.child(text(error.clone()).font(META).color(failed()).wrap_anywhere());
+        body = body.child(text(error.clone()).font(k.text(META)).color(failed()).wrap_anywhere());
     }
     let save = if saving { "Saving…" } else if e.item.is_none() { "Add" } else { "Save" };
     let buttons = row()

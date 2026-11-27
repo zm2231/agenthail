@@ -8,12 +8,11 @@ use feed::catalog::Client;
 use feed::watch::Reconnect;
 use feed::look::{self as fl, Fit, Look, Rgb, Tint, View, Wallpaper};
 use rune::{Color, Cx, El, Pixels, PixelsWrap, SystemMaterial, Tx, el};
-use rune_kit::{Kit, KitEnv, KitTheme};
+use rune_kit::{Kit, KitCx, KitEnv, KitTheme, TextRoles, TextScale};
 
 use crate::theme::{self, Paint};
 
 const SAMPLE_SIDE: u32 = 512;
-const MIN_LAYOUT: (f32, f32) = (1440.0, 900.0);
 const SIGN_IN_WAIT: Duration = Duration::from_secs(10);
 const FIRST_READ_RETRY: Duration = Duration::from_secs(10);
 
@@ -53,7 +52,7 @@ struct State {
     seen_settings: u64,
     increased: bool,
     screen: u32,
-    zoom: f32,
+    text: TextScale,
     held_scale: Option<f32>,
 }
 
@@ -460,11 +459,11 @@ fn accented(k: &mut Kit, a: Color) {
     k.c.border_focus = a;
 }
 
-pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool, zoom: bool) -> theme::Themes {
+pub fn frame<S, R>(cx: &mut Cx<S>, session: bool, glass: bool, build: impl FnOnce(&mut Cx<S>, &theme::Themes) -> R) -> R {
     let system_dark = cx.system_dark();
     let system_accent = srgb(cx.accent());
     let increased = cx.system_increased_contrast();
-    let (paint, kit, chrome, scale) = STATE.with_borrow_mut(|s| {
+    let (paint, kit, chrome) = STATE.with_borrow_mut(|s| {
         if increased != s.increased {
             s.increased = increased;
             relook(s);
@@ -486,9 +485,22 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool, zoom: bool) -> theme
         paint.failed = role("error", paint.failed);
         paint.accent = rgb(accent_rgb);
         paint.accent_deep = rgb(fl::blend(accent_rgb, [0.0; 3], 0.35));
+        let roles = TextRoles {
+            meta: role("meta", paint.faint),
+            link: role("link", paint.accent),
+            code: role("code", paint.text),
+            working: role("working", paint.accent),
+            added: role("done", paint.done),
+            removed: role("diff.removed", paint.failed),
+            peer: role("peer", paint.text),
+            needs_attention: paint.attention,
+            done: paint.done,
+            error: paint.failed,
+        };
         let translucent = glass && s.look.translucent(dark);
         let drawn = s.look.drawn(dark);
-        let mut key = format!("{dark}:{translucent}:{drawn}:{:?}:{:?}:{:?}:{:?}", accent_rgb.map(quant), srgb(paint.text).map(quant), srgb(paint.muted).map(quant), srgb(paint.faint).map(quant));
+        let roles_key: Vec<[u32; 3]> = rune_kit::TextRole::ALL.iter().map(|r| srgb(roles.get(*r)).map(quant)).collect();
+        let mut key = format!("{dark}:{translucent}:{drawn}:{:?}:{:?}:{:?}:{:?}:{roles_key:?}", accent_rgb.map(quant), srgb(paint.text).map(quant), srgb(paint.muted).map(quant), srgb(paint.faint).map(quant));
         if translucent {
             let ground = ground_rgb(dark);
             let tint = tint_rgb(&s.look, dark, accent_rgb);
@@ -519,6 +531,7 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool, zoom: bool) -> theme
             k.c.text_muted = paint.muted;
             k.c.text_faint = paint.faint;
             accented(&mut k, paint.accent);
+            k.roles = roles;
             k
         });
         let chrome = cached(s, format!("chrome:{key}"), move |env| {
@@ -535,21 +548,24 @@ pub fn frame<S>(cx: &mut Cx<S>, session: bool, glass: bool, zoom: bool) -> theme
             k.c.text_base = paint.text;
             k.c.text_weak = paint.muted;
             accented(&mut k, paint.accent);
+            k.roles = roles;
             k
         });
-        if zoom {
-            let window = (s.area.0 * s.zoom.max(1.0), s.area.1 * s.zoom.max(1.0));
-            let room = (window.0 / MIN_LAYOUT.0).min(window.1 / MIN_LAYOUT.1).max(1.0);
-            s.zoom = s.look.text_scale.min(room);
-        }
-        (paint, kit, chrome, s.zoom)
+        (paint, kit, chrome)
     });
     let themes = theme::Themes { main: kit, chrome };
     theme::set(paint, themes.clone());
-    if zoom {
-        cx.zoom(scale);
-    }
-    themes
+    with_text(cx, |cx| cx.with_kit(&themes.main, |cx| build(cx, &themes)))
+}
+
+pub fn with_text<S, R>(cx: &mut Cx<S>, build: impl FnOnce(&mut Cx<S>) -> R) -> R {
+    let text = STATE.with_borrow_mut(|s| {
+        if (s.text.get() - s.look.text_scale).abs() > 1e-6 {
+            s.text = TextScale::new(s.look.text_scale);
+        }
+        s.text.clone()
+    });
+    cx.with_text_scale(&text, build)
 }
 
 pub fn backdrop(session: bool) -> El {

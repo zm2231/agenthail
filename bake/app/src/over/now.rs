@@ -39,11 +39,11 @@ pub fn digest_line(s: &App, key: String, l: &Line, k: &Kit) -> El {
         row()
             .gap(8.0)
             .items_center()
-            .child(text(l.kind.label().to_string()).font(META_MED).color(color))
-            .child(text(l.text.clone()).font(BODY).color(strong(k)).truncate().shrink()),
+            .child(text(l.kind.label().to_string()).font(k.text(META_MED)).color(color))
+            .child(text(l.text.clone()).font(k.text(BODY)).color(strong(k)).truncate().shrink()),
     );
     if !l.detail.is_empty() {
-        body = body.child(text(l.detail.clone()).font(META).color(weak(k)).truncate());
+        body = body.child(text(l.detail.clone()).font(k.text(META)).color(weak(k)).truncate());
     }
     row()
         .key(key)
@@ -55,9 +55,9 @@ pub fn digest_line(s: &App, key: String, l: &Line, k: &Kit) -> El {
         .radius(8.0)
         .hover(k.c.surface_raised_hover)
         .on_press(move |s: &mut App| open_target(s, &t))
-        .child(row().pt(2.0).child(icon(glyph, 15.0).color(color)))
+        .child(row().pt(2.0).child(icon(glyph, k.text_size(15.0)).color(color)))
         .child(body)
-        .child(text(s.ov.d.ago(&l.at)).font(META).color(weak(k)))
+        .child(text(s.ov.d.ago(&l.at)).font(k.text(META)).color(weak(k)))
 }
 
 pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize, looked: Option<&str>, catch_up: bool, k: &Kit) -> El {
@@ -68,8 +68,8 @@ pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize, looked: Op
         .gap(10.0)
         .items_center()
         .child(ui::avatar(&p.name, 22.0))
-        .child(text(p.name.clone()).font(HEAD).color(strong(k)))
-        .child(text(summary.join(" · ")).font(META).color(weak(k)).truncate().shrink())
+        .child(text(p.name.clone()).font(k.text(HEAD)).color(strong(k)))
+        .child(text(summary.join(" · ")).font(k.text(META)).color(weak(k)).truncate().shrink())
         .child(ui::spacer())
         .children(catch_up.then(|| crate::over::decisions::brief_button(s, &p.key, k)))
         .child(Button::new("Open project").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(move |s: &mut App| go(s, Screen::Project(key.clone()))).build(k));
@@ -91,7 +91,7 @@ pub fn digest_block(s: &App, p: &Project, lines: &[Line], max: usize, looked: Op
         c = c.child(digest_line(s, format!("d-{}-{}", p.key, new.len() + i), l, k));
     }
     if lines.len() > max {
-        c = c.child(text(format!("{} more in {}", lines.len() - max, p.name)).font(META).color(weak(k)).pl(35.0).pt(4.0));
+        c = c.child(text(format!("{} more in {}", lines.len() - max, p.name)).font(k.text(META)).color(weak(k)).pl(35.0).pt(4.0));
     }
     ui::card(c, k)
 }
@@ -101,9 +101,9 @@ pub fn hands_on_card(s: &App, i: usize, id: &str, k: &Kit) -> El {
     let busy = busy(x);
     let idc = id.to_string();
     let status = if busy {
-        row().gap(6.0).items_center().child(Spinner::new().size(11.0).build(k)).child(text("Working".to_string()).font(META_MED).color(k.c.text_accent))
+        row().gap(6.0).items_center().child(Spinner::new().size(k.text_size(11.0)).build(k)).child(text("Working".to_string()).font(k.text(META_MED)).color(k.c.text_accent))
     } else {
-        row().gap(6.0).items_center().child(icon(&icons::CIRCLE_CHECK, 12.0).color(weak(k))).child(text(format!("Idle {}", s.ov.d.ago(&x.last_active))).font(META).color(weak(k)))
+        row().gap(6.0).items_center().child(icon(&icons::CIRCLE_CHECK, k.text_size(12.0)).color(weak(k))).child(text(format!("Idle {}", s.ov.d.ago(&x.last_active))).font(k.text(META)).color(weak(k)))
     };
     let c = col()
         .w_full()
@@ -115,12 +115,12 @@ pub fn hands_on_card(s: &App, i: usize, id: &str, k: &Kit) -> El {
                 .gap(8.0)
                 .items_center()
                 .child(ui::avatar(&x.project_name(), 18.0))
-                .child(text(ui::short_title(&s.ov.d.title(x), 30)).font(BODY_MED).color(strong(k)).truncate().shrink())
+                .child(text(ui::short_title(&s.ov.d.title(x), 30)).font(k.text(BODY_MED)).color(strong(k)).truncate().shrink())
                 .child(ui::spacer())
                 .child(ui::ghost_keys(&[format!("⌘{}", i + 1).as_str()], k)),
         )
-        .child(text(if s.ov.d.gist(x) == x.display.label { "No summary yet".to_string() } else { s.ov.d.gist(x) }).font(META).color(weak(k)).max_lines(2).wrap())
-        .child(row().w_full().items_center().child(status).child(ui::spacer()).child(text(x.project_name()).font(META).color(weak(k))));
+        .child(text(if s.ov.d.gist(x) == x.display.label { "No summary yet".to_string() } else { s.ov.d.gist(x) }).font(k.text(META)).color(weak(k)).max_lines(2).wrap())
+        .child(row().w_full().items_center().child(status).child(ui::spacer()).child(text(x.project_name()).font(k.text(META)).color(weak(k))));
     ui::card(c, k).key(format!("hands-{i}")).on_press(move |s: &mut App| crate::over::open_session(s, &idc))
 }
 
@@ -138,15 +138,15 @@ pub fn moving_row(s: &App, i: usize, id: &str, k: &Kit) -> El {
         .radius(8.0)
         .hover(k.c.surface_raised_hover)
         .on_press(move |s: &mut App| crate::over::open_session(s, &idc))
-        .child(row().pt(3.0).child(Spinner::new().size(12.0).build(k)))
+        .child(row().pt(3.0).child(Spinner::new().size(k.text_size(12.0)).build(k)))
         .child(
             col()
                 .grow(1.0)
                 .shrink()
                 .min_w(0.0)
                 .gap(2.0)
-                .child(row().gap(6.0).items_center().child(text(ui::short_title(&s.ov.d.title(x), 34)).font(META_MED).color(strong(k)).truncate().shrink()).child(text(x.project_name()).font(META).color(weak(k))))
-                .child(text(crate::over::plain(&what)).font(META).color(weak(k)).max_lines(2).wrap()),
+                .child(row().gap(6.0).items_center().child(text(ui::short_title(&s.ov.d.title(x), 34)).font(k.text(META_MED)).color(strong(k)).truncate().shrink()).child(text(x.project_name()).font(k.text(META)).color(weak(k))))
+                .child(text(crate::over::plain(&what)).font(k.text(META)).color(weak(k)).max_lines(2).wrap()),
         )
 }
 
@@ -158,10 +158,10 @@ fn focus_card(s: &App, k: &Kit) -> El {
         .gap(10.0)
         .items_center()
         .child(ui::kind_pill(n.kind, k))
-        .child(text(format!("{} · {} of {total} that need you", n.group.label(), s.ov.need_ix + 1)).font(META).color(weak(k)))
+        .child(text(format!("{} · {} of {total} that need you", n.group.label(), s.ov.need_ix + 1)).font(k.text(META)).color(weak(k)))
         .child(ui::spacer())
         .child(Button::new("Next").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).shortcut("⌘J").on_press(|s: &mut App| next_need(s)).build(k));
-    let mut meta = row().gap(8.0).items_center().child(ui::avatar(&n.project, 16.0)).child(text(n.project.clone()).font(META_MED).color(base(k))).child(text(format!("{} · {}", n.who, s.ov.d.ago(&n.at))).font(META).color(weak(k)));
+    let mut meta = row().gap(8.0).items_center().child(ui::avatar(&n.project, 16.0)).child(text(n.project.clone()).font(k.text(META_MED)).color(base(k))).child(text(format!("{} · {}", n.who, s.ov.d.ago(&n.at))).font(k.text(META)).color(weak(k)));
     if let Some(l) = &n.label {
         meta = meta.child(ui::id_label(l, k));
     }
@@ -170,8 +170,8 @@ fn focus_card(s: &App, k: &Kit) -> El {
         .gap(12.0)
         .padding(18.0)
         .child(head)
-        .child(text(n.title.clone()).font(TITLE.lh(30.0)).color(strong(k)).wrap())
-        .child(text(n.kind.ask().to_string()).font(BODY).color(base(k)))
+        .child(text(n.title.clone()).font(k.text(TITLE.lh(30.0))).color(strong(k)).wrap())
+        .child(text(n.kind.ask().to_string()).font(k.text(BODY)).color(base(k)))
         .child(meta)
         .child(row().w_full().pt(4.0).child(ui::need_actions(s, n, false, k)));
     col().w_full().radius(14.0).fill(k.c.surface_raised).border(1.0, ui::kind_color(n.kind, k).alpha(0.35)).child(c)
@@ -179,7 +179,7 @@ fn focus_card(s: &App, k: &Kit) -> El {
 
 fn toolbar(s: &App, strip: bool, k: &Kit) -> Toolbar {
     let mut t = Toolbar::new();
-    t = if strip { t.leading(row().gap(12.0).items_center().child(text("Now".to_string()).font(BODY_MED).color(strong(k))).child(ui::strip(s, None, k))) } else { t.leading(ui::crumb(&[("Now", true)], k)) };
+    t = if strip { t.leading(row().gap(12.0).items_center().shrink().min_w(0.0).child(text("Now".to_string()).font(k.text(BODY_MED)).color(strong(k)).truncate().shrink().min_w(0.0)).child(ui::strip(s, None, k))) } else { t.leading(ui::crumb(&[("Now", true)], k)) };
     if let Some(tabs) = crate::ui::tabs::strip(s, k, false) {
         t = t.center(row().max_w(560.0).child(tabs));
     }
@@ -214,8 +214,8 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
             .w_full()
             .gap(3.0)
             .pt(14.0)
-            .child(ui::section_head("Since you left", None, Some(text(format!("{}, from the records", since_note(s, looked))).font(META).color(weak(&k))), &k))
-            .child(text("Each line opens what it is about.".to_string()).font(META).color(weak(&k))),
+            .child(ui::section_head("Since you left", None, Some(text(format!("{}, from the records", since_note(s, looked))).font(k.text(META)).color(weak(&k))), &k))
+            .child(text("Each line opens what it is about.".to_string()).font(k.text(META)).color(weak(&k))),
     );
     for (p, lines) in s.ov.d.digests(s.ov.d.window(looked)).iter().take(6) {
         centre = centre.child(digest_block(s, p, lines, 5, looked, false, &k));
@@ -227,7 +227,7 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
         .child(col().key("now-a").w_full().grow(1.0).min_h(0.0).items_center().scroll(ScrollSpec { stick_bottom: false }).child(centre));
 
     let wide = centre_c;
-    let mut rail = col().w_full().max_w(if wide { 820.0 } else { 10000.0 }).gap(10.0).px(14.0).pt(16.0).pb(24.0).child(ui::section_head("Hands-on", Some(s.ov.hands_on.len()), Some(text("⌃Tab".to_string()).font(META).color(weak(&k))), &k));
+    let mut rail = col().w_full().max_w(if wide { 820.0 } else { 10000.0 }).gap(10.0).px(14.0).pt(16.0).pb(24.0).child(ui::section_head("Hands-on", Some(s.ov.hands_on.len()), Some(text("⌃Tab".to_string()).font(k.text(META)).color(weak(&k))), &k));
     if wide {
         let mut grid = row().w_full().gap(10.0).flex_wrap().items_stretch();
         for (i, id) in s.ov.hands_on.iter().enumerate() {
@@ -243,7 +243,7 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
     let moving = s.ov.d.moving(&s.ov.hands_on);
     rail = rail.child(ui::section_head("What's moving", Some(moving.len()), None, &k).mt(14.0));
     if moving.is_empty() {
-        rail = rail.child(text("Nothing else is running.".to_string()).font(META).color(weak(&k)));
+        rail = rail.child(text("Nothing else is running.".to_string()).font(k.text(META)).color(weak(&k)));
     }
     for (i, x) in moving.iter().take(6).enumerate() {
         rail = rail.child(moving_row(s, i, &x.id, &k));
@@ -286,8 +286,8 @@ pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
     let intro = col()
         .w_full()
         .gap(6.0)
-        .child(text("Since you left".to_string()).font(TITLE).color(strong(&k)))
-        .child(text(format!("{} need you · {} shipped · {} working · {} across {} projects", s.ov.needs.len(), shipped, s.ov.d.working(), since_note(s, looked).to_lowercase(), digests.len())).font(BODY).color(base(&k)));
+        .child(text("Since you left".to_string()).font(k.text(TITLE)).color(strong(&k)))
+        .child(text(format!("{} need you · {} shipped · {} working · {} across {} projects", s.ov.needs.len(), shipped, s.ov.d.working(), since_note(s, looked).to_lowercase(), digests.len())).font(k.text(BODY)).color(base(&k)));
     let mut c = col()
         .w_full()
         .max_w(820.0)
@@ -297,10 +297,10 @@ pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
         .pb(48.0)
         .child(intro)
         .child(ui::sessions_block(s, false, &k))
-        .child(ui::section_head("Needs you", Some(s.ov.needs.len()), Some(row().gap(6.0).items_center().child(text("Next".to_string()).font(META).color(weak(&k))).child(ui::ghost_keys(&["⌘J"], &k))), &k).mt(10.0))
+        .child(ui::section_head("Needs you", Some(s.ov.needs.len()), Some(row().gap(6.0).items_center().child(text("Next".to_string()).font(k.text(META)).color(weak(&k))).child(ui::ghost_keys(&["⌘J"], &k))), &k).mt(10.0))
         .child(ui::needs_list(s, &k))
         .child(crate::over::decisions::section(s, &k, main_kit).mt(10.0))
-        .child(ui::section_head("By project", None, Some(text("From the ledger and each session's last word".to_string()).font(META).color(weak(&k))), &k).mt(10.0));
+        .child(ui::section_head("By project", None, Some(text("From the ledger and each session's last word".to_string()).font(k.text(META)).color(weak(&k))), &k).mt(10.0));
     for (p, lines) in digests.iter().take(6) {
         c = c.child(digest_block(s, p, lines, 4, looked, true, &k));
     }

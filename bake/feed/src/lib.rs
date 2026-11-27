@@ -64,6 +64,7 @@ pub mod voice;
 pub mod watch;
 pub mod windows;
 pub mod wire;
+pub mod worksearch;
 
 pub use blocks::{Block, Kind};
 pub use item::Item;

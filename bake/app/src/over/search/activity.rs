@@ -184,9 +184,9 @@ fn entry_row(s: &App, e: &feed::search::Entry, k: &Kit) -> El {
         .gap(8.0)
         .items_center()
         .child(dot)
-        .child(text(e.heading()).font(BODY_MED).color(strong(k)).truncate().shrink())
+        .child(text(e.heading()).font(k.text(BODY_MED)).color(strong(k)).truncate().shrink())
         .child(ui::spacer())
-        .child(text(feed::catalog::ago(&e.created_at, s.now)).font(META).color(weak(k)));
+        .child(text(feed::catalog::ago(&e.created_at, s.now)).font(k.text(META)).color(weak(k)));
     let toggle = row()
         .key(format!("activity-more-{id}"))
         .gap(4.0)
@@ -198,18 +198,18 @@ fn entry_row(s: &App, e: &feed::search::Entry, k: &Kit) -> El {
                 p.expanded.insert(id);
             }
         })
-        .child(icon(if open { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, 12.0).color(k.c.text_accent))
-        .child(text(if open { "Hide details" } else { "View details" }.to_string()).font(META).color(k.c.text_accent));
-    let mut c = col().key(format!("activity-{id}")).w_full().gap(4.0).px(12.0).py(10.0).radius(8.0).hover(k.c.surface_raised_hover).child(head).child(text(e.route()).font(META).color(weak(k)).truncate()).child(toggle);
+        .child(icon(if open { &icons::CHEVRON_DOWN } else { &icons::CHEVRON_RIGHT }, k.text_size(12.0)).color(k.c.text_accent))
+        .child(text(if open { "Hide details" } else { "View details" }.to_string()).font(k.text(META)).color(k.c.text_accent));
+    let mut c = col().key(format!("activity-{id}")).w_full().gap(4.0).px(12.0).py(10.0).radius(8.0).hover(k.c.surface_raised_hover).child(head).child(text(e.route()).font(k.text(META)).color(weak(k)).truncate()).child(toggle);
     if open {
-        c = c.child(text(e.content().to_string()).font(BODY).color(if failed { crate::theme::failed() } else { strong(k) }).wrap().pt(4.0));
+        c = c.child(text(e.content().to_string()).font(k.text(BODY)).color(if failed { crate::theme::failed() } else { strong(k) }).wrap().pt(4.0));
     }
     c
 }
 
 pub fn view(s: &App, layer: &mut Vec<El>, k: &Kit) {
     let Some(p) = &s.ov.search.activity.panel else { return };
-    let input = text_input(&p.query, TextStyle::new(15.0, 450.0).lh(20.0))
+    let input = text_input(&p.query, k.text(TextStyle::new(15.0, 450.0).lh(20.0)))
         .single_line()
         .key("activity-input")
         .label("Search activity")
@@ -251,16 +251,16 @@ pub fn view(s: &App, layer: &mut Vec<El>, k: &Kit) {
         .px(16.0)
         .py(12.0)
         .border_sides([0.0, 0.0, 1.0, 0.0], ui::rule(k))
-        .child(icon(&icons::MAGNIFYING_GLASS, 16.0).color(k.c.icon_base))
+        .child(icon(&icons::MAGNIFYING_GLASS, k.text_size(16.0)).color(k.c.icon_base))
         .child(input)
         .child(kinds)
         .child(ui::ghost_keys(&["esc"], k));
     let mut list = col().w_full().gap(2.0).padding(8.0);
     let long = too_long(p);
     if long {
-        list = list.child(text("This search is too long. Shorten it to search activity.".to_string()).font(META).color(weak(k)).px(12.0).py(10.0));
+        list = list.child(text("This search is too long. Shorten it to search activity.".to_string()).font(k.text(META)).color(weak(k)).px(12.0).py(10.0));
     } else if p.list.items.is_empty() && !p.loading && !pending(p) && p.error.is_none() {
-        list = list.child(text("No activity matches these filters.".to_string()).font(META).color(weak(k)).px(12.0).py(10.0));
+        list = list.child(text("No activity matches these filters.".to_string()).font(k.text(META)).color(weak(k)).px(12.0).py(10.0));
     }
     if !pending(p) && !long {
         for e in &p.list.items {
@@ -274,9 +274,9 @@ pub fn view(s: &App, layer: &mut Vec<El>, k: &Kit) {
         1 => "1 event shown".to_string(),
         n => format!("{n} events shown"),
     };
-    foot = foot.child(text(shown).font(META).color(weak(k)));
+    foot = foot.child(text(shown).font(k.text(META)).color(weak(k)));
     if let Some(e) = p.error.as_ref().filter(|_| !pending(p) && !long) {
-        foot = foot.child(text(e.clone()).font(META).color(crate::theme::failed()).wrap().shrink());
+        foot = foot.child(text(e.clone()).font(k.text(META)).color(crate::theme::failed()).wrap().shrink());
     }
     foot = foot.child(ui::spacer());
     if p.loading || pending(p) {
@@ -284,7 +284,7 @@ pub fn view(s: &App, layer: &mut Vec<El>, k: &Kit) {
     } else if p.list.has_more && !long {
         foot = foot.child(Button::new("Load more").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).build(k).key("activity-more").on_press(|s: &mut App| load(s, false)));
     }
-    let title = row().w_full().gap(10.0).items_center().px(16.0).pt(14.0).child(text("Activity history".to_string()).font(BODY_MED).color(strong(k))).child(ui::spacer());
+    let title = row().w_full().gap(10.0).items_center().px(16.0).pt(14.0).child(text("Activity history".to_string()).font(k.text(BODY_MED)).color(strong(k))).child(ui::spacer());
     let panel = col()
         .key("activity")
         .w(720.0)

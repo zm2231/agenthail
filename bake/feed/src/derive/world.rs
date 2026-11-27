@@ -49,7 +49,23 @@ pub struct Work {
     pub ledger_key: String,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct WorkKey {
+    pub ledger: String,
+    pub id: String,
+}
+
+impl WorkKey {
+    pub fn new(ledger: impl Into<String>, id: impl Into<String>) -> WorkKey {
+        WorkKey { ledger: ledger.into(), id: id.into() }
+    }
+}
+
 impl Work {
+    pub fn key(&self) -> WorkKey {
+        WorkKey::new(self.ledger_key(), &self.id)
+    }
+
     pub fn ledger_key(&self) -> &str {
         if self.ledger_key.is_empty() { &self.project } else { &self.ledger_key }
     }
@@ -81,6 +97,8 @@ pub struct Meter {
 #[derive(Deserialize, Clone, Default, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct Host {
+    #[serde(default)]
+    pub id: String,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
@@ -195,7 +213,7 @@ pub struct World {
     pub now: OffsetDateTime,
     pub sessions: Vec<Session>,
     pub projects: Vec<Project>,
-    pub work: HashMap<String, Work>,
+    pub work: HashMap<WorkKey, Work>,
     pub transcripts: HashMap<String, Vec<Item>>,
     pub prompted_before: HashSet<String>,
     pub started_by: HashMap<String, String>,
@@ -205,6 +223,7 @@ pub struct World {
     pub rows: HashMap<String, Rows>,
     pub records: Vec<ProjectRecord>,
     pub tile_order: Option<crate::projects::TileOrder>,
+    pub found_names: HashMap<String, String>,
     pub(crate) names: HashMap<String, String>,
 }
 
@@ -223,7 +242,7 @@ impl World {
             for mut w in rows {
                 w.project = key.clone();
                 w.ledger_key = ledger_key.clone();
-                work.insert(w.id.clone(), w);
+                work.insert(w.key(), w);
             }
         }
         let names = crate::derive::names::build(&raw.sessions, &raw.actors, &work);
@@ -242,6 +261,7 @@ impl World {
             rows: HashMap::new(),
             records: raw.projects,
             tile_order: raw.tile_order,
+            found_names: HashMap::new(),
             names,
         }
     }
@@ -252,6 +272,10 @@ impl World {
 
     pub fn project(&self, key: &str) -> Option<&Project> {
         self.projects.iter().find(|p| p.key == key)
+    }
+
+    pub fn project_name(&self, key: &str) -> String {
+        self.project(key).map(|p| p.name.clone()).or_else(|| self.record(key).map(|r| r.display_name.clone())).or_else(|| self.found_names.get(key).cloned()).unwrap_or_default()
     }
 
     pub fn record(&self, key: &str) -> Option<&ProjectRecord> {

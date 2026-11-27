@@ -63,20 +63,20 @@ pub fn session_row(s: &App, x: &Session, depth: u8, selected: bool, k: &Kit) -> 
     }
     let (line, color, live) = status_line(s, x, k);
     let trailing = if busy(x) {
-        row().gap(5.0).items_center().child(el().size(6.0, 6.0).radius(3.0).fill(k.c.text_accent)).child(text("live".to_string()).font(META).color(k.c.text_accent))
+        row().gap(5.0).items_center().child(el().size(6.0, 6.0).radius(3.0).fill(k.c.text_accent)).child(text("live".to_string()).font(k.text(META)).color(k.c.text_accent))
     } else if x.state(s.ov.d.now) == State::Done {
-        row().gap(5.0).items_center().child(icon(&icons::CIRCLE_CHECK, 12.0).color(k.c.success.icon)).child(text(format!("done {}", s.ov.d.ago(&x.last_active))).font(META).color(weak(k)))
+        row().gap(5.0).items_center().child(icon(&icons::CIRCLE_CHECK, k.text_size(12.0)).color(k.c.success.icon)).child(text(format!("done {}", s.ov.d.ago(&x.last_active))).font(k.text(META)).color(weak(k)))
     } else {
-        text(format!("idle {}", s.ov.d.ago(&x.last_active))).font(META).color(weak(k))
+        text(format!("idle {}", s.ov.d.ago(&x.last_active))).font(k.text(META)).color(weak(k))
     };
     let mut status = row().gap(6.0).items_center();
     if live {
-        status = status.child(Spinner::new().size(11.0).build(k));
+        status = status.child(Spinner::new().size(k.text_size(11.0)).build(k));
     }
-    status = status.child(text(line).font(META).color(color).truncate().shrink());
-    let mut headline = row().w_full().gap(8.0).items_center().child(text(s.ov.d.title(x)).font(BODY_MED).color(strong(k)).truncate().shrink()).child(crate::ui::session_menu::marks(x));
+    status = status.child(text(line).font(k.text(META)).color(color).truncate().shrink());
+    let mut headline = row().w_full().gap(8.0).items_center().child(text(s.ov.d.title(x)).font(k.text(BODY_MED)).color(strong(k)).truncate().shrink()).child(crate::ui::session_menu::marks(x, k));
     if let Some((h, _)) = feed::derive::needs::headline(x).filter(|_| need_of(s, x).is_some() || busy(x)) {
-        headline = headline.child(text(ui::short_title(&crate::over::plain(&h), 60)).font(META).color(weak(k)).truncate().shrink());
+        headline = headline.child(text(ui::short_title(&crate::over::plain(&h), 60)).font(k.text(META)).color(weak(k)).truncate().shrink());
     }
     headline = headline.child(ui::spacer()).child(trailing);
     let mut r = row()
@@ -108,7 +108,7 @@ pub fn session_row(s: &App, x: &Session, depth: u8, selected: bool, k: &Kit) -> 
                 .min_w(0.0)
                 .gap(3.0)
                 .child(headline)
-                .child(row().gap(4.0).items_center().child(icon(&icons::BRANCH, 11.0).color(weak(k))).child(text(place.join(" · ")).font(META).color(weak(k)).truncate().shrink()))
+                .child(row().gap(4.0).items_center().child(icon(&icons::BRANCH, k.text_size(11.0)).color(weak(k))).child(text(place.join(" · ")).font(k.text(META)).color(weak(k)).truncate().shrink()))
                 .child(status),
         );
     r = if selected { r.fill(k.c.surface_raised_hover).border(1.0, ui::edge()) } else { r.hover(k.c.surface_raised_hover) };
@@ -120,12 +120,12 @@ const ALL_STATUSES: &str = "All statuses";
 const ALL_SURFACES: &str = "All surfaces";
 
 fn checkout_line(c: &TreeCheckout, k: &Kit) -> El {
-    let mut line = row().gap(6.0).items_center().pl(14.0).pt(6.0).pb(2.0).child(icon(&icons::BRANCH, 11.0).color(weak(k))).child(text(c.label.clone()).font(META.mono()).color(weak(k)).truncate().shrink());
+    let mut line = row().gap(6.0).items_center().pl(14.0).pt(6.0).pb(2.0).child(icon(&icons::BRANCH, k.text_size(11.0)).color(weak(k))).child(text(c.label.clone()).font(k.text(META.mono())).color(weak(k)).truncate().shrink());
     if c.dirty {
         line = line.child(el().size(5.0, 5.0).radius(2.5).fill(weak(k)).label("Uncommitted changes"));
     }
     if let Some(host) = &c.host {
-        line = line.child(text(format!("on {host}")).font(META).color(weak(k)));
+        line = line.child(text(format!("on {host}")).font(k.text(META)).color(weak(k)));
     }
     line.key(format!("checkout-{}", c.id))
 }
@@ -144,17 +144,17 @@ fn project_group(s: &App, p: &TreeProject, k: &Kit) -> El {
         .px(12.0)
         .pb(4.0)
         .child(ui::avatar(&p.name, 20.0))
-        .child(text(p.name.clone()).font(HEAD).color(strong(k)))
+        .child(text(p.name.clone()).font(k.text(HEAD)).color(strong(k)))
         .child(Badge::new(p.sessions_label()).variant(BadgeVariant::Subtle).build(k));
     let hosts = p.hosts();
     if !hosts.is_empty() {
-        head = head.child(text(format!("on {}", hosts.join(", "))).font(META).color(weak(k)));
+        head = head.child(text(format!("on {}", hosts.join(", "))).font(k.text(META)).color(weak(k)));
     }
     if needs > 0 {
-        head = head.child(text(format!("{needs} need you")).font(META_MED).color(ui::needs_color(k)));
+        head = head.child(text(format!("{needs} need you")).font(k.text(META_MED)).color(ui::needs_color(k)));
     }
     if working > 0 {
-        head = head.child(text(format!("{working} working")).font(META_MED).color(k.c.text_accent));
+        head = head.child(text(format!("{working} working")).font(k.text(META_MED)).color(k.c.text_accent));
     }
     head = head.child(ui::spacer());
     if s.ov.d.project(&p.id).is_some() {
@@ -242,6 +242,8 @@ fn bar(s: &App, layer: &mut Vec<El>, k: &Kit) -> El {
 
     let search = row()
         .w(240.0)
+        .shrink()
+        .min_w(120.0)
         .gap(8.0)
         .items_center()
         .px(10.0)
@@ -249,9 +251,9 @@ fn bar(s: &App, layer: &mut Vec<El>, k: &Kit) -> El {
         .radius(8.0)
         .fill(k.c.surface_base)
         .border(1.0, ui::edge())
-        .child(icon(&icons::MAGNIFYING_GLASS, 14.0).color(k.c.icon_base))
+        .child(icon(&icons::MAGNIFYING_GLASS, k.text_size(14.0)).color(k.c.icon_base))
         .child(
-            text_input(&s.ov.sessions_query, TextStyle::new(13.0, 440.0).lh(18.0))
+            text_input(&s.ov.sessions_query, k.text(TextStyle::new(13.0, 440.0).lh(18.0)))
                 .single_line()
                 .key("sessions-search")
                 .label("Search sessions")
@@ -290,7 +292,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, layer: &mut Vec<El>, main_kit: &Kit) -> E
     if projects.is_empty() {
         let note = empty_note(s);
         if !note.is_empty() {
-            list = list.child(text(note.to_string()).font(META).color(weak(&k)).pt(20.0));
+            list = list.child(text(note.to_string()).font(k.text(META)).color(weak(&k)).pt(20.0));
         }
     }
     for p in &projects {
@@ -302,11 +304,11 @@ pub fn view(s: &App, cx: &mut Cx<App>, layer: &mut Vec<El>, main_kit: &Kit) -> E
                 .w_full()
                 .gap(10.0)
                 .items_center()
-                .child(text(error.clone()).font(META).color(ui::needs_color(&k)).wrap().shrink())
+                .child(text(error.clone()).font(k.text(META)).color(ui::needs_color(&k)).wrap().shrink())
                 .child(Button::new("Try again").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(crate::over::listing::retry).build(&k).key("sessions-retry")),
         );
     } else if s.ov.list.loading_more() {
-        list = list.child(text("Loading…".to_string()).font(META).color(weak(&k)));
+        list = list.child(text("Loading…".to_string()).font(k.text(META)).color(weak(&k)));
     } else if listing.is_some_and(|l| l.next.is_some()) {
         list = list.child(Button::new("Show more").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(crate::over::listing::more).build(&k).key("sessions-more"));
     }

@@ -50,7 +50,7 @@ fn an_item_never_reads_failed_and_scope_at_once() {
         for l in w.digest(p, WINDOW_HOURS).iter().filter(|l| l.kind == Happened::Failed) {
             let Target::Work(id) = &l.target else { panic!("a failure names a work item") };
             let ph = phase(&w.work[id]);
-            assert!(ph != 0 && ph != phase::SHIP, "{id} reads Failed while in {}", PHASES[ph]);
+            assert!(ph != 0 && ph != phase::SHIP, "{id:?} reads Failed while in {}", PHASES[ph]);
         }
     }
     for n in w.needs().iter().filter(|n| n.kind == NeedKind::CiFailing) {

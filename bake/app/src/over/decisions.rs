@@ -30,36 +30,36 @@ fn line(s: &App, i: usize, d: &Decision, shift: bool, k: &Kit, main_kit: &Kit) -
         meta.push(since);
     }
     let title = if d.work_title.is_empty() { d.reason_text() } else { d.work_title.clone() };
-    let mut body = col().grow(1.0).shrink().min_w(0.0).gap(4.0).child(text(crate::over::plain(&title)).font(BODY_MED).color(strong(k)).max_lines(2).wrap());
+    let mut body = col().grow(1.0).shrink().min_w(0.0).gap(4.0).child(text(crate::over::plain(&title)).font(k.text(BODY_MED)).color(strong(k)).max_lines(2).wrap());
     if !d.work_title.is_empty() && !d.reason.is_empty() {
-        body = body.child(text(crate::over::plain(&d.reason_text())).font(META).color(base(k)).max_lines(2).wrap());
+        body = body.child(text(crate::over::plain(&d.reason_text())).font(k.text(META)).color(base(k)).max_lines(2).wrap());
     }
-    let mut facts = row().gap(8.0).items_center().child(ui::avatar(if project.is_empty() { &who } else { &project }, 16.0)).child(text(meta.join(" · ")).font(META).color(weak(k)).truncate().shrink());
+    let mut facts = row().gap(8.0).items_center().child(ui::avatar(if project.is_empty() { &who } else { &project }, 16.0)).child(text(meta.join(" · ")).font(k.text(META)).color(weak(k)).truncate().shrink());
     if !d.holds_up.is_empty() {
-        facts = facts.child(text(format!("Holds up {}", d.holds_up.len())).font(META_MED).color(ui::needs_color(k)));
+        facts = facts.child(text(format!("Holds up {}", d.holds_up.len())).font(k.text(META_MED)).color(ui::needs_color(k)));
     }
     if !d.work_item.is_empty() && d.covers.is_empty() {
         facts = facts.child(ui::id_label(&crate::over::short_id(&d.work_item), k));
     }
     if let Some(p) = d.proof_line() {
-        facts = facts.child(text(p).font(META).color(weak(k)));
+        facts = facts.child(text(p).font(k.text(META)).color(weak(k)));
     }
     if !d.covers.is_empty() {
-        body = body.child(text(format!("Covers {} items", d.covers.len())).font(META_MED).color(base(k)));
+        body = body.child(text(format!("Covers {} items", d.covers.len())).font(k.text(META_MED)).color(base(k)));
         for c in &d.covers {
             let title = if c.work_title.is_empty() { c.reason_text() } else { c.work_title.clone() };
-            body = body.child(row().gap(6.0).items_center().child(ui::id_label(&c.work_item, k)).child(text(crate::over::plain(&title)).font(META).color(base(k)).truncate().shrink()));
+            body = body.child(row().gap(6.0).items_center().child(ui::id_label(&c.work_item, k)).child(text(crate::over::plain(&title)).font(k.text(META)).color(base(k)).truncate().shrink()));
         }
     }
     for (q, answer) in d.recommended_lines() {
-        body = body.child(row().gap(6.0).items_center().child(text(crate::over::plain(&q)).font(META).color(base(k)).truncate().shrink()).child(text("→".to_string()).font(META).color(weak(k))).child(text(answer).font(META_MED).color(strong(k))));
+        body = body.child(row().gap(6.0).items_center().child(text(crate::over::plain(&q)).font(k.text(META)).color(base(k)).truncate().shrink()).child(text("→".to_string()).font(k.text(META)).color(weak(k))).child(text(answer).font(k.text(META_MED)).color(strong(k))));
     }
     body = body.child(facts);
     if !d.request_error.is_empty() {
-        body = body.child(text(d.request_error.clone()).font(META).color(ui::needs_color(k)).wrap());
+        body = body.child(text(d.request_error.clone()).font(k.text(META)).color(ui::needs_color(k)).wrap());
     }
     if let Some((_, note)) = s.ov.inbox.notes.get(&id).filter(|(hold, _)| d.holds(hold)) {
-        body = body.child(text(note.clone()).font(META).color(ui::needs_color(k)).wrap());
+        body = body.child(text(note.clone()).font(k.text(META)).color(ui::needs_color(k)).wrap());
     }
     let mut actions = row().gap(6.0).items_center();
     if d.is_review() {
@@ -125,7 +125,7 @@ fn answer_panel(s: &App, d: &Decision, k: &Kit, main_kit: &Kit) -> El {
     let Some(request) = waiting::shown_of(s, &d.session_id, &open) else { return el() };
     let busy = inbox::held(s, d, &request.id);
     let who = s.ov.d.session(&d.session_id).map(|x| s.ov.d.title(x)).unwrap_or_else(|| "The agent".into());
-    let head = row().w_full().gap(8.0).items_center().child(text(crate::over::plain(&waiting::request_heading(request, &who))).font(BODY_MED).color(strong(k)).wrap().grow(1.0).min_w(0.0)).children(waiting::switcher(&d.session_id, &open, &request.id));
+    let head = row().w_full().gap(8.0).items_center().child(text(crate::over::plain(&waiting::request_heading(request, &who))).font(k.text(BODY_MED)).color(strong(k)).wrap().grow(1.0).min_w(0.0)).children(waiting::switcher(&d.session_id, &open, &request.id, k));
     let route = Route::Decision(d.clone());
     col()
         .key(format!("decision-answer-{}", d.id()))
@@ -146,7 +146,7 @@ fn reply_panel(s: &App, i: usize, d: &Decision, who: &str, k: &Kit) -> El {
     let edit = st.replies.get(&id).unwrap_or(&empty);
     let ready = !sending && !edit.text.trim().is_empty();
     let (lens, dd, de) = (id.clone(), d.clone(), d.clone());
-    let input = text_input(edit, BODY)
+    let input = text_input(edit, k.text(BODY))
         .key(format!("decision-{i}-reply"))
         .w_full()
         .min_h(44.0)
@@ -158,9 +158,9 @@ fn reply_panel(s: &App, i: usize, d: &Decision, who: &str, k: &Kit) -> El {
     let send = Button::new(if sending { "Sending…".to_string() } else { format!("Send to {}", ui::short_title(who, 24)) }).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(!ready).on_press(move |s: &mut App| inbox::reply(s, &dd)).build(k).key(format!("decision-{i}-reply-send"));
     let mut c = col().key(format!("decision-reply-{id}")).w_full().gap(8.0).pl(4.0);
     if let Some(sent) = st.replied.get(&id) {
-        c = c.child(row().gap(6.0).items_center().child(icon(&icons::CIRCLE_CHECK, 12.0).color(base(k))).child(text(sent.clone()).font(META_MED).color(base(k))));
+        c = c.child(row().gap(6.0).items_center().child(icon(&icons::CIRCLE_CHECK, k.text_size(12.0)).color(base(k))).child(text(sent.clone()).font(k.text(META_MED)).color(base(k))));
     }
-    c.child(field).child(row().gap(8.0).items_center().child(send).child(text("It goes to the session holding the work, as your message.".to_string()).font(META).color(weak(k)).wrap().shrink()))
+    c.child(field).child(row().gap(8.0).items_center().child(send).child(text("It goes to the session holding the work, as your message.".to_string()).font(k.text(META)).color(weak(k)).wrap().shrink()))
 }
 
 pub fn review_buttons(s: &App, d: &Decision, size: ControlSize, key: &str, show_note: bool, mut r: El, k: &Kit) -> El {
@@ -180,7 +180,7 @@ pub fn review_buttons(s: &App, d: &Decision, size: ControlSize, key: &str, show_
     r = r.child(a.build(k).key(format!("{key}-approve"))).child(c.build(k).key(format!("{key}-changes")));
     let note = st.notes.get(&d.id()).filter(|(hold, _)| show_note && d.holds(hold)).map(|(_, n)| n.clone()).or_else(|| old.then(review::needs_newer_note));
     if let Some(n) = note {
-        r = r.child(text(n).font(META).color(ui::needs_color(k)).wrap().shrink());
+        r = r.child(text(n).font(k.text(META)).color(ui::needs_color(k)).wrap().shrink());
     }
     r
 }
@@ -188,7 +188,7 @@ pub fn review_buttons(s: &App, d: &Decision, size: ControlSize, key: &str, show_
 pub fn note_dialog(s: &App, layer: &mut Vec<El>, k: &Kit) {
     let Some(n) = &s.ov.inbox.note else { return };
     let problem = review::note_problem(&n.text.text);
-    let input = text_input(&n.text, BODY)
+    let input = text_input(&n.text, k.text(BODY))
         .key("review-note-input")
         .label("What it still needs")
         .w_full()
@@ -207,7 +207,7 @@ pub fn note_dialog(s: &App, layer: &mut Vec<El>, k: &Kit) {
     let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0).child(field);
     let why = if n.gone { Some("This review isn't waiting on you any more, or it was resubmitted, so your note wasn't sent. Copy it if you want to send it to the worker yourself.".to_string()) } else { n.why.clone() };
     if let Some(why) = why {
-        body = body.child(text(why).font(META).color(ui::needs_color(k)).wrap().w_full());
+        body = body.child(text(why).font(k.text(META)).color(ui::needs_color(k)).wrap().w_full());
     }
     let body = body.child(buttons);
     Dialog::new("review-note", format!("Ask for changes to {}", ui::short_title(&crate::over::plain(&n.title), 48)))
@@ -223,13 +223,13 @@ pub fn note_dialog(s: &App, layer: &mut Vec<El>, k: &Kit) {
 pub fn section(s: &App, k: &Kit, main_kit: &Kit) -> El {
     let st = &s.ov.inbox;
     let count = st.inbox.as_ref().map(|i| i.decisions.len());
-    let mut c = col().w_full().gap(6.0).child(ui::section_head("Decisions", count, Some(text("from every connected computer".to_string()).font(META).color(weak(k))), k));
+    let mut c = col().w_full().gap(6.0).child(ui::section_head("Decisions", count, Some(text("from every connected computer".to_string()).font(k.text(META)).color(weak(k))), k));
     let Some(found) = &st.inbox else {
         let note = if s.client.is_some() { "Looking for decisions…" } else { "Decisions show when the app is connected to the daemon." };
-        return c.child(text(note.to_string()).font(META).color(weak(k)));
+        return c.child(text(note.to_string()).font(k.text(META)).color(weak(k)));
     };
     for n in &found.notes {
-        c = c.child(row().gap(6.0).items_center().child(icon(&icons::INFO, 13.0).color(weak(k))).child(text(n.clone()).font(META).color(weak(k)).wrap()));
+        c = c.child(row().gap(6.0).items_center().child(icon(&icons::INFO, k.text_size(13.0)).color(weak(k))).child(text(n.clone()).font(k.text(META)).color(weak(k)).wrap()));
     }
     let mut list = col().w_full().gap(2.0).padding(4.0);
     let mut last = "";
@@ -238,16 +238,16 @@ pub fn section(s: &App, k: &Kit, main_kit: &Kit) -> El {
         let group = d.group_title();
         if group != last {
             let n = found.decisions.iter().filter(|x| x.group_title() == group).count();
-            list = list.child(text(format!("{group} · {n}")).font(META_MED).color(weak(k)).px(14.0).pt(if last.is_empty() { 6.0 } else { 12.0 }).pb(2.0));
+            list = list.child(text(format!("{group} · {n}")).font(k.text(META_MED)).color(weak(k)).px(14.0).pt(if last.is_empty() { 6.0 } else { 12.0 }).pb(2.0));
             last = group;
         }
         list = list.child(line(s, i, d, target.as_deref() == Some(d.id().as_str()), k, main_kit));
     }
     if found.decisions.is_empty() {
-        list = list.child(row().gap(8.0).items_center().px(14.0).py(10.0).child(icon(&icons::CIRCLE_CHECK, 14.0).color(weak(k))).child(text(if found.notes.is_empty() { "Nothing needs you." } else { "Nothing needs you on the computers that answered." }.to_string()).font(BODY).color(weak(k))));
+        list = list.child(row().gap(8.0).items_center().px(14.0).py(10.0).child(icon(&icons::CIRCLE_CHECK, k.text_size(14.0)).color(weak(k))).child(text(if found.notes.is_empty() { "Nothing needs you." } else { "Nothing needs you on the computers that answered." }.to_string()).font(k.text(BODY)).color(weak(k))));
     }
     if !found.lead_handling.is_empty() {
-        list = list.child(text("Handled by a lead".to_string()).font(META_MED).color(weak(k)).px(14.0).pt(12.0).pb(2.0));
+        list = list.child(text("Handled by a lead".to_string()).font(k.text(META_MED)).color(weak(k)).px(14.0).pt(12.0).pb(2.0));
         for (i, h) in found.lead_handling.iter().enumerate() {
             let who = s.ov.d.session(&h.session_id).map(|x| s.ov.d.title(x)).unwrap_or_else(|| crate::over::short_id(&h.session_id));
             let id = h.session_id.clone();
@@ -262,14 +262,14 @@ pub fn section(s: &App, k: &Kit, main_kit: &Kit) -> El {
                     .radius(8.0)
                     .hover(k.c.surface_raised_hover)
                     .on_press(move |s: &mut App| crate::over::open_session(s, &id))
-                    .child(text(ui::short_title(&who, 28)).font(META_MED).color(strong(k)))
-                    .child(text(format!("{} has it · {}", s.ov.d.name_of(&h.held_by), crate::over::plain(&h.reason))).font(META).color(weak(k)).truncate().shrink()),
+                    .child(text(ui::short_title(&who, 28)).font(k.text(META_MED)).color(strong(k)))
+                    .child(text(format!("{} has it · {}", s.ov.d.name_of(&h.held_by), crate::over::plain(&h.reason))).font(k.text(META)).color(weak(k)).truncate().shrink()),
             );
         }
     }
     c = c.child(ui::card(list, k));
     if !st.history.is_empty() {
-        let mut h = col().w_full().gap(2.0).padding(4.0).child(text("Handled here".to_string()).font(META_MED).color(weak(k)).px(14.0).pt(6.0).pb(2.0));
+        let mut h = col().w_full().gap(2.0).padding(4.0).child(text("Handled here".to_string()).font(k.text(META_MED)).color(weak(k)).px(14.0).pt(6.0).pb(2.0));
         for (i, e) in st.history.iter().take(HISTORY_SHOWN).enumerate() {
             let id = e.session.clone();
             h = h.child(
@@ -283,11 +283,11 @@ pub fn section(s: &App, k: &Kit, main_kit: &Kit) -> El {
                     .radius(8.0)
                     .hover(k.c.surface_raised_hover)
                     .on_press(move |s: &mut App| crate::over::open_session(s, &id))
-                    .child(icon(&icons::CIRCLE_CHECK, 12.0).color(weak(k)))
-                    .child(text(ui::short_title(&e.title, 40)).font(META_MED).color(base(k)).truncate().shrink())
-                    .child(text(e.outcome.clone()).font(META).color(weak(k)))
+                    .child(icon(&icons::CIRCLE_CHECK, k.text_size(12.0)).color(weak(k)))
+                    .child(text(ui::short_title(&e.title, 40)).font(k.text(META_MED)).color(base(k)).truncate().shrink())
+                    .child(text(e.outcome.clone()).font(k.text(META)).color(weak(k)))
                     .child(ui::spacer())
-                    .child(text(s.ov.d.ago(&e.at)).font(META).color(weak(k))),
+                    .child(text(s.ov.d.ago(&e.at)).font(k.text(META)).color(weak(k))),
             );
         }
         c = c.child(ui::card(h, k));
@@ -312,5 +312,5 @@ pub fn brief_button(s: &App, project: &str, k: &Kit) -> El {
 pub fn brief_note(s: &App, project: &str, k: &Kit) -> Option<El> {
     let b = s.ov.inbox.briefs.get(project)?;
     let note = b.notice.clone()?;
-    Some(text(note).font(META).color(if b.failed { ui::needs_color(k) } else { base(k) }).wrap())
+    Some(text(note).font(k.text(META)).color(if b.failed { ui::needs_color(k) } else { base(k) }).wrap())
 }

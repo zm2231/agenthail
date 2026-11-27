@@ -280,22 +280,22 @@ fn change_row(s: &App, h: &History, change: &Change, k: &Kit) -> El {
                 .w_full()
                 .gap(10.0)
                 .items_start()
-                .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(text(change.describe()).font(BODY).color(strong(k)).wrap().w_full()).child(text(change.meta(crate::ui::background::clock(), offset)).font(META).color(weak(k)).wrap().w_full()))
+                .child(col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(text(change.describe()).font(k.text(BODY)).color(strong(k)).wrap().w_full()).child(text(change.meta(crate::ui::background::clock(), offset)).font(k.text(META)).color(weak(k)).wrap().w_full()))
                 .child(actions),
         );
     if let Some((_, _, shown)) = h.patch.as_ref().filter(|_| open) {
         card = card.child(match shown {
-            None => row().gap(6.0).items_center().child(Spinner::new().size(11.0).build(k)).child(text("Reading the patch…".to_string()).font(META).color(weak(k))),
-            Some(Err(error)) => text(error.clone()).font(META).color(crate::theme::failed()).wrap().w_full(),
+            None => row().gap(6.0).items_center().child(Spinner::new().size(k.text_size(11.0)).build(k)).child(text("Reading the patch…".to_string()).font(k.text(META)).color(weak(k))),
+            Some(Err(error)) => text(error.clone()).font(k.text(META)).color(crate::theme::failed()).wrap().w_full(),
             Some(Ok(truncated)) => {
                 let mut patch = col().w_full().gap(4.0);
                 if s.ov.ext.sheets.diff.files().is_empty() {
-                    patch = patch.child(text("This change has no file differences to show.".to_string()).font(META).color(weak(k)));
+                    patch = patch.child(text("This change has no file differences to show.".to_string()).font(k.text(META)).color(weak(k)));
                 } else {
                     patch = patch.child(el().w_full().h(320.0).radius(8.0).border(1.0, crate::over::ui::edge()).child(DiffView::new(|s: &App| &s.ov.ext.sheets.diff, |s: &mut App| &mut s.ov.ext.sheets.diff).key("ext-change-diff").build(s, k)));
                 }
                 if *truncated {
-                    patch = patch.child(text("Cut: the change is larger than this view.".to_string()).font(META).color(weak(k)));
+                    patch = patch.child(text("Cut: the change is larger than this view.".to_string()).font(k.text(META)).color(weak(k)));
                 }
                 patch
             }
@@ -308,12 +308,12 @@ fn history_dialog(s: &App, h: &History, layer: &mut Vec<El>, k: &Kit) {
     let note = if h.host.is_local() { "Changes are kept as they are made. Undo any change here.".to_string() } else { format!("Changes on {}. Undo any change here.", h.host.name) };
     let mut body = col().w_full().gap(8.0).px(16.0).pb(16.0);
     if let Some(failure) = &h.failure {
-        body = body.child(text(failure.clone()).font(META).color(crate::theme::failed()).wrap().w_full());
+        body = body.child(text(failure.clone()).font(k.text(META)).color(crate::theme::failed()).wrap().w_full());
     }
     body = body.child(match &h.changes {
-        None => row().w_full().h(120.0).items_center().justify_center().child(Spinner::new().size(14.0).build(k)),
-        Some(Err(error)) => text(error.clone()).font(META).color(crate::theme::failed()).wrap().w_full(),
-        Some(Ok(changes)) if changes.is_empty() => text("No changes recorded yet.".to_string()).font(BODY).color(weak(k)),
+        None => row().w_full().h(120.0).items_center().justify_center().child(Spinner::new().size(k.text_size(14.0)).build(k)),
+        Some(Err(error)) => text(error.clone()).font(k.text(META)).color(crate::theme::failed()).wrap().w_full(),
+        Some(Ok(changes)) if changes.is_empty() => text("No changes recorded yet.".to_string()).font(k.text(BODY)).color(weak(k)),
         Some(Ok(changes)) => col().key("ext-history-list").w_full().max_h(460.0).scroll(ScrollSpec { stick_bottom: false }).children(changes.iter().map(|c| change_row(s, h, c, k))),
     });
     let done = row().w_full().child(el().grow(1.0)).child(small("Done", ButtonVariant::Contrast).disabled(h.undoing.is_some()).on_press(close_history).build(k).key("ext-history-done"));
@@ -321,7 +321,7 @@ fn history_dialog(s: &App, h: &History, layer: &mut Vec<El>, k: &Kit) {
 }
 
 fn build_dialog(b: &Building, layer: &mut Vec<El>, k: &Kit) {
-    let input = text_input(&b.text, BODY)
+    let input = text_input(&b.text, k.text(BODY))
         .key("ext-build-message")
         .label("What the extension should do".to_string())
         .w_full()
@@ -339,7 +339,7 @@ fn build_dialog(b: &Building, layer: &mut Vec<El>, k: &Kit) {
         });
     let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0).child(input);
     if let Some(failure) = &b.failure {
-        body = body.child(text(failure.clone()).font(META).color(crate::theme::failed()).wrap().w_full());
+        body = body.child(text(failure.clone()).font(k.text(META)).color(crate::theme::failed()).wrap().w_full());
     }
     let empty = b.text.text.trim().is_empty();
     let buttons = row()

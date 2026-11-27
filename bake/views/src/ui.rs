@@ -441,9 +441,10 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
     let mut needs = SidebarSection::new("Needs you").key("sec-needs").count(s.needs.len());
     for (i, n) in s.needs.iter().take(6).enumerate() {
         let t = n.target.clone();
-        let sel = match (&n.target, selected) {
-            (Target::Session(id), Some(x)) | (Target::Work(id), Some(x)) => id == x,
-            _ => false,
+        let sel = match &n.target {
+            Target::Session(id) => selected == Some(id.as_str()),
+            Target::Work(key) => matches!(&s.screen, Screen::Work(open) if open == key),
+            Target::Project(_) => false,
         };
         needs = needs.row(
             SidebarRow::new(short_title(&n.title, 60))

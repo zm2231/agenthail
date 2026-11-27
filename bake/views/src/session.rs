@@ -372,10 +372,10 @@ pub fn composer(s: &App, placeholder: &str, to: Option<(String, String)>, layer:
 pub fn work_rail(s: &App, id: &str, k: &Kit) -> El {
     let Some(x) = s.d.session(id) else { return col() };
     let mut c = col().w_full().gap(14.0).px(16.0).pt(14.0).pb(24.0);
-    let primary = x.primary_work(None).and_then(|h| s.d.work.get(&h.item_id));
+    let primary = x.primary_work(None).and_then(|h| s.d.work.get(&h.key()));
     match primary {
         Some(w) => {
-            let item = w.id.clone();
+            let item = w.key();
             c = c
                 .child(row().w_full().items_center().child(ui::label("On this work", k)).child(ui::spacer()).child(ui::id_label(&crate::data::short_id(&w.id), k)))
                 .child(ui::title_fit(s, "rail-title", &plain(&w.text), BODY_MED, strong(k), 2))
@@ -392,11 +392,11 @@ pub fn work_rail(s: &App, id: &str, k: &Kit) -> El {
                     .on_press(move |s: &mut App| go(s, Screen::Work(item.clone())))
                     .build(k),
             );
-            let also = s.d.also_holds(x, &w.id);
+            let also = s.d.also_holds(x, &w.key());
             if !also.is_empty() {
                 c = c.child(ui::label("Also holds", k).mt(6.0));
                 for a in also {
-                    let aid = a.id.clone();
+                    let aid = a.key();
                     c = c.child(
                         row()
                             .w_full()

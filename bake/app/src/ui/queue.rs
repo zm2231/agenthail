@@ -255,14 +255,14 @@ fn row_el(s: &App, x: &Session, item: &Queued, k: &Kit) -> El {
         .gap(10.0)
         .items_center()
         .px(12.0)
-        .child(icon(&icons::CLOCK, 13.0).color(faint()))
+        .child(icon(&icons::CLOCK, k.text_size(13.0)).color(faint()))
         .child(
             col()
                 .grow(1.0)
                 .min_w(0.0)
                 .gap(2.0)
-                .child(text(item.headline()).font(META_BOLD).color(theme::text()).truncate())
-                .child(text(if working { "Working…".to_string() } else { item.summary(s.now) }).font(META).color(faint()).truncate()),
+                .child(text(item.headline()).font(k.text(META_BOLD)).color(theme::text()).truncate())
+                .child(text(if working { "Working…".to_string() } else { item.summary(s.now) }).font(k.text(META)).color(faint()).truncate()),
         )
         .child(actions)
 }
@@ -279,7 +279,7 @@ pub(crate) fn dock(s: &App, x: &Session, k: &Kit) -> Option<El> {
         c = c.child(col().key("queue-dock-rows").w_full().max_h(SHOWN as f32 * ROW_HEIGHT).scroll(ScrollSpec { stick_bottom: false }).child(rows_el));
     }
     if let Some(note) = note {
-        c = c.child(row().w_full().h(NOTE_HEIGHT).px(12.0).items_center().child(text(note.clone()).font(META).color(attention()).wrap().max_lines(2)));
+        c = c.child(row().w_full().h(NOTE_HEIGHT).px(12.0).items_center().child(text(note.clone()).font(k.text(META)).color(attention()).wrap().max_lines(2)));
     }
     Some(c)
 }

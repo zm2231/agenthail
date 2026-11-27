@@ -74,27 +74,27 @@ fn banner(r: &LeadReplacement, k: &Kit) -> El {
         .radius(10.0)
         .fill(attention().alpha(0.10))
         .border(1.0, attention().alpha(0.35))
-        .child(icon(&icons::ROTATE, 14.0).color(attention()))
+        .child(icon(&icons::ROTATE, k.text_size(14.0)).color(attention()))
         .child(
             col()
                 .grow(1.0)
                 .w(1.0)
                 .min_w(0.0)
                 .gap(3.0)
-                .child(text(format!("@{} runs in this new conversation", r.name)).font(BODY_BOLD).color(theme::text()).wrap().w_full())
-                .child(text(r.reason.clone()).font(BODY).color(muted()).wrap().w_full().max_lines(2)),
+                .child(text(format!("@{} runs in this new conversation", r.name)).font(k.text(BODY_BOLD)).color(theme::text()).wrap().w_full())
+                .child(text(r.reason.clone()).font(k.text(BODY)).color(muted()).wrap().w_full().max_lines(2)),
         )
         .child(ack)
 }
 
-fn turn(x: &Session) -> Option<El> {
+fn turn(x: &Session, k: &Kit) -> Option<El> {
     let notice = feed::notice::turn_notice(x);
     if notice.is_empty() || !feed::notice::shared().shows(&x.id) {
         return None;
     }
     let id = x.id.clone();
     let never = text("Don\u{2019}t show again")
-        .font(META)
+        .font(k.text(META))
         .color(accent())
         .key("turn-notice-hide")
         .role("button")
@@ -106,7 +106,7 @@ fn turn(x: &Session) -> Option<El> {
         });
     let close = col()
         .key("turn-notice-close")
-        .size(18.0, 18.0)
+        .size(k.text_size(18.0), k.text_size(18.0))
         .radius(5.0)
         .items_center()
         .justify_center()
@@ -118,14 +118,14 @@ fn turn(x: &Session) -> Option<El> {
             crate::settings::redraw();
             crate::over::layout::save(s);
         })
-        .child(icon(&icons::CLOSE, 11.0).color(faint()));
-    Some(row().key("turn-notice").w_full().gap(8.0).items_start().px(15.0).pb(8.0).child(text(notice).font(META).color(muted()).wrap().grow(1.0).w(1.0).min_w(0.0)).child(never).child(close))
+        .child(icon(&icons::CLOSE, k.text_size(11.0)).color(faint()));
+    Some(row().key("turn-notice").w_full().gap(8.0).items_start().px(15.0).pb(8.0).child(text(notice).font(k.text(META)).color(muted()).wrap().grow(1.0).w(1.0).min_w(0.0)).child(never).child(close))
 }
 
 pub fn above(s: &App, x: &Session, k: &Kit) -> Option<El> {
     let banners: Vec<El> = s.notices.replacements.iter().filter(|r| r.session_id == x.id && !s.notices.acking.contains(&r.id)).map(|r| banner(r, k)).collect();
-    let error = s.notices.error.as_ref().filter(|_| !banners.is_empty()).map(|e| text(e.clone()).font(META).color(attention()).wrap().w_full());
-    let turn = turn(x);
+    let error = s.notices.error.as_ref().filter(|_| !banners.is_empty()).map(|e| text(e.clone()).font(k.text(META)).color(attention()).wrap().w_full());
+    let turn = turn(x, k);
     if banners.is_empty() && turn.is_none() {
         return None;
     }
