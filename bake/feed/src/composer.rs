@@ -196,8 +196,14 @@ pub fn now_ms() -> i64 {
 
 pub fn send_stamp(now: i64) -> i64 {
     static LAST: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
-    let before = LAST.fetch_update(std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed, |last| Some(now.max(last + 1))).unwrap_or_default();
-    now.max(before + 1)
+    let mut last = LAST.load(std::sync::atomic::Ordering::Relaxed);
+    loop {
+        let next = now.max(last + 1);
+        match LAST.compare_exchange_weak(last, next, std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed) {
+            Ok(_) => return next,
+            Err(seen) => last = seen,
+        }
+    }
 }
 pub const REDELIVER_MAX_WAIT: f64 = 20.0;
 
