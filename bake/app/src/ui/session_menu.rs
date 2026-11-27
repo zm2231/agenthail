@@ -229,6 +229,12 @@ fn fetch_models(s: &mut App, id: &str) {
     spawn(s, Duration::ZERO, move |c| Some(Done::Models(id.clone(), seq, c.session_models(&surface, &id).map_err(|e| e.to_string()))));
 }
 
+fn failed_now(s: &mut App, id: &str) {
+    if s.selected.as_deref() == Some(id) {
+        s.menus.refreshed = Some((id.to_string(), Instant::now()));
+    }
+}
+
 fn refresh_shown(s: &mut App) {
     if s.screen != Screen::Session || s.client.is_none() {
         return;
@@ -467,12 +473,12 @@ fn settled(s: &mut App, done: Done) {
                 Ok(set) => {
                     s.menus.note.remove(&id);
                     if set.agent_mode_unread {
-                        s.menus.refreshed = Some((id.clone(), Instant::now()));
+                        failed_now(s, &id);
                     }
                     s.menus.settings.insert(id, set);
                 }
                 Err(error) => {
-                    s.menus.refreshed = Some((id.clone(), Instant::now()));
+                    failed_now(s, &id);
                     s.menus.note.insert(id, format!("Couldn't read the settings: {error}"));
                 }
             }
