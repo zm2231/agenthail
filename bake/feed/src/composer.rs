@@ -386,6 +386,9 @@ impl Unconfirmed {
             for unsent in self.0.remove(&old).unwrap_or_default() {
                 self.add(&new, unsent);
             }
+            if let Some(list) = self.0.get_mut(&new) {
+                list.sort_by_key(|u| u.sent_at);
+            }
         }
     }
 
@@ -571,6 +574,17 @@ mod tests {
         list.add_first("s1", Unsent { key: "b".into(), text: "b".into(), ..Default::default() });
         assert_eq!(list.list("s1").iter().map(|u| u.key.as_str()).collect::<Vec<_>>(), ["b", "a"]);
         assert!(list.list("gone").is_empty());
+    }
+
+    #[test]
+    fn merging_a_continued_session_keeps_messages_in_the_order_they_were_sent() {
+        let mut list = Unconfirmed::default();
+        list.add("old", Unsent { key: "a".into(), text: "a".into(), sent_at: 10, ..Default::default() });
+        list.add("new", Unsent { key: "b".into(), text: "b".into(), sent_at: 20, ..Default::default() });
+        list.add("old", Unsent { key: "c".into(), text: "c".into(), sent_at: 30, ..Default::default() });
+        list.rekey(&HashMap::from([("old".to_string(), "new".to_string())]));
+        assert_eq!(list.list("new").iter().map(|u| u.key.as_str()).collect::<Vec<_>>(), ["a", "b", "c"]);
+        assert!(list.list("old").is_empty());
     }
 
     #[test]
