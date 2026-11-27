@@ -241,6 +241,7 @@ pub fn lookup<'a>(listed: Option<&'a Session>, pinned: Pinned<'a>, cached: impl 
 pub enum Recheck {
     Fresh(Box<Session>),
     Gone,
+    Unlisted(String),
     Unknown(String),
 }
 
@@ -291,7 +292,7 @@ impl Client {
         let probe = Session { name: stored, alias: row.alias.clone(), cwd: row.cwd.clone(), ..Session::default() };
         let terms = crate::gone::search_terms(std::iter::once(&probe));
         if terms.is_empty() {
-            return Recheck::Unknown("it has no name or folder to look it up by".into());
+            return Recheck::Unlisted("it has no name or folder to look it up by".into());
         }
         for term in terms {
             match self.listed(&row.id, &term) {
@@ -304,7 +305,7 @@ impl Client {
             }
         }
         if delegated || hidden_from_list(known) {
-            return Recheck::Unknown("Agenthail's session list hides this kind of session".into());
+            return Recheck::Unlisted("Agenthail's session list hides this kind of session".into());
         }
         found
     }
@@ -489,10 +490,10 @@ mod tests {
         assert!(matches!(client.recheck(&known), Recheck::Fresh(r) if !r.archived && r.status == "busy"));
         let delegated = Session { delegated: Some(true), ..known.clone() };
         let (client, _hidden) = crate::mock::daemon(vec![(200, detail.into()), (200, unlisted.into())]);
-        assert!(matches!(client.recheck(&delegated), Recheck::Unknown(_)));
+        assert!(matches!(client.recheck(&delegated), Recheck::Unlisted(_)));
         for marked in [r#"{"session": {"id": "c1", "name": "Fix the importer", "source": "exec"}}"#, r#"{"session": {"id": "c1", "name": "Fix the importer", "source": "subAgent"}}"#, r#"{"session": {"id": "c1", "name": "Fix the importer", "subagent": {"parentId": "p1"}}}"#] {
             let (client, _marked) = crate::mock::daemon(vec![(200, marked.into()), (200, unlisted.into())]);
-            assert!(matches!(client.recheck(&known), Recheck::Unknown(_)), "{marked}");
+            assert!(matches!(client.recheck(&known), Recheck::Unlisted(_)), "{marked}");
         }
         let (client, _failed) = crate::mock::daemon(vec![(200, detail.into()), (500, r#"{"error":{"code":"internal_error","message":"boom"}}"#.into())]);
         assert!(matches!(client.recheck(&known), Recheck::Unknown(_)));

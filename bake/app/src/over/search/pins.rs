@@ -7,7 +7,7 @@ use feed::search::{Pinned, Recheck};
 
 use crate::App;
 
-const RECHECK: Duration = Duration::from_secs(20);
+const RETRY: Duration = Duration::from_secs(20);
 
 pub struct Pins {
     rows: Vec<Session>,
@@ -15,7 +15,7 @@ pub struct Pins {
     read: HashSet<String>,
     revision: HashMap<String, u64>,
     checking: HashMap<String, u64>,
-    checked: HashMap<String, Instant>,
+    checked: HashMap<String, Option<Instant>>,
     requests: u64,
     tx: Sender<(String, u64, u64, Recheck)>,
     rx: Receiver<(String, u64, u64, Recheck)>,
@@ -55,7 +55,7 @@ impl Pins {
         self.pin(row);
         self.verified.insert(id.clone());
         self.read.insert(id.clone());
-        self.checked.insert(id, Instant::now());
+        self.checked.insert(id, None);
     }
 
     pub fn patch(&mut self, id: &str, patch: &feed::menu::Patch) {
@@ -78,6 +78,15 @@ impl Pins {
         self.checked.remove(id);
     }
 
+    fn due(&self, id: &str) -> bool {
+        !self.checking.contains_key(id)
+            && match self.checked.get(id) {
+                None => true,
+                Some(None) => false,
+                Some(Some(failed)) => failed.elapsed() >= RETRY,
+            }
+    }
+
     fn take(&mut self, id: String, seq: u64, revision: u64, found: Recheck) -> Option<String> {
         if self.checking.get(&id) != Some(&seq) {
             return None;
@@ -92,17 +101,23 @@ impl Pins {
                     *x = *row;
                 }
                 self.verified.insert(id.clone());
-                self.checked.insert(id, Instant::now());
+                self.checked.insert(id, None);
             }
             Recheck::Gone => {
                 self.unpin(&id);
                 return Some(id);
             }
+            Recheck::Unlisted(_) => {
+                if !self.read.contains(&id) {
+                    self.verified.remove(&id);
+                }
+                self.checked.insert(id, None);
+            }
             Recheck::Unknown(_) => {
                 if !self.read.contains(&id) {
                     self.verified.remove(&id);
                 }
-                self.checked.insert(id, Instant::now());
+                self.checked.insert(id, Some(Instant::now()));
             }
         }
         None
@@ -118,7 +133,7 @@ fn recheck(s: &mut App) -> bool {
     let Some(id) = super::selected(s) else { return dropped };
     let pins = &s.ov.search.pins;
     let Some(row) = pins.row(&id).cloned() else { return dropped };
-    if pins.checking.contains_key(&id) || pins.checked.get(&id).is_some_and(|at| at.elapsed() < RECHECK) {
+    if !pins.due(&id) {
         return dropped;
     }
     let Some(client) = s.client.clone() else { return dropped };
@@ -188,7 +203,7 @@ mod tests {
         let mut p = Pins::default();
         p.pin_read(row.clone());
         assert_eq!(verdict(&p, "c1"), "verified");
-        check(&mut p, "c1", Recheck::Unknown("Agenthail's session list hides this kind of session".into()));
+        check(&mut p, "c1", Recheck::Unlisted("Agenthail's session list hides this kind of session".into()));
         assert_eq!(verdict(&p, "c1"), "verified");
         p.pin(row.clone());
         assert_eq!(verdict(&p, "c1"), "withheld", "a search pin of the same session is checked again");
@@ -197,5 +212,26 @@ mod tests {
         p.pin_read(row);
         assert_eq!(check(&mut p, "c1", Recheck::Gone), Some("c1".to_string()));
         assert_eq!(verdict(&p, "c1"), "unpinned");
+    }
+
+    #[test]
+    fn a_pin_is_checked_again_only_after_a_failure_or_a_change() {
+        let row = Session { id: "c1".into(), ..Session::default() };
+        let mut p = Pins::default();
+        p.pin(row.clone());
+        assert!(p.due("c1"));
+        check(&mut p, "c1", Recheck::Fresh(Box::new(row.clone())));
+        assert!(!p.due("c1"), "a verified pin isn't read again on a timer");
+        p.patch("c1", &feed::menu::Patch::Alias(Some("x".into())));
+        assert!(p.due("c1"), "a change to the pin checks it again");
+        check(&mut p, "c1", Recheck::Unlisted("Agenthail's session list hides this kind of session".into()));
+        assert!(!p.due("c1"), "a session the list can't show is settled");
+        p.pin(row.clone());
+        check(&mut p, "c1", Recheck::Unknown("offline".into()));
+        assert!(!p.due("c1"), "a failed check waits before trying again");
+        p.checked.insert("c1".into(), Instant::now().checked_sub(RETRY));
+        assert!(p.due("c1"));
+        p.pin_read(row);
+        assert!(!p.due("c1"), "a pin read from the session itself needs no check");
     }
 }
