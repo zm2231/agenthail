@@ -222,7 +222,7 @@ fn choose(s: &mut App, key: &str, item: Item, tx: &mut Tx) {
         Item::NewConversation { host, folder } => crate::ui::new_session::open(s, crate::ui::new_session::Prefill { host, folder }, tx),
         Item::Rename => open_sheet(s, Sheet::Rename { project: p.id.clone(), name: focused(&name) }),
         Item::Lead { .. } => {
-            let first = p.lead_places().first().map(|c| c.project_id.clone()).unwrap_or_default();
+            let first = p.lead_places().first().map(|c| c.key()).unwrap_or_default();
             open_sheet(s, Sheet::Lead { project: p.id.clone(), checkout: first, surface: "claude", name: focused("") });
         }
         Item::ClearLead => ask(s, projects::confirm_clear_lead(&name), Job::ClearLead { project: p.id.clone(), name }, None),
@@ -679,7 +679,7 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
             }
             if places.len() > 1 {
                 let labels = projects::host_labels(p.checkouts.iter().map(|c| (c.host.id.as_str(), c.host.name.as_str())));
-                let choices = places.iter().map(|c| (format!("{}: {}", labels.get(&c.host.id).cloned().unwrap_or_else(|| c.host.name.clone()), c.root_path), c.project_id.clone())).collect();
+                let choices = places.iter().map(|c| (format!("{}: {}", labels.get(&c.host.id).cloned().unwrap_or_else(|| c.host.name.clone()), c.root_path), c.key())).collect();
                 body = body.child(field("Checkout", select("lead-checkout", Pick::Checkout, choices, checkout, "Choose…", open == Some(Pick::Checkout), pick_checkout, &mut popups)));
             }
             let at = SURFACES.iter().position(|(id, _)| id == surface);

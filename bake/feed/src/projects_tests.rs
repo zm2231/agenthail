@@ -464,10 +464,15 @@ fn a_lead_starts_where_chosen_or_on_the_one_computer_left() {
         {"host": {"id": "h3", "name": "spare", "state": "connected"}, "projectId": "h3::p1", "rootPath": "/s/app", "archived": true},
     ]}));
     let both = two("connected");
-    assert_eq!(both.lead_place("h2::p1").map(|c| c.host.id.as_str()), Some("h2"));
+    assert_eq!(both.lead_place(&both.checkouts[1].key()).map(|c| c.host.id.as_str()), Some("h2"));
     assert_eq!(both.lead_place("gone"), None, "with a choice left, nothing is picked for you");
     let one = two("unreachable");
-    assert_eq!(one.lead_place("h2::p1").map(|c| c.host.id.as_str()), Some("h1"), "the one computer left is used and shown");
+    assert_eq!(one.lead_place(&one.checkouts[1].key()).map(|c| c.host.id.as_str()), Some("h1"), "the one computer left is used and shown");
+    let same = record(json!({"id": "p1", "checkouts": [
+        {"host": {"id": "h1", "name": "mac", "state": "local"}, "projectId": "implicit:/w", "rootPath": "/w"},
+        {"host": {"id": "h2", "name": "forge", "state": "connected"}, "projectId": "implicit:/w", "rootPath": "/w"},
+    ]}));
+    assert_eq!(same.lead_place(&same.checkouts[1].key()).map(|c| c.host.id.as_str()), Some("h2"), "the same folder id on two computers stays apart");
 }
 
 #[test]
@@ -479,4 +484,12 @@ fn a_message_to_a_lead_says_whether_it_arrived_or_waits() {
     ]));
     let notes: Vec<String> = (0..3).map(|_| lead_sent("@lead", &client.lead_send("p1", "hi").unwrap())).collect();
     assert_eq!(notes, vec!["Sent to @lead.", "Queued for @lead; it goes when @lead is free.", "Queued for @lead; it goes once @lead's waiting question is answered."]);
+}
+
+#[test]
+fn a_lead_message_without_a_receipt_is_unconfirmed() {
+    let (client, _seen) = daemon(replies(&[(200, r#"{"ok":true}"#), (200, r#"{"ok":true,"result":null}"#), (200, r#"{"ok":true,"result":{}}"#), (200, r#"{"ok":true,"result":"x"}"#)]));
+    for _ in 0..4 {
+        assert_eq!(client.lead_send("p1", "hi").unwrap(), Delivered::Unconfirmed);
+    }
 }

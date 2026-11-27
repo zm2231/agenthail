@@ -81,6 +81,12 @@ impl Entry {
     }
 }
 
+impl Checkout {
+    pub fn key(&self) -> String {
+        format!("{}\u{1f}{}", self.host.id, self.project_id)
+    }
+}
+
 impl ProjectRecord {
     pub fn name(&self) -> &str {
         if self.display_name.is_empty() { &self.id } else { &self.display_name }
@@ -110,7 +116,7 @@ impl ProjectRecord {
 
     pub fn lead_place(&self, chosen: &str) -> Option<&Checkout> {
         let places = self.lead_places();
-        places.iter().find(|c| c.project_id == chosen).or_else(|| if places.len() == 1 { places.first() } else { None }).copied()
+        places.iter().find(|c| c.key() == chosen).or_else(|| if places.len() == 1 { places.first() } else { None }).copied()
     }
 
     pub fn start_place(&self) -> Option<&Checkout> {
@@ -644,7 +650,11 @@ impl Client {
     }
 
     pub fn lead_send(&self, project: &str, message: &str) -> Outcome<Delivered> {
-        Ok(Delivered::read(&self.action("coordinator-send", json!({"project": project, "message": message, "author": "person"}))?))
+        let reply = self.action("coordinator-send", json!({"project": project, "message": message, "author": "person"}))?;
+        if reply["result"]["evidence"].as_str().is_none_or(str::is_empty) {
+            return Ok(Delivered::Unconfirmed);
+        }
+        Ok(Delivered::read(&reply))
     }
 
     pub fn lead_clear(&self, project: &str) -> Outcome<()> {
