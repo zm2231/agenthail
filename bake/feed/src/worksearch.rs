@@ -31,6 +31,10 @@ pub struct Found {
     #[serde(default)]
     pub state: String,
     #[serde(default)]
+    pub phase: String,
+    #[serde(default)]
+    pub assignee_alias: String,
+    #[serde(default)]
     pub snippet: Option<String>,
 }
 
@@ -97,6 +101,14 @@ fn state_word(state: &str) -> String {
     }
 }
 
+fn step_word(f: &Found) -> String {
+    let phase = f.phase.trim();
+    if phase.is_empty() {
+        return state_word(&f.state);
+    }
+    crate::derive::phase::PHASES.iter().find(|p| p.eq_ignore_ascii_case(phase)).map_or_else(|| crate::derive::text::capital(&phase.replace('_', " ")), |p| p.to_string())
+}
+
 impl World {
     pub fn found_extra(&self, f: &Found) -> Vec<String> {
         let mut out = Vec::new();
@@ -116,7 +128,11 @@ impl World {
             .iter()
             .filter(|f| !listed(f))
             .map(|f| {
-                let mut status = vec![state_word(&f.state)];
+                let mut status = vec![step_word(f)];
+                let alias = f.assignee_alias.trim().trim_start_matches('@');
+                if !alias.is_empty() {
+                    status.push(format!("@{alias}"));
+                }
                 if !f.project_name.is_empty() {
                     status.push(f.project_name.clone());
                 }
@@ -188,7 +204,7 @@ mod tests {
     #[test]
     fn rows_show_state_project_host_and_snippet_and_skip_listed_work() {
         let w = world();
-        let item = |id: &str, host: Option<&str>, snippet: Option<&str>| Found { project_key: "repo:x/y".into(), project_name: "Y".into(), host: host.map(String::from), id: id.into(), title: format!("{id} export"), state: "parked".into(), snippet: snippet.map(String::from) };
+        let item = |id: &str, host: Option<&str>, snippet: Option<&str>| Found { project_key: "repo:x/y".into(), project_name: "Y".into(), host: host.map(String::from), id: id.into(), title: format!("{id} export"), state: "parked".into(), snippet: snippet.map(String::from), ..Found::default() };
         let search = Search { items: vec![item("y-W1", None, None), item("y-W2", Some("h2"), Some("…drops\n rows…")), item("y-W3", Some("h9"), None), item("y-W4", None, None)], truncated: false };
         let rows = w.found_rows(&search, |f| f.id == "y-W4");
         assert_eq!(w.found_extra(&search.items[1]), ["on build-box", "…drops rows…"]);
@@ -198,6 +214,22 @@ mod tests {
         assert_eq!((rows[0].badge.as_str(), rows[0].avatar.as_str()), (short_id("y-W1").as_str(), "Y"));
         assert_eq!(state_word("in_review"), "In review");
         assert_eq!(state_word("deleted"), "Deleted");
+    }
+
+    #[test]
+    fn rows_show_the_step_and_the_assignee_and_fall_back_to_the_state() {
+        let w = world();
+        let item = |id: &str, state: &str, phase: &str, alias: &str| Found { project_key: "repo:x/y".into(), project_name: "Y".into(), id: id.into(), state: state.into(), phase: phase.into(), assignee_alias: alias.into(), ..Found::default() };
+        let search = Search { items: vec![item("y-W1", "in_progress", "review", "builder"), item("y-W2", "in_progress", "build", ""), item("y-W3", "in_review", "", "@checker"), item("y-W4", "open", "triage_later", "")], truncated: false };
+        let rows: Vec<String> = w.found_rows(&search, |_| false).into_iter().map(|r| r.status).collect();
+        assert_eq!(rows, ["Review · @builder · Y", "Build · Y", "In review · @checker · Y", "Triage later · Y"]);
+    }
+
+    #[test]
+    fn the_search_reads_phase_and_assignee_alias() {
+        let found = read(&json!({"items": [{"projectKey": "p", "id": "p-W1", "title": "t", "state": "in_progress", "phase": "verify", "assignee": "s-1", "assigneeAlias": "builder"}, {"projectKey": "p", "id": "p-W2", "state": "open"}]})).unwrap();
+        assert_eq!((found.items[0].phase.as_str(), found.items[0].assignee_alias.as_str()), ("verify", "builder"));
+        assert_eq!((found.items[1].phase.as_str(), found.items[1].assignee_alias.as_str()), ("", ""));
     }
 
     #[test]
