@@ -24,10 +24,14 @@ fn what(t: &Entry, moved_back: bool) -> String {
     plain(&text)
 }
 
+fn is_handoff(text: &str) -> bool {
+    text.ends_with(']') && [", remaining [", ", decisions [", ", uncertain ["].iter().all(|k| text.contains(k))
+}
+
 fn park_why(text: &str) -> Option<&str> {
     let start = text.find("parked (")?;
     let part = &text[start..];
-    let part = part.rfind("; handoff: done [").map_or(part, |end| &part[..end]);
+    let part = part.rfind("; handoff: done [").filter(|&end| is_handoff(&part[end + 2..])).map_or(part, |end| &part[..end]);
     part.split_once("): ").map(|(_, why)| why).filter(|w| !w.is_empty())
 }
 

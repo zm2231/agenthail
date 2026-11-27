@@ -92,6 +92,10 @@ pub fn refusal(e: &RespondError) -> String {
 
 pub const CHANGED_WORDS: &str = "The last send isn't confirmed yet. Changed words go as a new one, so check the timeline first.";
 
+pub fn unreached(e: &RespondError) -> String {
+    format!("Couldn't reach Agenthail: {}. The earlier send is still unconfirmed; pressing again asks about it.", e.message)
+}
+
 pub fn unconfirmed(e: &RespondError, again: bool) -> String {
     if again {
         format!("Still not confirmed: {}. If the timeline doesn't show it, pressing again sends it as new.", e.message)
@@ -175,6 +179,10 @@ mod tests {
         let lost = client.work_move(&w, Move::Claim, "", "k3").unwrap_err();
         assert!(lost.maybe_delivered);
         assert_eq!(unconfirmed(&lost, false), "Sent, not confirmed: Host mac did not answer. Check the timeline; pressing again asks about the same send.");
+        let unsent = Client::new("http://127.0.0.1:0", "secret").work_move(&w, Move::Comment, "hi", "k4").unwrap_err();
+        assert!(!unsent.answered && !unsent.maybe_delivered);
+        assert!(unreached(&unsent).starts_with("Couldn't reach Agenthail: "));
+        assert!(unreached(&unsent).ends_with("The earlier send is still unconfirmed; pressing again asks about it."));
         assert_eq!(unconfirmed(&lost, true), "Still not confirmed: Host mac did not answer. If the timeline doesn't show it, pressing again sends it as new.");
     }
 
