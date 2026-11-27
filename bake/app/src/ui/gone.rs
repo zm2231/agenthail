@@ -43,9 +43,9 @@ fn due(m: &Missing, clock: f64) -> bool {
         return true;
     }
     match &m.look {
-        Look::Found(g) => g.incomplete && clock - m.asked >= RETRY,
+        Look::Found(g) => g.incomplete && crate::wake::due_clock(m.asked + RETRY, clock),
         Look::Deleted(_) => false,
-        Look::Pending | Look::Failed(_) => clock - m.asked >= RETRY,
+        Look::Pending | Look::Failed(_) => crate::wake::due_clock(m.asked + RETRY, clock),
     }
 }
 

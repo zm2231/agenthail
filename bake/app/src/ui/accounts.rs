@@ -1,14 +1,16 @@
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use feed::catalog::{Client, RespondError};
 use feed::limit::span;
 use feed::prefer::{self, Meter, Plan, Prefer, ProxyAccount, ProxyGroup, Set};
+use feed::wake::Sender;
 use rune::{El, ScrollSpec, col, el, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit, Switch};
 
 use crate::theme::{self, BODY_BOLD, LABEL, META, attention, done, failed, faint, muted};
 use crate::{App, select};
+use crate::wake::channel;
 
 pub enum Done {
     Sets(u64, Result<Vec<Set>, String>),
@@ -196,7 +198,7 @@ pub fn drain(s: &mut App) -> bool {
         settled(s, done);
     }
     if s.accounts.open && s.client.is_some() && !s.accounts.in_flight {
-        if s.accounts.asked_at.is_none_or(|at| at.elapsed() >= USAGE_EVERY) {
+        if s.accounts.asked_at.is_none_or(|at| crate::wake::due_after(at, USAGE_EVERY)) {
             fetch(s);
         }
     }

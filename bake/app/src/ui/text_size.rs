@@ -1,13 +1,15 @@
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::sync::{Condvar, Mutex};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use feed::look::{self as fl, Change};
 use feed::prefs::Failure;
+use feed::wake::Sender;
 
 use crate::App;
+use crate::wake::channel;
 
 const WRITE_AFTER: Duration = Duration::from_secs(1);
 
@@ -99,7 +101,7 @@ pub fn pump(s: &mut App) -> bool {
         if !wrote.is_empty() {
             st.writing = false;
         }
-        let due = st.due.filter(|(_, at)| !st.writing && Instant::now() >= *at).map(|(scale, _)| scale);
+        let due = st.due.filter(|(_, at)| !st.writing && crate::wake::due(*at)).map(|(scale, _)| scale);
         if due.is_some() {
             st.due = None;
             st.writing = true;

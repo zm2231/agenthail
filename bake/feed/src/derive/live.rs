@@ -583,6 +583,14 @@ impl Overview {
         self.tails.retry_due()
     }
 
+    pub fn next_tail_retry(&self) -> Option<Instant> {
+        self.tails.next_retry()
+    }
+
+    pub fn next_expiry(&self) -> Option<Instant> {
+        self.expected.iter().map(|e| e.at + EXPECT_HOLD).min()
+    }
+
     pub fn take_tail(&mut self, session: &str, last_active: String, result: Result<Tail, String>, at: Option<tails::Resume>) {
         if let Some(at) = at {
             self.tails.hold(session, at);

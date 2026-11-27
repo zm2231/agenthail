@@ -1,12 +1,14 @@
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 
 use feed::catalog::{RespondError, Session};
 use feed::inspect::{self, GoalAct, LifecycleAct, LifecycleResult, Metadata};
+use feed::wake::Sender;
 use rune::{El, ScrollSpec, TextEdit, Tx, col, el, icon, row, text, text_input};
 use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit};
 use time::OffsetDateTime;
 
+use crate::wake::channel;
 use super::rail::rail_section;
 use crate::icons;
 use crate::theme::{self, BODY, META, META_BOLD, accent, attention, failed, faint, muted, wash};

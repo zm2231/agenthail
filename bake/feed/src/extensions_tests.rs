@@ -228,3 +228,13 @@ fn an_offered_entry_asks_to_be_pinned() {
     assert_eq!(pin_help(false, false), "Pin to the sidebar");
     assert_eq!(pin_help(true, true), "Unpin from the sidebar");
 }
+
+#[test]
+fn a_read_age_wakes_the_page_when_its_label_next_changes() {
+    for secs in [0, 3, 4, 5, 30, 59, 60, 61, 119, 3599, 3600, 7300] {
+        let next = age_moves_at(secs);
+        assert!(next > secs);
+        assert_eq!(age(next - 1, false), age(secs, false), "{secs}s reads the same until {next}s");
+        assert_ne!(age(next, false), age(secs, false), "{secs}s changes at {next}s");
+    }
+}

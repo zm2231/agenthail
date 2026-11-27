@@ -1,12 +1,14 @@
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use feed::derive::world::{Work, WorkKey, World};
+use feed::wake::Sender;
 use feed::worksearch::{Search, work_query};
 
 use crate::over::go;
 use crate::{App, Screen};
+use crate::wake::channel;
 
 pub const SETTLE: Duration = Duration::from_millis(200);
 

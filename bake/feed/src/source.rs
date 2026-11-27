@@ -1,9 +1,9 @@
 use std::io::{BufRead, BufReader};
-use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
+use crate::wake::Post;
 use crate::wire::{Event, Outcome, Rebuild, Sse, Wire};
 
 pub struct Batch {
@@ -17,11 +17,11 @@ pub enum Message {
     CaughtUp,
 }
 
-fn feed_line(line: &str, sse: &mut Sse, rebuild: &mut Rebuild, tx: &Sender<Message>) -> Result<bool, ()> {
+fn feed_line(line: &str, sse: &mut Sse, rebuild: &mut Rebuild, tx: &impl Post<Message>) -> Result<bool, ()> {
     let Some(json) = sse.line(line) else { return Ok(true) };
     let Ok(wire) = serde_json::from_str::<Wire>(&json) else { return Ok(true) };
     match rebuild.apply(wire) {
-        Outcome::Events(seq, events) => Ok(tx.send(Message::Batch(Batch { seq, events })).is_ok()),
+        Outcome::Events(seq, events) => Ok(tx.post(Message::Batch(Batch { seq, events })).is_ok()),
         Outcome::Skip => Ok(true),
         Outcome::Resync => Err(()),
     }
@@ -39,7 +39,7 @@ impl Live {
         Ok(Self { base: base.trim_end_matches('/').into(), token, session })
     }
 
-    pub fn run(self, tx: Sender<Message>) {
+    pub fn run(self, tx: impl Post<Message>) {
         let agent = ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(5)).build();
         let id: String = url::form_urlencoded::byte_serialize(self.session.as_bytes()).collect();
         let mut after = 0u64;
@@ -53,12 +53,12 @@ impl Live {
                 .call();
             match response {
                 Ok(response) => {
-                    let _ = tx.send(Message::Status("live".into()));
+                    let _ = tx.post(Message::Status("live".into()));
                     let mut sse = Sse::default();
                     let mut rebuild = Rebuild::default();
                     for line in BufReader::new(response.into_reader()).lines() {
                         let Ok(line) = line else { break };
-                        if line == ": live" && tx.send(Message::CaughtUp).is_err() {
+                        if line == ": live" && tx.post(Message::CaughtUp).is_err() {
                             return;
                         }
                         if let Some(json) = line.strip_prefix("data:").map(str::trim) {
@@ -79,7 +79,7 @@ impl Live {
                     }
                 }
                 Err(error) => {
-                    if tx.send(Message::Status(format!("reconnecting: {error}"))).is_err() {
+                    if tx.post(Message::Status(format!("reconnecting: {error}"))).is_err() {
                         return;
                     }
                 }
@@ -95,7 +95,7 @@ pub struct Replay {
 }
 
 impl Replay {
-    pub fn run(self, tx: Sender<Message>) -> Result<()> {
+    pub fn run(self, tx: impl Post<Message>) -> Result<()> {
         let file = std::fs::File::open(&self.path).with_context(|| format!("open {}", self.path))?;
         let lines: Vec<(f64, String)> = BufReader::new(file)
             .lines()
@@ -109,7 +109,7 @@ impl Replay {
         let start = Instant::now();
         let mut sse = Sse::default();
         let mut rebuild = Rebuild::default();
-        let _ = tx.send(Message::Status("replay".into()));
+        let _ = tx.post(Message::Status("replay".into()));
         for (ts, line) in lines {
             if self.speed > 0.0 {
                 let due = Duration::from_secs_f64(((ts - first) / self.speed).max(0.0));
@@ -121,7 +121,7 @@ impl Replay {
                 return Ok(());
             }
         }
-        let _ = tx.send(Message::Status("replay finished".into()));
+        let _ = tx.post(Message::Status("replay finished".into()));
         Ok(())
     }
 }

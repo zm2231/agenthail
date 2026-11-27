@@ -1,9 +1,10 @@
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 
 use feed::catalog::{RespondError, request_key};
 use feed::create::Host;
 use feed::extension_changes::{Change, Shown, Started, build_title};
+use feed::wake::Sender;
 use rune::{El, ScrollSpec, TextEdit, col, el, row, text, text_input};
 use rune_kit::diff::{DiffState, DiffView, parse};
 use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit, Spinner};
@@ -11,6 +12,7 @@ use rune_kit::{Button, ButtonVariant, ControlSize, Dialog, Kit, Spinner};
 use crate::App;
 use crate::over::open_session;
 use crate::over::ui::{BODY, META, strong, weak};
+use crate::wake::channel;
 
 const HISTORY_LIMIT: usize = 50;
 

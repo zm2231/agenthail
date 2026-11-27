@@ -1,10 +1,12 @@
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 
 use feed::native_queue::{self as nq, Act, Keys, Outcome, Page, Queue};
+use feed::wake::Sender;
 use rune::TextEdit;
 
 use crate::{App, session};
+use crate::wake::channel;
 
 mod view;
 

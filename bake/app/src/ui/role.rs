@@ -1,10 +1,12 @@
 use std::collections::HashMap;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use feed::role::SessionRole;
+use feed::wake::Sender;
 
 use crate::App;
+use crate::wake::channel;
 
 type Read = (String, u64, Result<Option<SessionRole>, String>);
 
@@ -62,7 +64,7 @@ pub fn drain(s: &mut App) -> bool {
             Err(_) => s.roles.failed = Some((id, Instant::now())),
         }
     }
-    let due = s.roles.failed.as_ref().filter(|(id, at)| at.elapsed() >= RETRY && s.screen == crate::Screen::Session && s.selected.as_deref() == Some(id.as_str())).map(|(id, _)| id.clone());
+    let due = s.roles.failed.as_ref().filter(|(id, at)| s.screen == crate::Screen::Session && s.selected.as_deref() == Some(id.as_str()) && crate::wake::due_after(*at, RETRY)).map(|(id, _)| id.clone());
     if let Some(id) = due {
         s.roles.failed = None;
         refresh(s, &id);

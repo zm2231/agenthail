@@ -214,6 +214,10 @@ impl Tails {
         self.failed.values().any(|until| now >= *until)
     }
 
+    pub fn next_retry(&self) -> Option<Instant> {
+        self.failed.values().min().copied()
+    }
+
     pub fn held(&self) -> impl Iterator<Item = (&String, &Tail)> {
         self.held.iter().map(|(id, (_, tail))| (id, tail))
     }

@@ -62,6 +62,7 @@ pub mod tabs;
 pub mod trace;
 pub mod version;
 pub mod voice;
+pub mod wake;
 pub mod watch;
 pub mod windows;
 pub mod wire;

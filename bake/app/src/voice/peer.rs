@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::Sender;
 
 use feed::voice::{Peer, peer_allowed, shown_address};
+use feed::wake::Sender;
 
 use super::Heard;
 use rune::NativeView;

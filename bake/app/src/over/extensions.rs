@@ -1,11 +1,12 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use feed::catalog::RespondError;
 use feed::create::Host;
 use feed::extension_changes::build_blocked;
 use feed::extensions::{Approval, Entry, Extension, Kind, List, Tone, WebSession, approval, entries, pin_help, pins_host, problems, status};
+use feed::wake::Sender;
 use rune::{Color, Cx, El, ScrollSpec, col, el, icon, row, text};
 use rune_kit::shell::Toolbar;
 use rune_kit::{Button, ButtonVariant, ControlSize, Kit, KitCx, Spinner};
@@ -14,6 +15,7 @@ use rune_theme_opencode::icons;
 use crate::over::extension_sheets::{self, Sheets};
 use crate::over::ui::{self, BODY, BODY_MED, HEAD, META, META_MED, strong, weak};
 use crate::over::{go, open_session};
+use crate::wake::channel;
 use crate::web::{Phase, Web};
 use crate::{App, Screen};
 
@@ -277,13 +279,13 @@ pub fn drain(s: &mut App) -> bool {
     match s.ov.ext.fetched_at {
         None => refresh(s),
         Some(at) => {
-            let retry = |since: Option<Instant>, after: Duration| since.is_some_and(|t| t.elapsed() >= after);
+            let retry = |since: Option<Instant>, after: Duration| since.is_some_and(|t| crate::wake::due_after(t, after));
             if retry(s.ov.ext.hosts_failed_at, PAIRED_EVERY)
                 && let Some(client) = s.client.clone()
             {
                 read_hosts(s, client);
             }
-            let poll = at.elapsed() >= PAIRED_EVERY && s.ov.ext.catalogs.iter().any(|c| !c.host.is_local() && wanted(s, &c.host));
+            let poll = s.ov.ext.catalogs.iter().any(|c| !c.host.is_local() && wanted(s, &c.host)) && crate::wake::due_after(at, PAIRED_EVERY);
             if poll {
                 s.ov.ext.fetched_at = Some(Instant::now());
             }
@@ -296,7 +298,18 @@ pub fn drain(s: &mut App) -> bool {
             }
         }
     }
-    let ages: Vec<String> = s.ov.ext.catalogs.iter().filter_map(|c| Some(feed::extensions::age(c.fetched?.elapsed().as_secs(), s.ov.ext.listing.contains(&c.key())))).collect();
+    let ages: Vec<String> = s
+        .ov
+        .ext
+        .catalogs
+        .iter()
+        .filter_map(|c| {
+            let fetched = c.fetched?;
+            let secs = fetched.elapsed().as_secs();
+            crate::wake::due_after(fetched, Duration::from_secs(feed::extensions::age_moves_at(secs)));
+            Some(feed::extensions::age(secs, s.ov.ext.listing.contains(&c.key())))
+        })
+        .collect();
     if ages != s.ov.ext.ages {
         s.ov.ext.ages = ages;
         changed = true;

@@ -1,11 +1,13 @@
 use std::collections::HashSet;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use feed::listing::{Listing, Page, RECENT, Request, SCOPES};
+use feed::wake::Sender;
 use feed::watch::Removal;
 
 use crate::{App, Screen};
+use crate::wake::channel;
 
 const SETTLE: Duration = Duration::from_millis(300);
 const TYPING: Duration = Duration::from_millis(250);
@@ -276,9 +278,10 @@ pub fn poll(s: &mut App) -> bool {
         let typing = current.is_some_and(|c| Request { query: want.query.clone(), ..c.clone() } == want);
         if typing && s.ov.list.typed.as_ref().is_none_or(|t| t.0 != want) {
             s.ov.list.typed = Some((want, Instant::now() + TYPING));
+            crate::wake::due(Instant::now() + TYPING);
             return changed;
         }
-        if typing && s.ov.list.typed.as_ref().is_some_and(|t| Instant::now() < t.1) {
+        if typing && s.ov.list.typed.as_ref().is_some_and(|t| !crate::wake::due(t.1)) {
             return changed;
         }
         ask(s, Read::First, want);
@@ -291,7 +294,7 @@ pub fn poll(s: &mut App) -> bool {
     if s.ov.list.stale {
         s.ov.list.due = Some(Instant::now());
     }
-    if s.ov.list.due.is_some_and(|d| Instant::now() >= d) {
+    if s.ov.list.due.is_some_and(crate::wake::due) {
         ask(s, Read::Again, want);
         return true;
     }

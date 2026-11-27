@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::mpsc::{Sender, channel};
+use std::sync::mpsc::Sender;
 use std::sync::{Mutex, OnceLock};
 
 use serde_json::{Value, json};
 
 use crate::App;
+use crate::wake::to_thread;
 
 pub const PANES: [&str; 3] = ["Sidebar", "Needs you", "Sessions"];
 
@@ -199,7 +200,7 @@ type Write = (String, Option<Sender<Result<(), String>>>);
 fn writer() -> &'static Sender<Write> {
     static WRITER: OnceLock<Sender<Write>> = OnceLock::new();
     WRITER.get_or_init(|| {
-        let (tx, rx) = channel::<Write>();
+        let (tx, rx) = to_thread::<Write>();
         std::thread::spawn(move || {
             for (text, done) in rx {
                 let Some(p) = path() else { continue };
@@ -211,6 +212,7 @@ fn writer() -> &'static Sender<Write> {
                     .and_then(|()| std::fs::rename(&next, &p))
                     .map_err(|e| e.to_string());
                 *FAILED.lock().expect("layout lock") = written.clone().err();
+                crate::wake::poke();
                 if written.is_err() {
                     let mut last = LAST.lock().expect("layout lock");
                     if *last == text {
@@ -251,7 +253,7 @@ pub fn save_now(s: &App) -> Result<(), String> {
         return Err("HOME is not set".into());
     }
     let now = encode(s);
-    let (done, wait) = channel();
+    let (done, wait) = to_thread();
     *LAST.lock().expect("layout lock") = now.clone();
     let result = writer()
         .send((now, Some(done)))

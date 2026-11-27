@@ -1,13 +1,15 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use feed::catalog::{Client, RespondError};
 use feed::menu::{self, Act, Patch};
 use feed::settings::{self, Chip, Choice, ContextUsage, ModelOption, Pick, SessionSettings};
+use feed::wake::Sender;
 use rune::{PointerPress, TextEdit};
 
 use crate::{App, Screen, open_link, session};
+use crate::wake::channel;
 
 pub use super::session_dialogs::{button, has_marks, marks, overlays};
 
@@ -205,13 +207,13 @@ pub fn ensure_models(s: &mut App, id: &str) {
     if s.client.is_none() || session(s, id).is_none() {
         return;
     }
-    if !s.menus.settings.contains_key(id) && s.menus.settings_asked.get(id).is_none_or(|at| at.elapsed() >= RETRY) {
+    if !s.menus.settings.contains_key(id) && s.menus.settings_asked.get(id).is_none_or(|at| crate::wake::due_after(*at, RETRY)) {
         s.menus.settings_asked.insert(id.to_string(), Instant::now());
         fetch_settings(s, id, Duration::ZERO);
     }
     let retry = match s.menus.models_asked.get(id) {
         None => true,
-        Some(at) => s.menus.models_error.contains_key(id) && at.elapsed() >= RETRY,
+        Some(at) => s.menus.models_error.contains_key(id) && crate::wake::due_after(*at, RETRY),
     };
     if retry {
         fetch_models(s, id);
@@ -245,7 +247,7 @@ fn refresh_shown(s: &mut App) {
     }
     let unread = s.menus.settings.get(&id).is_some_and(|x| x.agent_mode_unread);
     let failed = unread || s.menus.note.contains_key(&id) || s.menus.context_error.contains_key(&id) || s.menus.models_error.contains_key(&id);
-    let due = s.menus.refreshed.as_ref().is_none_or(|(shown, at)| *shown != id || at.elapsed() >= RETRY);
+    let due = s.menus.refreshed.as_ref().is_none_or(|(shown, at)| *shown != id || crate::wake::due_after(*at, RETRY));
     if !failed || !due {
         return;
     }
@@ -611,6 +613,9 @@ pub fn drain(s: &mut App) -> bool {
     if s.ov.live.expire() {
         s.sessions = s.ov.live.sessions().to_vec();
         changed = true;
+    }
+    if let Some(at) = s.ov.live.next_expiry() {
+        crate::wake::due(at);
     }
     if let Some((id, key)) = s.menus.chip.clone()
         && !chips_for(s, &id).iter().any(|c| c.key == key && c.changeable)

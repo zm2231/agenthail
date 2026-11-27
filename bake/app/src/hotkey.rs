@@ -1,5 +1,5 @@
 use std::cell::{OnceCell, RefCell};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, Sender};
 
 use feed::hotkey::{Ask, Hotkey, Refusal, Registrar, Return, Window};
 use feed::shortcuts::{ANY_APP, ANY_APP_ID, Stored};
@@ -71,7 +71,7 @@ fn shown(refused: Option<Refusal>, tried: Option<Stored>) {
 }
 
 pub fn keep(handle: AppHandle<App>) {
-    let (tx, rx) = channel();
+    let (tx, rx) = crate::wake::to_thread();
     let worker = handle.clone();
     let spawned = std::thread::Builder::new().name("agenthail-shortcut".into()).spawn(move || run(worker, rx));
     if let Err(error) = spawned {

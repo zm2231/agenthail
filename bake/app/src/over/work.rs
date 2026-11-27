@@ -1,5 +1,5 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 
 use rune::{Cx, El, ScrollSpec, TextEdit, Tx, col, el, icon, row, text, text_input};
 use rune_kit::shell::Toolbar;
@@ -13,11 +13,13 @@ use feed::ledger::{self, Move};
 use feed::derive::phase::{CHECK, SHIP, off_board, phase};
 use feed::derive::proof::proof;
 use feed::derive::work::{commit, pr, unchecked};
+use feed::wake::Sender;
 
 use crate::over::{PHASES, WorkKey, plain, short_id};
 use crate::over::ui::{self, BODY, BODY_MED, HEAD, META, META_MED, TITLE, base, strong, weak};
 use crate::over::go;
 use crate::{App, Screen};
+use crate::wake::channel;
 
 fn phase_badge(phase: usize, k: &Kit) -> El {
     let color = if phase == CHECK { k.c.warning.icon } else if phase == SHIP { k.c.success.icon } else { k.c.text_accent };
@@ -425,6 +427,9 @@ pub fn drain(s: &mut App) -> bool {
             fly(s, &item, m, key, body);
             changed = true;
         }
+    }
+    if let Some(at) = s.ov.work.sends.next_due(clock) {
+        crate::wake::due_clock(at, clock);
     }
     changed
 }

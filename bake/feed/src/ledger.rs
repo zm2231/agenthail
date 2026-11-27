@@ -233,6 +233,10 @@ impl Sends {
         self.0.iter().filter(|(_, p)| !p.answered_unknown).filter_map(|((k, m), p)| p.resend.filter(|r| r.due <= now && now - r.since < RESEND_FOR).map(|_| (k.clone(), *m, p.words.clone()))).collect()
     }
 
+    pub fn next_due(&self, now: f64) -> Option<f64> {
+        self.0.values().filter(|p| !p.answered_unknown).filter_map(|p| p.resend.filter(|r| r.due > now && r.due - r.since < RESEND_FOR).map(|r| r.due)).min_by(f64::total_cmp)
+    }
+
     pub fn wake(&mut self, now: f64) {
         for p in self.0.values_mut() {
             p.woke = true;
@@ -382,6 +386,18 @@ mod tests {
         assert!(sends.due(29.9).is_empty() && !sends.due(30.0).is_empty(), "the wait doubles");
         assert_eq!(sent(&mut sends, &client, &parked, Move::Claim, "", 30.0), (true, "Not done: p-W6 is parked".into()));
         assert_eq!(sends.held(&k6()), None);
+    }
+
+    #[test]
+    fn the_next_resend_is_when_one_first_comes_due() {
+        let lost = Err(RespondError::from_status("claim", 504, ""));
+        let mut sends = Sends::default();
+        assert_eq!(sends.next_due(0.0), None, "nothing waiting arms nothing");
+        sends.sending(&work("open", None), Move::Park, "later");
+        sends.answered(&k6(), Move::Park, &lost, 0.0);
+        let next = sends.next_due(0.0).expect("a lost send waits to go again");
+        assert!(sends.due(next - 0.01).is_empty() && !sends.due(next).is_empty());
+        assert_eq!(sends.next_due(next), None, "a due send is taken now, not woken for");
     }
 
     #[test]

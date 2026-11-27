@@ -255,7 +255,7 @@ fn daemon_log() -> (feed::catalog::Client, std::sync::mpsc::Receiver<(String, st
 #[test]
 fn a_ledger_asked_for_between_overview_reads_is_read_without_waiting_for_the_next_one() {
     let (client, log) = daemon_log();
-    let (outbox, _inbox) = std::sync::mpsc::channel();
+    let (outbox, _inbox) = crate::wake::channel();
     let (poke, poked) = std::sync::mpsc::channel();
     let stream = feed::watch::Stream::default();
     stream.open();
@@ -306,70 +306,212 @@ fn unframed(app: App) -> Runtime<App> {
     rune::App::new(spec).init(move || app).headless_runtime((1440.0, 900.0), Env { system_dark: true, scale: 1.0 })
 }
 
-fn streaming(app: &mut App, id: &str) -> std::sync::mpsc::Sender<feed::source::Message> {
-    let (stream, live) = std::sync::mpsc::channel();
+fn streaming(app: &mut App, id: &str) -> feed::wake::Sender<feed::source::Message> {
+    let (stream, live) = crate::wake::channel();
     let mut pane = Pane::new();
     pane.live = Some(live);
     app.panes.insert(id.into(), pane);
     stream
 }
 
+fn rings() -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+    let rings = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = rings.clone();
+    crate::wake::MAIN.install(move || {
+        counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    });
+    rings
+}
+
+fn rung(rings: &std::sync::atomic::AtomicUsize) -> usize {
+    rings.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+fn settle(rt: &mut Runtime<App>) {
+    for _ in 0..200 {
+        if !crate::wake::MAIN.rung() {
+            return;
+        }
+        rt.frame(DT);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    panic!("the loop keeps waking itself");
+}
+
+fn answering(body: &'static str) -> feed::catalog::Client {
+    use std::io::{BufRead, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            std::thread::spawn(move || {
+                let mut reader = std::io::BufReader::new(stream.try_clone().unwrap());
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                }
+                let mut stream = stream;
+                let _ = write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            });
+        }
+    });
+    feed::catalog::Client::new(&base, "t")
+}
+
 #[test]
-fn an_idle_loop_asks_to_wake_in_a_quarter_second_and_keeps_that_pace() {
-    if !isolated("an_idle_loop_asks_to_wake_in_a_quarter_second_and_keeps_that_pace") {
+fn an_idle_loop_arms_no_timer_and_a_poll_with_nothing_to_drain_changes_nothing() {
+    if !isolated("an_idle_loop_arms_no_timer_and_a_poll_with_nothing_to_drain_changes_nothing") {
         return;
     }
     let dir = Dir::new("idle");
-    let mut rt = unframed(app(sessions(&["a"]), &dir));
+    let mut rt = runtime(app(sessions(&["a", "b"]), &dir), (1440.0, 900.0));
     rt.frame(DT);
-    assert!((wake_in(&rt) - 0.250).abs() < 1e-9, "idle wake in {}", wake_in(&rt));
-    for _ in 0..4 {
-        let polled = rt.state.clock;
-        rt.frame(wake_in(&rt));
-        assert!((rt.state.clock - polled - 0.250).abs() < 1e-9);
-        assert!((wake_in(&rt) - 0.250).abs() < 1e-9, "idle wake in {}", wake_in(&rt));
-    }
+    assert_eq!(rt.wake_deadline(), None, "nothing pending arms no timer");
+    let clock = rt.state.clock + DT;
+    assert!(!rt.update_if(|s, tx| crate::poll(s, clock, tx)), "a poll that drains nothing changes nothing, so nothing draws");
+    assert_eq!(rt.wake_deadline(), None);
 }
 
 #[test]
-fn polls_run_early_by_other_frames_do_not_add_wakes() {
-    if !isolated("polls_run_early_by_other_frames_do_not_add_wakes") {
+fn a_session_list_posted_with_no_timer_armed_wakes_the_loop_and_shows_in_one_frame() {
+    if !isolated("a_session_list_posted_with_no_timer_armed_wakes_the_loop_and_shows_in_one_frame") {
         return;
     }
-    let dir = Dir::new("early");
-    let mut rt = unframed(app(sessions(&["a"]), &dir));
+    let rings = rings();
+    let dir = Dir::new("posted");
+    let mut rt = runtime(app(sessions(&["a"]), &dir), (1440.0, 900.0));
+    settle(&mut rt);
+    assert_eq!(rt.wake_deadline(), None);
+    let before = rung(&rings);
+    let out = rt.state.outbox.clone();
+    std::thread::spawn(move || out.send(snapshot(2, sessions(&["a", "b"]), None)).unwrap()).join().unwrap();
+    assert_eq!(rung(&rings), before + 1, "the post wakes the loop");
     rt.frame(DT);
-    for _ in 0..10 {
-        rt.frame(0.03);
-    }
-    rt.frame(wake_in(&rt));
-    for _ in 0..8 {
-        let polled = rt.state.clock;
-        rt.frame(wake_in(&rt));
-        assert!(rt.state.clock - polled > 0.249, "woke {} after the last poll", rt.state.clock - polled);
-    }
+    assert!(rt.state.ov.d.session("b").is_some() && !rt.state.ov.live.stale(), "the next frame takes it and rebuilds what shows");
 }
 
 #[test]
-fn an_open_stream_makes_the_loop_ask_for_the_next_frame() {
-    if !isolated("an_open_stream_makes_the_loop_ask_for_the_next_frame") {
+fn a_post_that_lands_while_the_loop_drains_wakes_it_again() {
+    if !isolated("a_post_that_lands_while_the_loop_drains_wakes_it_again") {
         return;
     }
-    let dir = Dir::new("busy");
+    let rings = rings();
+    let dir = Dir::new("mid");
+    let mut rt = unframed(app(sessions(&["a"]), &dir));
+    settle(&mut rt);
+    let base = rung(&rings);
+    let out = rt.state.outbox.clone();
+    out.send(snapshot(2, sessions(&["a", "b"]), None)).unwrap();
+    out.send(snapshot(3, sessions(&["a", "b"]), None)).unwrap();
+    let first = rung(&rings);
+    assert_eq!(first, base + 1, "a burst wakes once");
+    let clock = rt.state.clock + DT;
+    rt.update_if(move |s, tx| {
+        let changed = crate::poll(s, clock, tx);
+        out.send(snapshot(4, sessions(&["a", "b", "c"]), None)).unwrap();
+        changed
+    });
+    assert_eq!(rung(&rings), first + 1, "a post after the drain began wakes the loop again");
+    rt.frame(DT);
+    assert!(rt.state.ov.d.session("c").is_some());
+}
+
+#[test]
+fn a_stream_batch_wakes_the_loop_and_an_open_stream_does_not_poll_every_frame() {
+    if !isolated("a_stream_batch_wakes_the_loop_and_an_open_stream_does_not_poll_every_frame") {
+        return;
+    }
+    let rings = rings();
+    let dir = Dir::new("stream");
     let mut first = app(sessions(&["a"]), &dir);
     let stream = streaming(&mut first, "a");
     let mut rt = unframed(first);
+    settle(&mut rt);
+    assert!(rt.wake_deadline().is_none_or(|at| at - rt.state.clock > 0.1), "an open stream doesn't ask for every frame");
+    let before = rung(&rings);
+    std::thread::spawn(move || stream.send(feed::source::Message::Status("live".into())).unwrap()).join().unwrap();
+    assert_eq!(rung(&rings), before + 1, "the stream wakes the loop");
     rt.frame(DT);
-    assert!((wake_in(&rt) - 0.016).abs() < 1e-9, "busy wake in {}", wake_in(&rt));
-    rt.frame(wake_in(&rt));
-    assert!((wake_in(&rt) - 0.016).abs() < 1e-9, "busy wake in {}", wake_in(&rt));
+    assert_eq!(rt.state.panes["a"].status, "live");
+}
 
-    rt.state.panes.remove("a");
-    drop(stream);
-    let at = rt.wake_deadline().unwrap();
-    rt.frame(wake_in(&rt));
-    assert!(rt.state.clock >= at);
-    assert!((wake_in(&rt) - 0.250).abs() < 1e-9, "idle again in {}", wake_in(&rt));
+#[test]
+fn a_module_result_wakes_the_loop_and_shows_in_one_frame() {
+    if !isolated("a_module_result_wakes_the_loop_and_shows_in_one_frame") {
+        return;
+    }
+    let rings = rings();
+    let dir = Dir::new("module");
+    let mut a = app(sessions(&["a"]), &dir);
+    a.client = Some(answering(r#"{"role":{"label":"worker","source":"assigned"}}"#));
+    let mut rt = unframed(a);
+    rt.frame(DT);
+    settle(&mut rt);
+    let mut seen = rung(&rings);
+    rt.update(|s, _| crate::ui::role::refresh(s, "a"));
+    for _ in 0..500 {
+        if crate::ui::role::shown(&rt.state, "a").is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        if rung(&rings) != seen {
+            seen = rung(&rings);
+            rt.frame(DT);
+        }
+    }
+    assert_eq!(crate::ui::role::shown(&rt.state, "a"), Some(("worker", "assigned")), "frames ran only when a result rang");
+}
+
+#[test]
+fn a_post_while_only_a_session_window_runs_rings_main_which_drains_it() {
+    if !isolated("a_post_while_only_a_session_window_runs_rings_main_which_drains_it") {
+        return;
+    }
+    let rings = rings();
+    let dir = Dir::new("window");
+    let mut main = unframed(app(sessions(&["a"]), &dir));
+    main.frame(DT);
+    let mut id = 0;
+    main.update(|s, _| id = crate::ui::window::open(s, "a"));
+    settle(&mut main);
+    let spec = AppSpec::<App> { poll: Some(crate::ui::window::poll), ..AppSpec::new("Session", (900.0, 820.0), crate::placeholder, crate::ui::session_window) };
+    let mut window = rune::App::new(spec).headless_runtime((900.0, 820.0), Env { system_dark: true, scale: 1.0 });
+    std::mem::swap(&mut main.state, &mut window.state);
+    crate::ui::window::on_enter(&mut window.state, &format!("session-{id}"));
+    window.frame(DT);
+    let before = rung(&rings);
+    let out = window.state.outbox.clone();
+    std::thread::spawn(move || out.send(snapshot(2, sessions(&["a", "b"]), None)).unwrap()).join().unwrap();
+    assert_eq!(rung(&rings), before + 1, "the post rings main's wake whichever window is in front");
+    for _ in 0..3 {
+        window.frame(DT);
+    }
+    assert!(window.state.ov.d.session("b").is_none(), "the app-wide drain runs only in main's poll");
+    assert!(crate::wake::MAIN.rung(), "main's wake stays owed until main polls");
+    crate::ui::window::on_leave(&mut window.state, &format!("session-{id}"));
+    std::mem::swap(&mut main.state, &mut window.state);
+    main.frame(DT);
+    assert!(main.state.ov.d.session("b").is_some(), "main's poll takes it");
+    assert!(!crate::wake::MAIN.rung());
+}
+
+#[test]
+fn a_closed_tab_note_arms_its_own_expiry_and_no_other_timer() {
+    if !isolated("a_closed_tab_note_arms_its_own_expiry_and_no_other_timer") {
+        return;
+    }
+    let dir = Dir::new("expiry");
+    let mut rt = unframed(app(sessions(&["a"]), &dir));
+    rt.frame(DT);
+    rt.update(|s, _| s.tabs.closed = Some(("a".into(), "a".into(), s.clock + 5.0)));
+    rt.frame(DT);
+    let wake = wake_in(&rt);
+    assert!((wake - 5.0).abs() < 0.1, "wakes when the note expires, in {wake}");
+    rt.frame(wake + DT);
+    assert!(rt.state.tabs.closed.is_none());
+    assert_eq!(rt.wake_deadline(), None);
 }
 
 fn many(target: &str) -> Vec<Session> {

@@ -179,8 +179,8 @@ pub fn expire(s: &mut App) -> bool {
         s.tabs.archived = None;
         crate::over::open_session(s, &a.id);
     }
-    s.tabs.closed.take_if(|(_, _, until)| clock >= *until);
-    s.tabs.archived.take_if(|a| !a.unarchiving && clock >= a.until);
+    s.tabs.closed.take_if(|(_, _, until)| crate::wake::due_clock(*until, clock));
+    s.tabs.archived.take_if(|a| !a.unarchiving && crate::wake::due_clock(a.until, clock));
     before != (s.tabs.closed.is_some(), s.tabs.archived.clone().map(|a| (a.unarchiving, stuck(s, &a))))
 }
 

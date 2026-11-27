@@ -17,7 +17,7 @@ pub enum Feed {
     Gap(u64),
 }
 
-pub fn events(client: Client, mut after: u64, tx: Sender<Bg>, generation: Arc<AtomicU64>, mine: u64) {
+pub fn events(client: Client, mut after: u64, tx: feed::wake::Sender<Bg>, generation: Arc<AtomicU64>, mine: u64) {
     let current = move || generation.load(Ordering::Acquire) == mine;
     std::thread::spawn(move || {
         let (mut failures, mut lost) = (0u32, false);
@@ -55,7 +55,7 @@ pub fn events(client: Client, mut after: u64, tx: Sender<Bg>, generation: Arc<At
     });
 }
 
-pub fn ledgers(client: Client, tx: Sender<Bg>, stream: Stream) {
+pub fn ledgers(client: Client, tx: feed::wake::Sender<Bg>, stream: Stream) {
     std::thread::spawn(move || {
         let (mut seen, mut failures, mut lost) = (Ledgers::default(), 0u32, false);
         loop {

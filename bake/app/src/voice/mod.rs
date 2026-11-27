@@ -7,7 +7,7 @@ use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 use feed::catalog::Client;
@@ -17,7 +17,10 @@ use feed::derive::World;
 use feed::voice::{Action, Activity, Call, Effect, Failure, Job, Pick, Req, State, Trail};
 #[cfg(target_os = "macos")]
 use feed::voice::Setup;
+use feed::wake::Sender;
 use rune::{AppSpec, Chrome, MicPermission, NativeView, TextEdit, Tx, Voice, WindowHandle, WindowOptions, WindowSpec};
+
+use crate::wake::voice_channel;
 
 thread_local! {
     static WINDOW: RefCell<Option<WindowHandle>> = const { RefCell::new(None) };
@@ -136,9 +139,9 @@ impl Win {
             peer,
             #[cfg(target_os = "macos")]
             web: None,
-            replies: channel(),
-            heard: channel(),
-            mic: channel(),
+            replies: voice_channel(),
+            heard: voice_channel(),
+            mic: voice_channel(),
             gone: Arc::new(AtomicBool::new(false)),
             clock: 0.0,
             save_after: 0.0,
@@ -266,6 +269,9 @@ impl Win {
         SHARED.with_borrow_mut(|s| {
             let moved = s.operator != operator;
             s.operator = operator;
+            if moved {
+                crate::wake::poke();
+            }
             let cleared = moved && self.activity.take().is_some();
             if s.version == self.shared_seen {
                 return cleared;
@@ -334,6 +340,8 @@ pub fn open(target: &str, name: &str) {
         .srgb_blend(true)
         .map_app(|app| app.on_close(closed));
     reset_shared();
+    let ring = window.app.handle();
+    crate::wake::VOICE.install(move || ring.wake());
     let handle = rune::open_window(window);
     WINDOW.with(|w| *w.borrow_mut() = Some(handle));
 }
@@ -373,6 +381,7 @@ fn closed(w: &mut Win, _: &mut Tx) {
         w.web = None;
     }
     WINDOW.with(|slot| *slot.borrow_mut() = None);
+    crate::wake::VOICE.uninstall();
     reset_shared();
 }
 
@@ -382,6 +391,7 @@ pub fn take_opened_session() -> Option<String> {
 
 pub fn open_timeline(id: &str) {
     OPENED.with(|o| *o.borrow_mut() = Some(id.to_string()));
+    crate::wake::poke();
 }
 
 thread_local! {
@@ -407,6 +417,7 @@ pub fn trace(from: &'static str, w: &Win) {
 }
 
 fn poll(w: &mut Win, t: f64, tx: &mut Tx) -> bool {
+    crate::wake::VOICE.rearm();
     w.clock = t;
     let mut changed = w.fresh_page();
     changed |= w.build_peer();

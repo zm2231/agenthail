@@ -475,6 +475,15 @@ pub fn age(secs: u64, refreshing: bool) -> String {
     if refreshing { format!("Refreshing… last read {read}") } else { format!("Updated {read}") }
 }
 
+pub fn age_moves_at(secs: u64) -> u64 {
+    match secs {
+        0..=4 => 5,
+        5..=59 => secs + 1,
+        60..=3599 => (secs / 60 + 1) * 60,
+        _ => (secs / 3600 + 1) * 3600,
+    }
+}
+
 pub fn holds_settings(client: &Client) -> bool {
     crate::dashboard_token().is_some_and(|token| token == client.token)
 }

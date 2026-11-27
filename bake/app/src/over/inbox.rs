@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
 use feed::brief::Brief;
@@ -9,7 +9,10 @@ use feed::decisions::{Decision, Handled, Inbox, gone, remember, request_hold, re
 use feed::request::Response;
 use feed::review::{self, Verdict};
 use feed::version::{Build, notice};
+use feed::wake::Sender;
 use rune::TextEdit;
+
+use crate::wake::{channel, to_thread};
 
 const OLD_RECHECK: Duration = Duration::from_secs(300);
 
@@ -54,7 +57,7 @@ pub struct State {
     daemon: Option<String>,
     newest: Option<Instant>,
     rev: Option<String>,
-    ask: Option<Sender<bool>>,
+    ask: Option<std::sync::mpsc::Sender<bool>>,
     pub open: Option<String>,
     pub replies: HashMap<String, TextEdit>,
     pub replying: HashSet<String>,
@@ -89,7 +92,7 @@ pub fn start(state: &mut State, client: &Client) {
     if state.ask.is_some() {
         return;
     }
-    let (ask, asked) = channel::<bool>();
+    let (ask, asked) = to_thread::<bool>();
     let _ = ask.send(false);
     state.ask = Some(ask);
     let (client, tx) = (client.clone(), state.tx.clone());
@@ -165,6 +168,9 @@ pub fn rev_seen(s: &mut crate::App, rev: &str) {
 
 pub fn drain(s: &mut crate::App) -> bool {
     let mut changed = false;
+    let held = s.ov.inbox.review_old.len();
+    s.ov.inbox.review_old.retain(|_, at| !crate::wake::due_after(*at, OLD_RECHECK));
+    changed |= s.ov.inbox.review_old.len() != held;
     while let Ok(done) = s.ov.inbox.rx.try_recv() {
         changed = true;
         let st = &mut s.ov.inbox;

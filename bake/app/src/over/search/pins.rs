@@ -1,11 +1,13 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use feed::catalog::Session;
 use feed::search::{Pinned, Recheck};
+use feed::wake::Sender;
 
 use crate::App;
+use crate::wake::channel;
 
 const RETRY: Duration = Duration::from_secs(20);
 
@@ -83,7 +85,7 @@ impl Pins {
             && match self.checked.get(id) {
                 None => true,
                 Some(None) => false,
-                Some(Some(failed)) => failed.elapsed() >= RETRY,
+                Some(Some(failed)) => crate::wake::due_after(*failed, RETRY),
             }
     }
 

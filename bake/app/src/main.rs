@@ -21,7 +21,7 @@ mod web;
 mod loop_tests;
 
 use std::collections::{HashMap, HashSet};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, Sender};
 use std::time::Duration;
 
 use feed::catalog::{Client, OpenRequest, Session, WorkItem};
@@ -182,7 +182,7 @@ pub struct App {
     overview_poke: Option<Sender<Ask>>,
     fixtures: Option<Fixtures>,
     inbox: Receiver<Bg>,
-    outbox: Sender<Bg>,
+    outbox: feed::wake::Sender<Bg>,
     pub status: String,
     clock: f64,
     panes_moved: bool,
@@ -215,7 +215,7 @@ pub enum Ask {
     Read(String),
 }
 
-fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: feed::watch::Stream) {
+fn watch_overview(client: Client, tx: feed::wake::Sender<Bg>, poke: Receiver<Ask>, stream: feed::watch::Stream) {
     std::thread::spawn(move || {
         let first = std::time::Instant::now();
         while !stream.settled() && first.elapsed() < feed::watch::LEDGERS_FIRST {
@@ -308,7 +308,7 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
 }
 
 fn empty(live: Overview, persist: bool) -> App {
-    let (outbox, inbox) = channel();
+    let (outbox, inbox) = wake::channel();
     App {
         sessions: Vec::new(),
         now: OffsetDateTime::now_utc(),
@@ -501,7 +501,7 @@ pub fn load_pane(s: &mut App, id: &str) {
                 None => pane.status = "no recording for this session".into(),
             }
         } else if let Ok(live) = Live::from_env(id.to_string()) {
-            let (tx, rx) = channel();
+            let (tx, rx) = wake::channel();
             std::thread::spawn(move || live.run(tx));
             pane.live = Some(rx);
         }
@@ -927,14 +927,18 @@ fn retry_key(s: &mut App, id: &str, key: &str, auto: bool, tx: &mut Tx) {
     }
 }
 
-fn redeliver(s: &mut App, tx: &mut Tx) {
+fn redeliver(s: &mut App, tx: &mut Tx) -> bool {
     let now = feed::composer::now_ms();
     let expired: Vec<(String, Unsent)> = s.unsent.iter().filter(|(_, u)| u.unanswered && u.sent_at > 0 && !u.redelivering(now)).map(|(id, u)| (id.clone(), u.clone())).collect();
+    let stopped_any = !expired.is_empty();
     for (id, unsent) in expired {
         let stopped = Unsent { unanswered: false, ..unsent };
         s.unsent.remove(&id, &stopped.key);
         put_back(s, &id, &stopped);
         s.unsent.add(&id, stopped);
+    }
+    if let Some(ends) = s.unsent.iter().filter_map(|(_, u)| u.redelivering_ends(now)).min() {
+        wake::later(time::Duration::milliseconds(ends - now));
     }
     let mut due: Vec<(String, String)> = Vec::new();
     for (id, unsent) in s.unsent.iter().filter(|(_, u)| u.redelivering(now) && feed::attach::missing_upload(&u.error).is_none()) {
@@ -945,18 +949,20 @@ fn redeliver(s: &mut App, tx: &mut Tx) {
     let flying: Vec<String> = s.in_flight.keys().cloned().collect();
     s.redeliver.retain(|id, _| due.iter().any(|(d, _)| d == id) || flying.contains(id));
     if s.client.is_none() {
-        return;
+        return stopped_any;
     }
     for (id, key) in due {
         if sending(s, &id) || closed(s, &id) {
             continue;
         }
         let clock = s.clock;
-        if s.redeliver.entry(id.clone()).or_insert_with(|| feed::composer::Backoff::starting(clock)).due <= clock {
+        if wake::due_clock(s.redeliver.entry(id.clone()).or_insert_with(|| feed::composer::Backoff::starting(clock)).due, clock) {
             retry_key(s, &id, &key, true, tx);
         }
     }
+    stopped_any
 }
+
 
 fn same_delivery(again: &Unsent, asked: Option<Busy>, now: Option<Busy>) -> bool {
     asked.is_none_or(|b| again.busy == Some(b)) && (now.is_none() || (again.busy == Some(Busy::Steer)) == (now == Some(Busy::Steer)))
@@ -1351,6 +1357,8 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
 }
 
 fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
+    wake::MAIN.rearm();
+    wake::begin(wake::Window::Main);
     ui::attach::adopt(s);
     s.clock = t;
     let mut changed = false;
@@ -1522,7 +1530,6 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         }
         let arrived: Vec<Message> = pane.live.as_ref().map(|rx| rx.try_iter().collect()).unwrap_or_default();
         if pane.live.is_some() {
-            busy = true;
             for message in arrived {
                 match message {
                     Message::Batch(b) => {
@@ -1542,7 +1549,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                     Message::CaughtUp => caught.push(id.clone()),
                 }
             }
-            if !pane.caught_up && t - pane.last_batch >= REPLAY_QUIET_SECS && !caught.contains(id) {
+            if !pane.caught_up && !caught.contains(id) && wake::due_clock(pane.last_batch + REPLAY_QUIET_SECS, t) {
                 caught.push(id.clone());
             }
         }
@@ -1561,7 +1568,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     for (id, x) in streamed {
         ui::inspect::streamed(s, &id, x);
     }
-    if s.ov.live.stale() || (s.panes_moved && s.clock - s.built_at >= PANE_REBUILD_SECS) {
+    if s.ov.live.stale() || (s.panes_moved && wake::due_clock(s.built_at + PANE_REBUILD_SECS, s.clock)) {
         rebuild(s);
         changed = true;
     }
@@ -1602,13 +1609,16 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= ui::native_queue::drain(s);
     changed |= ui::attach::pump(s);
     changed |= ui::text_size::pump(s);
-    redeliver(s, tx);
+    changed |= redeliver(s, tx);
     changed |= transcript::take_behind_moved();
     changed |= over::extensions::drain(s);
     changed |= over::projects::drain(s);
     changed |= ui::delivery::poll(s) | ui::ready::poll(s) | over::earlier::poll(s) | over::listing::poll(s);
     if s.ov.live.tail_retry_due() {
         fetch_tails(s);
+    }
+    if let Some(at) = s.ov.live.next_tail_retry() {
+        wake::due(at);
     }
     changed |= ui::complete::pump(s);
     changed |= look::poll(look::Window::Main, tx);
@@ -1629,11 +1639,30 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     menubar::warn(s);
     menubar::badge(s);
     hotkey::tick();
+    changed |= minute(s);
     if let Some(due) = over::worksearch::wait(s) {
         s.wake.after(tx, due);
     }
-    s.wake.after(tx, Duration::from_millis(if busy { 16 } else { 250 }));
+    if busy {
+        s.wake.after(tx, Duration::from_millis(16));
+    }
+    if let Some(at) = wake::next(wake::Window::Main) {
+        s.wake.until(tx, at);
+    }
     changed
+}
+
+fn minute(s: &mut App) -> bool {
+    if s.fixtures.is_some() {
+        return false;
+    }
+    let now = OffsetDateTime::now_utc();
+    let turned = now >= feed::wake::next_minute(s.now);
+    if turned {
+        s.now = now;
+    }
+    wake::later(feed::wake::next_minute(now) - now);
+    turned
 }
 
 fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {

@@ -279,6 +279,10 @@ impl Unsent {
         self.unanswered && self.sent_at > 0 && (0..REDELIVER_FOR).contains(&(now - self.sent_at))
     }
 
+    pub fn redelivering_ends(&self, now: i64) -> Option<i64> {
+        self.redelivering(now).then_some(self.sent_at + REDELIVER_FOR)
+    }
+
     pub fn ids(&self) -> Vec<String> {
         self.attachments.iter().map(|a| a.id.clone()).collect()
     }
