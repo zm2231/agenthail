@@ -195,9 +195,7 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
                 if let Some(at) = last.filter(|_| !reset) {
                     std::thread::sleep(feed::watch::OVERVIEW_GAP.saturating_sub(at.elapsed()));
                 }
-                if std::mem::take(&mut reset) {
-                    known = Default::default();
-                }
+                reset = false;
                 if let Some(at) = stream.settles_at() {
                     std::thread::sleep(at.saturating_duration_since(std::time::Instant::now()));
                 }
@@ -219,7 +217,10 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
             let mut reads = Vec::new();
             let mut take = |ask: Ask| match ask {
                 Ask::Refresh => due = true,
-                Ask::Reset => (due, reset) = (true, true),
+                Ask::Reset => {
+                    known = Default::default();
+                    (due, reset) = (true, true);
+                }
                 Ask::Ledger(key, at) => match known.changed(&key, at) {
                     feed::derive::live::Change::Read(id) => reads.push(id),
                     feed::derive::live::Change::Overview => due = true,
