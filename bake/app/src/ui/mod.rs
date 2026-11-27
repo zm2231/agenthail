@@ -113,8 +113,7 @@ pub(crate) fn avatar_with_state(name: &str, state: State, size: f32) -> El {
 
 pub fn view(s: &App, cx: &mut Cx<App>) -> El {
     let in_session = s.screen == Screen::Session;
-    let themes = crate::look::frame(cx, in_session, true, true);
-    cx.with_kit(&themes.main, |cx| window(s, cx, &themes.chrome, in_session))
+    crate::look::frame(cx, in_session, true, |cx, themes| window(s, cx, &themes.chrome, in_session))
 }
 
 fn window(s: &App, cx: &mut Cx<App>, chrome: &KitTheme, in_session: bool) -> El {

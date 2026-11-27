@@ -9,7 +9,7 @@ use crate::theme::{self, BODY, BODY_BOLD, META, META_BOLD, TITLE, accent, failed
 
 pub fn view(w: &Win, cx: &mut Cx<Win>) -> El {
     super::trace("view", w);
-    cx.with_kit(&theme::themes().main, |cx| window(w, cx))
+    crate::look::with_text(cx, |cx| cx.with_kit(&theme::themes().main, |cx| window(w, cx)))
 }
 
 fn window(w: &Win, cx: &mut Cx<Win>) -> El {

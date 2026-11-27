@@ -663,8 +663,7 @@ fn unfollowed(s: &Prefs) -> Option<El> {
 pub const TABS: [&str; 7] = ["General", "Claude", "Notifications", "Devices", "Handoffs", "Appearance", "Overview"];
 
 pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
-    let themes = crate::look::frame(cx, false, false, false);
-    cx.with_kit(&themes.main, |cx| window(s, cx))
+    crate::look::frame(cx, false, false, |cx, _| window(s, cx))
 }
 
 fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
