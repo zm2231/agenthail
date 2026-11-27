@@ -23,7 +23,7 @@ struct Process {
     generation: u64,
     status: Option<LifecycleResult>,
     busy: Option<LifecycleAct>,
-    unchanged: bool,
+    outcome: Option<String>,
     error: Option<String>,
 }
 
@@ -164,6 +164,7 @@ pub(crate) fn run(s: &mut App, id: &str, act: LifecycleAct, tell: bool) {
         return;
     }
     p.busy = Some(act);
+    p.outcome = None;
     let generation = p.generation;
     let id = id.to_string();
     spawn(s, move |c| Done::Life(id.clone(), generation, act, tell, c.lifecycle(&id, act)));
@@ -208,7 +209,7 @@ fn settled(s: &mut App, done: Done) {
             match result {
                 Ok(result) => {
                     p.error = None;
-                    p.unchanged = act == LifecycleAct::Resume && result.unchanged == Some(true);
+                    p.outcome = if act == LifecycleAct::Resume && result.unchanged == Some(true) { Some(inspect::RESUME_UNCHANGED.to_string()) } else { act.done().map(str::to_string) };
                     match act {
                         LifecycleAct::Status => p.status = Some(result),
                         LifecycleAct::Logs => s.inspect.logs = Some((id.clone(), result.output.unwrap_or_default())),
@@ -227,8 +228,9 @@ fn settled(s: &mut App, done: Done) {
         Done::Status(id, generation, result) => {
             let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.generation == generation) else { return };
             p.busy = None;
-            if let Ok(result) = result {
-                p.status = Some(result);
+            match result {
+                Ok(result) => p.status = Some(result),
+                Err(error) => p.error = Some(format!("Couldn't read its status: {}", failure(&error))),
             }
         }
     }
@@ -312,13 +314,11 @@ fn process_section(s: &App, x: &Session) -> Option<El> {
     let busy = p.and_then(|p| p.busy).is_some();
     let mut body = col().w_full().gap(8.0);
     match p.and_then(|p| p.status.as_ref()) {
-        Some(status) => {
-            body = body.child(text(status.line()).font(META).color(theme::text()).wrap());
-            if p.is_some_and(|p| p.unchanged) {
-                body = body.child(text(inspect::RESUME_UNCHANGED).font(META).color(muted()));
-            }
-        }
+        Some(status) => body = body.child(text(status.line()).font(META).color(theme::text()).wrap()),
         None => body = body.child(text(inspect::lifecycle_detail(x)).font(META).color(muted()).wrap()),
+    }
+    if let Some(outcome) = p.and_then(|p| p.outcome.clone()) {
+        body = body.child(text(outcome).font(META).color(muted()));
     }
     let buttons = row().w_full().flex_wrap().gap(6.0).items_center().children(LifecycleAct::ALL.into_iter().filter(|a| a.offered(lifecycle)).map(|act| {
         let id = x.id.clone();
