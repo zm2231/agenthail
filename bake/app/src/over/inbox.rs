@@ -69,11 +69,9 @@ pub fn app_build() -> Build {
     }
 }
 
-fn fetch(client: &Client, tx: &Sender<Done>) -> Option<bool> {
+fn fetch(client: &Client, tx: &Sender<Done>) -> Option<()> {
     let started = Instant::now();
-    let inbox = client.inbox();
-    let failed = inbox.failed;
-    tx.send(Done::Inbox(started, inbox)).ok().map(|()| failed)
+    tx.send(Done::Inbox(started, client.inbox())).ok()
 }
 
 pub fn start(state: &mut State, client: &Client) {
@@ -104,8 +102,10 @@ pub fn start(state: &mut State, client: &Client) {
                 continue;
             }
             let started = Instant::now();
-            let Some(failed) = fetch(&client, &tx) else { return };
-            pace.read(started, failed);
+            if fetch(&client, &tx).is_none() {
+                return;
+            }
+            pace.read(started);
         }
     });
 }
@@ -164,6 +164,9 @@ pub fn drain(s: &mut crate::App) -> bool {
                 }
                 st.newest = Some(started);
                 st.reads += 1;
+                if inbox.failed {
+                    st.rev = None;
+                }
                 if inbox.notes.is_empty() {
                     st.unconfirmed.retain(|hold| inbox.decisions.iter().any(|d| d.holds(hold)));
                 }

@@ -8,13 +8,12 @@ use serde_json::Value;
 use crate::catalog::{Client, Session, enc};
 
 pub const SAFETY: Duration = Duration::from_secs(30);
-pub const OVERVIEW_EVERY: Duration = Duration::from_secs(60);
+pub const OVERVIEW_EVERY: Duration = Duration::from_secs(120);
 pub const SETTLE: Duration = Duration::from_millis(180);
 pub const OVERVIEW_GAP: Duration = Duration::from_secs(5);
 pub const DECISIONS_GAP: Duration = Duration::from_secs(10);
 pub const LEDGERS_FIRST: Duration = Duration::from_secs(5);
 pub const LEDGERS_SETTLE: Duration = Duration::from_secs(1);
-pub const DECISIONS_RETRY: Duration = Duration::from_secs(30);
 const KEEP: usize = 2000;
 const IDLE: Duration = Duration::from_secs(120);
 
@@ -309,14 +308,12 @@ impl Client {
 pub struct Pace {
     last: Option<std::time::Instant>,
     soon: bool,
-    failed: bool,
 }
 
 impl Pace {
     pub fn wait(&self, now: std::time::Instant) -> Option<Duration> {
         let last = self.last?;
-        let due = [self.soon.then_some(last + DECISIONS_GAP), self.failed.then_some(last + DECISIONS_RETRY)].into_iter().flatten().min()?;
-        Some(due.saturating_duration_since(now))
+        self.soon.then(|| (last + DECISIONS_GAP).saturating_duration_since(now))
     }
 
     pub fn ask(&mut self, now: bool, at: std::time::Instant) -> bool {
@@ -324,10 +321,9 @@ impl Pace {
         now || self.last.is_none_or(|last| at >= last + DECISIONS_GAP)
     }
 
-    pub fn read(&mut self, at: std::time::Instant, failed: bool) {
+    pub fn read(&mut self, at: std::time::Instant) {
         self.last = Some(at);
         self.soon = false;
-        self.failed = failed;
     }
 }
 

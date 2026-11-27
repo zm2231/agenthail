@@ -178,13 +178,13 @@ fn decisions_are_read_at_once_when_asked_now_and_otherwise_no_sooner_than_ten_se
     let mut p = Pace::default();
     assert_eq!(p.wait(t0), None, "nothing asked, nothing to wait for");
     assert!(p.ask(false, t0), "the first change reads at once");
-    p.read(t0, false);
+    p.read(t0);
     assert_eq!(p.wait(t0), None);
     assert!(!p.ask(false, t0 + Duration::from_secs(2)), "a change two seconds later waits");
     assert_eq!(p.wait(t0 + Duration::from_secs(2)), Some(Duration::from_secs(8)));
     assert!(p.ask(true, t0 + Duration::from_secs(3)), "the person's own refresh doesn't wait");
-    p.read(t0 + Duration::from_secs(3), true);
-    assert_eq!(p.wait(t0 + Duration::from_secs(3)), Some(DECISIONS_RETRY), "a failed read tries again 30 seconds after it");
+    p.read(t0 + Duration::from_secs(3));
+    assert_eq!(p.wait(t0 + Duration::from_secs(3)), None, "no timer of its own after a read, failed or not");
     assert!(!p.ask(false, t0 + Duration::from_secs(4)));
-    assert_eq!(p.wait(t0 + Duration::from_secs(4)), Some(Duration::from_secs(9)), "a change waiting sooner than the retry goes first");
+    assert_eq!(p.wait(t0 + Duration::from_secs(4)), Some(Duration::from_secs(9)));
 }
