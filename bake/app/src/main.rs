@@ -155,6 +155,7 @@ pub struct App {
     pub accounts: ui::accounts::Accounts,
     pub prs: ui::pr_link::Prs,
     pub inspect: ui::inspect::Inspect,
+    pub roles: ui::role::Roles,
     pub new_session: Option<ui::new_session::Sheet>,
     bar: menubar::Bar,
     pub attach: ui::attach::Attach,
@@ -347,6 +348,7 @@ fn empty(live: Overview, persist: bool) -> App {
         accounts: ui::accounts::Accounts::new(),
         prs: ui::pr_link::Prs::new(),
         inspect: ui::inspect::Inspect::new(),
+        roles: ui::role::Roles::new(),
         new_session: None,
         bar: menubar::Bar::default(),
         attach: ui::attach::Attach::default(),
@@ -452,6 +454,7 @@ pub fn select(s: &mut App, id: &str) {
     ui::queue::fetch(s, id);
     ui::subagents::load(s, id);
     ui::inspect::load(s, id);
+    ui::role::load(s, id);
 }
 
 pub fn load_pane(s: &mut App, id: &str) {
@@ -548,7 +551,13 @@ fn changed_elsewhere(s: &mut App, wants: feed::watch::Wants) {
         && s.selected.as_deref() == Some(id.as_str())
     {
         selected_changed(s, &id);
+        selected_moved(s, &id);
     }
+}
+
+fn selected_moved(s: &mut App, id: &str) {
+    ui::role::refresh(s, id);
+    ui::session_menu::agent_mode_changed(s, id);
 }
 
 fn reopened(s: &mut App) {
@@ -558,6 +567,7 @@ fn reopened(s: &mut App) {
     over::extensions::reopened(s);
     if let Some(id) = s.selected.clone() {
         selected_changed(s, &id);
+        selected_moved(s, &id);
     }
 }
 
@@ -1165,9 +1175,12 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 ui::connect::up(s);
                 link::listed(s);
                 if let Some(id) = s.selected.clone()
-                    && touched.is_none_or(|t| t.contains(&id))
+                    && touched.as_ref().is_none_or(|t| t.contains(&id))
                 {
                     selected_changed(s, &id);
+                    if touched.is_some() {
+                        selected_moved(s, &id);
+                    }
                 }
             }
             Bg::Changed(wants) => changed_elsewhere(s, wants),
@@ -1362,6 +1375,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= notify::tick(s);
     changed |= ui::gone::watch(s);
     changed |= ui::limit::drain(s) | ui::accounts::drain(s) | ui::pr_link::drain(s) | ui::inspect::drain(s);
+    changed |= ui::role::drain(s);
     changed |= ui::attach::pump(s);
     changed |= over::extensions::drain(s);
     changed |= over::projects::drain(s);

@@ -245,6 +245,8 @@ pub struct Capabilities {
     pub reaches_as_note: bool,
     #[serde(default)]
     pub remote_control: bool,
+    #[serde(default)]
+    pub permission_mode: bool,
 }
 
 #[derive(Deserialize, Clone, Copy, Debug, Default, PartialEq)]
@@ -276,7 +278,7 @@ fn capabilities_or_default<'de, D: serde::Deserializer<'de>>(d: D) -> std::resul
 
 impl Default for Capabilities {
     fn default() -> Self {
-        Capabilities { send: true, interrupt: true, steer: true, model: false, compact: false, commands: false, attach: false, goal: false, goal_set: false, steer_images: None, lifecycle: Lifecycle::default(), reaches_as_note: false, remote_control: false }
+        Capabilities { send: true, interrupt: true, steer: true, model: false, compact: false, commands: false, attach: false, goal: false, goal_set: false, steer_images: None, lifecycle: Lifecycle::default(), reaches_as_note: false, remote_control: false, permission_mode: false }
     }
 }
 

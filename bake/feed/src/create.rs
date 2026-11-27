@@ -33,6 +33,8 @@ pub struct Surface {
     pub connected: bool,
     #[serde(default)]
     pub models: Vec<String>,
+    #[serde(default)]
+    pub modes: Vec<String>,
 }
 
 impl Surface {
@@ -277,6 +279,10 @@ pub const CLAUDE: &str = "claude";
 pub const CODEX: &str = "codex";
 pub const NOTION: &str = "notion";
 
+pub fn is_acp(surface: &str) -> bool {
+    !surface.is_empty() && ![CLAUDE, CODEX, NOTION].contains(&surface)
+}
+
 pub const CLAUDE_PERMISSION_MODES: [(&str, &str); 6] = [
     ("plan", "Plan"),
     ("auto", "Auto"),
@@ -404,18 +410,19 @@ impl Launch {
                 put("configRoot", &self.config_root);
             }
             if !self.in_terminal() {
-                put("effort", &self.effort);
                 match self.surface.as_str() {
                     CLAUDE => {
+                        put("effort", &self.effort);
                         put("permissionMode", &self.permission);
                         put("agent", &self.agent);
                     }
                     CODEX => {
+                        put("effort", &self.effort);
                         put("approvalPolicy", &self.permission);
                         put("mode", &self.mode);
                         put("serviceTier", &self.service_tier);
                     }
-                    _ => {}
+                    _ => put("permissionMode", &self.permission),
                 }
             }
             if self.worktree && self.takes_worktree() {
@@ -615,6 +622,16 @@ mod tests {
     }
 
     #[test]
+    fn an_acp_agent_takes_its_own_mode_and_no_effort() {
+        let devin = Launch { surface: "devin".into(), model: "swe-2".into(), effort: "high".into(), permission: "plan".into(), agent: "reviewer".into(), mode: "plan".into(), ..claude() };
+        assert_eq!(devin.payload(), json!({"surface": "devin", "message": "Fix the build", "cwd": "/work/app", "model": "swe-2", "permissionMode": "plan"}));
+        assert_eq!(Launch { permission: String::new(), ..devin.clone() }.payload().get("permissionMode"), None, "the agent's default mode is left to it");
+        let terminal = Launch { launcher: Some(Launcher { agents: vec!["devin".into()], ..launcher("tmux", false) }), ..devin };
+        assert_eq!(terminal.payload().get("permissionMode"), None);
+        assert!(is_acp("devin") && !is_acp(CLAUDE) && !is_acp(CODEX) && !is_acp(NOTION) && !is_acp(""));
+    }
+
+    #[test]
     fn codex_sends_its_launch_options_and_claude_its_agent() {
         let codex = Launch {
             surface: CODEX.into(),
@@ -697,6 +714,8 @@ mod tests {
         assert_eq!(options.first_surface().map(|s| s.id.as_str()), Some("claude"));
         let devin = options.surface("devin").unwrap();
         assert_eq!((devin.title(), devin.models.len(), devin.uses_folder()), ("Devin".to_string(), 2, true));
+        assert_eq!(devin.modes, ["plan"]);
+        assert!(options.surface("claude").unwrap().modes.is_empty());
         assert_eq!(options.surface("codex").unwrap().title(), "Codex");
         assert!(!options.surface("notion").unwrap().uses_folder());
         assert_eq!(options.launchers_for("codex").iter().map(|l| l.id.as_str()).collect::<Vec<_>>(), ["cmux"]);

@@ -27,6 +27,7 @@ pub mod new_session;
 pub(crate) mod notice;
 pub mod paste;
 pub mod pr_link;
+pub mod role;
 pub(crate) mod rail;
 pub(crate) mod session;
 mod session_dialogs;

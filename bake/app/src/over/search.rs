@@ -177,6 +177,7 @@ fn refresh(s: &mut App) {
             crate::fetch_requests(s, &id);
             crate::ui::session_menu::load(s, &id);
             crate::ui::queue::fetch(s, &id);
+            crate::ui::role::refresh(s, &id);
         }
         None => crate::over::arrive(s),
     }

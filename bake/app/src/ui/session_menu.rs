@@ -134,7 +134,8 @@ fn spawn(s: &App, after: Duration, job: impl FnOnce(&Client) -> Option<Done> + S
 
 fn fetch_settings(s: &mut App, id: &str, after: Duration) {
     let (id, seq) = (id.to_string(), s.menus.next());
-    spawn(s, after, move |c| Some(Done::Settings(id.clone(), seq, c.session_settings(&id).map_err(|e| e.to_string()))));
+    let row = session(s, &id).cloned().unwrap_or_else(|| feed::catalog::Session { id: id.clone(), ..Default::default() });
+    spawn(s, after, move |c| Some(Done::Settings(id.clone(), seq, c.settings_for(&row).map_err(|e| e.to_string()))));
 }
 
 fn fetch_context(s: &mut App, id: &str, after: Duration) -> u64 {
@@ -186,6 +187,12 @@ pub(crate) fn changed(s: &mut App, id: &str) {
     fetch_context(s, id, Duration::ZERO);
 }
 
+pub(crate) fn agent_mode_changed(s: &mut App, id: &str) {
+    if s.client.is_some() && session(s, id).is_some_and(|x| feed::create::is_acp(&x.surface)) {
+        fetch_settings(s, id, Duration::ZERO);
+    }
+}
+
 pub(crate) fn streamed_context(s: &mut App, id: &str, usage: Option<ContextUsage>) {
     s.menus.context_error.remove(id);
     match usage {
@@ -222,6 +229,12 @@ fn fetch_models(s: &mut App, id: &str) {
     spawn(s, Duration::ZERO, move |c| Some(Done::Models(id.clone(), seq, c.session_models(&surface, &id).map_err(|e| e.to_string()))));
 }
 
+fn failed_now(s: &mut App, id: &str) {
+    if s.selected.as_deref() == Some(id) {
+        s.menus.refreshed = Some((id.to_string(), Instant::now()));
+    }
+}
+
 fn refresh_shown(s: &mut App) {
     if s.screen != Screen::Session || s.client.is_none() {
         return;
@@ -230,13 +243,14 @@ fn refresh_shown(s: &mut App) {
     if !s.menus.models_asked.contains_key(&id) {
         fetch_models(s, &id);
     }
-    let failed = s.menus.note.contains_key(&id) || s.menus.context_error.contains_key(&id) || s.menus.models_error.contains_key(&id);
+    let unread = s.menus.settings.get(&id).is_some_and(|x| x.agent_mode_unread);
+    let failed = unread || s.menus.note.contains_key(&id) || s.menus.context_error.contains_key(&id) || s.menus.models_error.contains_key(&id);
     let due = s.menus.refreshed.as_ref().is_none_or(|(shown, at)| *shown != id || at.elapsed() >= RETRY);
     if !failed || !due {
         return;
     }
     s.menus.refreshed = Some((id.clone(), Instant::now()));
-    if s.menus.note.contains_key(&id) {
+    if unread || s.menus.note.contains_key(&id) {
         fetch_settings(s, &id, Duration::ZERO);
     }
     if s.menus.context_error.contains_key(&id) {
@@ -408,9 +422,10 @@ pub fn set(s: &mut App, id: &str, key: &'static str, value: &str) {
         return;
     }
     s.menus.busy.insert((id.to_string(), key));
+    let surface = session(s, id).map(|x| x.surface.clone()).unwrap_or_default();
     let (id, value) = (id.to_string(), value.to_string());
     spawn(s, Duration::ZERO, move |c| {
-        let result = c.turn_setting(&id, key, &value);
+        let result = c.session_setting(&id, &surface, key, &value);
         Some(Done::Set(id, key, value, result))
     });
 }
@@ -457,9 +472,13 @@ fn settled(s: &mut App, done: Done) {
             match result {
                 Ok(set) => {
                     s.menus.note.remove(&id);
+                    if set.agent_mode_unread {
+                        failed_now(s, &id);
+                    }
                     s.menus.settings.insert(id, set);
                 }
                 Err(error) => {
+                    failed_now(s, &id);
                     s.menus.note.insert(id, format!("Couldn't read the settings: {error}"));
                 }
             }
