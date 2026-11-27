@@ -109,7 +109,8 @@ impl Known {
             self.keys.insert(if p.ledger_key.is_empty() { p.id.clone() } else { p.ledger_key.clone() }, p.id.clone());
         }
         self.wanted = fetched.ledgers.keys().chain(&fetched.held).cloned().collect();
-        self.rows.retain(|id, _| self.wanted.contains(id) || self.opened.contains(id));
+        let listed: HashSet<&str> = fetched.recorded.projects.iter().filter(|p| !p.archived).map(|p| p.id.as_str()).collect();
+        self.rows.retain(|id, _| listed.contains(id.as_str()) && (self.wanted.contains(id) || self.opened.contains(id)));
         self.sessions = fetched.sessions.clone();
         self.actors.retain(|_, until| until.is_none_or(|at| at > fetched.actors_at));
         self.asked(&fetched.asked, &fetched.recorded.actors, fetched.actors_at);
