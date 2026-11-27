@@ -176,6 +176,9 @@ fn body_tools(cx: &Cx, item: &feed::Item, mut head: El) -> El {
             None => head.child(action(format!("full-{}", item.id), &icons::CHEVRON_DOWN, "Show all").on_press(move |s: &mut App| crate::history::load_body(s, &sid, &iid))),
         };
     }
+    if let Some(call) = item.call_id.clone().filter(|c| !c.is_empty()) {
+        head = head.child(action(format!("copy-call-{}", item.id), &icons::TERMINAL, "Copy call ID").help(call.clone()).on_press_tx(crate::history::copy(call)));
+    }
     head.child(action(format!("copy-{}", item.id), &icons::COPY, "Copy").on_press_tx(crate::history::copy(item.text.clone())))
 }
 
@@ -435,6 +438,7 @@ fn footer(cx: &Cx, block: &Block) -> Option<El> {
     };
     let mut tools = row().gap(2.0).items_center().group_opacity(0.0, 1.0);
     tools = tools.child(action(format!("copy-{item}"), &icons::COPY, "Copy").on_press_tx(crate::history::copy(body.clone())));
+    tools = tools.child(action(format!("share-{item}"), &icons::SHARE, "Share").on_press_tx(crate::history::share(cx.session.to_string(), format!("share-{item}"), body.clone())));
     let images = cx.pane.transcript.images_with(item);
     if user && images > 0 {
         tools = tools.child(action(format!("edit-{item}"), &icons::PENCIL, "Edit").opacity(0.45).help("Edit would resend this message without its images"));
