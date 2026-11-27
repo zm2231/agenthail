@@ -185,8 +185,11 @@ pub fn expire(s: &mut App) -> bool {
 }
 
 pub fn strip(s: &App, k: &Kit, sizes: bool) -> Option<El> {
-    if !in_main(s) || !on() || s.tabs.tabs.tabs().is_empty() {
+    if !in_main(s) || !on() {
         return None;
+    }
+    if s.tabs.tabs.tabs().is_empty() {
+        return notice(s, k);
     }
     let label = crate::look::tabs().label;
     let items = s.tabs.tabs.tabs().iter().map(|t| {

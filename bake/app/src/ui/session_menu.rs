@@ -353,6 +353,12 @@ pub fn changing(s: &App, id: &str) -> bool {
     s.menus.busy.iter().any(|(k, what)| *what == "menu" && feed::composer::current(&s.rekeyed, k) == now)
 }
 
+impl Menus {
+    pub fn swap_rename_seq(&mut self, seq: &mut u64) {
+        std::mem::swap(&mut self.rename_seq, seq);
+    }
+}
+
 pub fn open_at(s: &mut App, id: &str, at: PointerPress) {
     s.menus.chip = None;
     s.menus.open = Some(Open { session: id.to_string(), at: Some(at), sub: false });

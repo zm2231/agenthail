@@ -216,3 +216,18 @@ fn the_strip_shows_in_the_session_toolbar_and_a_right_click_offers_a_window() {
     rt.frame(1.0 / 60.0);
     assert!(rt.presented("tab-menu-menu").is_some(), "the tab menu opens");
 }
+
+#[test]
+fn archiving_the_last_tab_still_shows_the_notice() {
+    let mut s = app();
+    s.sessions = vec![row("a", false)];
+    open(&mut s, &["a"]);
+    s.sessions = vec![row("a", true)];
+    reconcile(&mut s);
+    assert!(ids(&s).is_empty() && s.screen == Screen::Now);
+    let spec = rune::AppSpec::<App> { ..rune::AppSpec::new("Agenthail", (1440.0, 900.0), crate::init, crate::ui::view) };
+    let mut rt = rune::App::new(spec).init(move || s).headless_runtime((1440.0, 900.0), rune::Env { system_dark: true, scale: 1.0 });
+    rt.frame(1.0 / 60.0);
+    rt.frame(1.0 / 60.0);
+    assert!(rt.presented("tab-archived").is_some());
+}

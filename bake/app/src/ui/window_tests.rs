@@ -159,3 +159,15 @@ fn the_shown_session_keeps_its_transcript_when_windows_hold_the_rest() {
     crate::select(&mut s, "main");
     assert!(s.panes.contains_key("main"));
 }
+
+#[test]
+fn a_rename_started_elsewhere_does_not_outdate_this_window_s_rename() {
+    let mut s = app();
+    let w = open(&mut s, "b");
+    let mine = s.windows.stash[&w].rename_seq;
+    enter(&mut s, w);
+    let main = s.windows.stash[&MAIN].rename_seq;
+    assert_ne!(mine, main, "each window counts its renames apart");
+    enter(&mut s, MAIN);
+    assert_eq!(s.windows.stash[&w].rename_seq, mine);
+}

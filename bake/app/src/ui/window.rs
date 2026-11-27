@@ -32,13 +32,14 @@ pub struct Local {
     rename_text: TextEdit,
     rename_error: Option<String>,
     rename_saving: bool,
+    rename_seq: u64,
     popup: super::complete::Popup,
     inspector: rune_kit::shell::PaneState,
     look: u64,
 }
 
 impl Local {
-    fn blank(selected: Option<String>, screen: Screen) -> Local {
+    fn blank(id: Id, selected: Option<String>, screen: Screen) -> Local {
         Local {
             selected,
             screen,
@@ -60,6 +61,7 @@ impl Local {
             rename_text: TextEdit::new(""),
             rename_error: None,
             rename_saving: false,
+            rename_seq: id << 32,
             popup: Default::default(),
             inspector: {
                 let mut p = rune_kit::shell::PaneState::new(284.0).range(260.0, 520.0);
@@ -140,6 +142,7 @@ fn swap_in(s: &mut App, l: &mut Local) {
     swap(&mut s.menus.rename_text, &mut l.rename_text);
     swap(&mut s.menus.rename_error, &mut l.rename_error);
     swap(&mut s.menus.rename_saving, &mut l.rename_saving);
+    s.menus.swap_rename_seq(&mut l.rename_seq);
     s.complete.swap_popup(&mut l.popup);
     swap(&mut s.ov.inspector, &mut l.inspector);
     swap(&mut s.windows.look, &mut l.look);
@@ -165,7 +168,7 @@ pub fn enter(s: &mut App, w: Id) {
         return;
     }
     keep_draft(s);
-    let mut next = s.windows.stash.remove(&w).unwrap_or_else(|| Local::blank(None, Screen::Now));
+    let mut next = s.windows.stash.remove(&w).unwrap_or_else(|| Local::blank(w, None, Screen::Now));
     swap_in(s, &mut next);
     let left = s.windows.current;
     s.windows.stash.insert(left, next);
@@ -181,7 +184,7 @@ pub fn open(s: &mut App, session: &str) -> Id {
     s.windows.next += 1;
     let id = s.windows.next;
     s.windows.open.push(Opened { id, session: session.clone(), frame: None });
-    s.windows.stash.insert(id, Local::blank(Some(session.clone()), Screen::Session));
+    s.windows.stash.insert(id, Local::blank(id, Some(session.clone()), Screen::Session));
     let back = s.windows.current;
     enter(s, id);
     crate::select(s, &session);
@@ -287,6 +290,7 @@ pub fn poll(s: &mut App, _: f64, tx: &mut rune::Tx) -> bool {
     }
     changed |= crate::look::poll_seen(&mut s.windows.look, tx);
     crate::switch_composer(s);
+    changed |= super::complete::pump(s);
     keep_draft(s);
     super::paste::settle(s);
     changed
