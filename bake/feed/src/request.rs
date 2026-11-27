@@ -31,9 +31,10 @@ impl Elicitation {
         self.mode == "url"
     }
 
-    pub fn web_url(&self) -> Option<&str> {
-        let lower = self.url.to_ascii_lowercase();
-        (lower.starts_with("https://") || lower.starts_with("http://")).then_some(self.url.as_str())
+    pub fn web_url(&self) -> Option<String> {
+        let (scheme, rest) = self.url.split_once("://")?;
+        let scheme = scheme.to_ascii_lowercase();
+        matches!(scheme.as_str(), "https" | "http").then(|| format!("{scheme}://{rest}"))
     }
 }
 
@@ -360,6 +361,15 @@ mod tests {
         let west = |_: OffsetDateTime| -8 * 3600;
         assert_eq!(r.deadline_label(now, Clock::Twelve, west).as_deref(), Some("Answer by 8:30 AM"));
         assert_eq!(request(json!({"id": "p"})).deadline_label(now, Clock::Twelve, utc), None);
+    }
+
+    #[test]
+    fn a_link_request_opens_only_web_links_whatever_their_case() {
+        let link = |url: &str| Elicitation { mode: "url".into(), url: url.into(), ..Default::default() };
+        assert_eq!(link("HTTPS://Example.com/Auth?X=1").web_url().as_deref(), Some("https://Example.com/Auth?X=1"));
+        assert_eq!(link("http://a.test").web_url().as_deref(), Some("http://a.test"));
+        assert_eq!(link("file:///etc/passwd").web_url(), None);
+        assert_eq!(link("example.com").web_url(), None);
     }
 
     #[test]

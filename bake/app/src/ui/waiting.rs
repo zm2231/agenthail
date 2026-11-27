@@ -173,7 +173,9 @@ fn pick_el(request: &str, (qi, count): (usize, usize), siblings: Vec<String>, op
         if was_typed {
             s.picks.entry(request.clone()).or_default().retain(|p| !siblings.contains(p));
         }
-        toggle_pick(s, &request, &siblings, &id, multi)
+        if multi || !s.picks.get(&request).is_some_and(|p| p.contains(&id)) {
+            toggle_pick(s, &request, &siblings, &id, multi)
+        }
     });
     el
 }
@@ -408,7 +410,6 @@ fn input_el(s: &App, request: &OpenRequest, e: &feed::request::Elicitation, rout
     if e.is_link() {
         let link = match e.web_url() {
             Some(url) => {
-                let url = url.to_string();
                 text(url.clone()).font(META_BOLD).color(accent()).wrap().on_press(move |_: &mut App| open_link(&url))
             }
             None => text(e.url.clone()).font(META).color(muted()).wrap(),
