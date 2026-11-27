@@ -21,7 +21,7 @@ pub struct State {
     asked: Option<Asked>,
     typed: Option<(String, f64)>,
     requests: u64,
-    reads: HashMap<String, u64>,
+    reads: HashMap<String, (u64, String)>,
     found: HashMap<String, Work>,
     names: HashMap<String, String>,
     opening: HashMap<String, Option<String>>,
@@ -133,7 +133,7 @@ pub fn drain(s: &mut App) -> bool {
                 }
             }
             Reply::Item(seq, ledger, id, read) => {
-                if s.ov.worksearch.reads.get(&id) != Some(&seq) {
+                if s.ov.worksearch.reads.get(&id).is_none_or(|(at, _)| *at != seq) {
                     continue;
                 }
                 s.ov.worksearch.reads.remove(&id);
@@ -178,7 +178,7 @@ fn read(s: &mut App, ledger: &str, id: &str) {
     let st = &mut s.ov.worksearch;
     st.requests += 1;
     let seq = st.requests;
-    st.reads.insert(id.to_string(), seq);
+    st.reads.insert(id.to_string(), (seq, ledger.to_string()));
     let (tx, ledger, id) = (st.tx.clone(), ledger.to_string(), id.to_string());
     std::thread::spawn(move || {
         let read = client.found_work(&ledger, &id);
@@ -192,22 +192,28 @@ pub fn open(s: &mut App, ledger: &str, id: &str) {
         s.ov.notice = Some(format!("{id} in {ledger} has the same id as work in another project, so it can't open here."));
         return;
     }
-    if !loaded(s, id) {
+    let fresh = !loaded(s, id) && !s.ov.worksearch.found.contains_key(id);
+    go(s, Screen::Work(id.to_string()));
+    if fresh {
         read(s, ledger, id);
     }
-    go(s, Screen::Work(id.to_string()));
+}
+
+fn ledger_of(s: &App, id: &str) -> Option<String> {
+    let st = &s.ov.worksearch;
+    st.found.get(id).map(|w| w.ledger_key().to_string()).or_else(|| st.reads.get(id).map(|(_, l)| l.clone()))
 }
 
 pub fn reread(s: &mut App, id: &str) {
-    if let Some(ledger) = s.ov.worksearch.found.get(id).map(|w| w.ledger_key().to_string()) {
+    if let Some(ledger) = ledger_of(s, id) {
         read(s, &ledger, id);
     }
 }
 
 pub fn ledger_changed(s: &mut App, key: Option<&str>) {
     let Screen::Work(id) = s.screen.clone() else { return };
-    if s.ov.worksearch.found.get(&id).is_some_and(|w| key.is_none_or(|k| w.ledger_key() == k)) {
-        reread(s, &id);
+    if let Some(ledger) = ledger_of(s, &id).filter(|l| key.is_none_or(|k| l == k)) {
+        read(s, &ledger, &id);
     }
 }
 

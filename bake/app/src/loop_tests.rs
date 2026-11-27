@@ -483,6 +483,9 @@ fn ledger_api(paths: std::sync::mpsc::Sender<String>) -> String {
                 (500, json!({"error": {"code": "internal", "message": "the ledger store is busy"}}))
             } else if path.starts_with("/api/v1/ledger?projectKey=shared%3Az&view=item&id=") {
                 let id = path.rsplit('=').next().unwrap_or_default();
+                if id == "z-W7" {
+                    std::thread::sleep(std::time::Duration::from_millis(300));
+                }
                 (200, json!({"item": {"item": {"id": id, "text": "Parked export", "state": "parked", "type": "task", "priority": "P3"}}}))
             } else {
                 (404, json!({"error": {"code": "unknown_route", "message": "no"}}))
@@ -551,7 +554,7 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     rt.frame(wake_in(&rt));
     typed(&mut rt, "export");
     assert_eq!(highlighted_session(&rt), Some("exporter".into()));
-    rt.frame(0.2);
+    rt.frame(0.21);
     until(&mut rt, |s| work_found(s).is_some());
     assert_eq!(highlighted_session(&rt), Some("exporter".into()), "arriving matches don't move the highlight");
     std::thread::sleep(std::time::Duration::from_millis(400));
@@ -563,7 +566,7 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     assert!(rt.presented("hit-1").is_some() && rt.presented("hit-2").is_none(), "the work match and the session are listed");
 
     typed(&mut rt, "broken");
-    rt.frame(0.2);
+    rt.frame(0.21);
     until(&mut rt, |s| work_found(s).is_some());
     assert_eq!(work_found(&rt.state), Some(Err("the ledger store is busy".to_string())));
     for _ in 0..20 {
@@ -571,7 +574,7 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     }
     assert_eq!(asked(&paths).len(), 1, "a failed search waits for the next keystroke");
     typed(&mut rt, "broken2");
-    rt.frame(0.2);
+    rt.frame(0.21);
     until(&mut rt, |s| work_found(s).is_some());
     assert_eq!(asked(&paths).len(), 1, "the next keystroke retries");
 
@@ -609,7 +612,7 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     assert!(asked(&paths).is_empty(), "a loaded item opens without a read");
 
     typed(&mut rt, "export");
-    rt.frame(0.2);
+    rt.frame(0.21);
     until(&mut rt, |s| work_found(s).is_some());
     assert_eq!(crate::over::jump::shown(&rt.state), [("Parked export".to_string(), "Build · Someone's move · Alpha · …a parked export…".to_string())], "a loaded match takes the search's snippet instead of listing twice");
     assert_eq!(asked(&paths), ["/api/v1/ledger/search?q=export&limit=20"]);
@@ -639,9 +642,26 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     rt.frame(DT);
     quiet(&mut rt);
     assert_eq!(asked(&paths).len(), 1, "so does a reconnect that may have missed changes");
+    crate::over::go(&mut rt.state, Screen::Now);
+    send(&rt, Bg::LedgerChanged("shared:z".into(), std::time::Instant::now()));
+    rt.frame(DT);
+    quiet(&mut rt);
+    assert!(asked(&paths).is_empty(), "a found item that isn't on screen isn't reread on every change");
+    crate::over::go(&mut rt.state, Screen::Work("z-W8".into()));
+    quiet(&mut rt);
+    assert_eq!(asked(&paths).len(), 1, "coming back to a found item rereads it");
+
+    crate::over::worksearch::open(&mut rt.state, "shared:z", "z-W7");
+    rt.frame(DT);
+    send(&rt, Bg::LedgerChanged("shared:z".into(), std::time::Instant::now()));
+    rt.frame(DT);
+    until(&mut rt, |s| s.ov.d.work.contains_key("z-W7"));
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    quiet(&mut rt);
+    assert_eq!(asked(&paths).len(), 2, "a change during the first read reads it again");
 
     typed(&mut rt, "export");
-    rt.frame(0.2);
+    rt.frame(0.21);
     std::thread::sleep(std::time::Duration::from_millis(100));
     rt.state.ov.jump = Some(rune::TextEdit::new("exported"));
     rt.state.ov.d.found_names.clear();

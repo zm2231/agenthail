@@ -172,6 +172,13 @@ pub fn go(s: &mut App, to: Screen) {
     s.ov.notice = None;
     crate::switch_composer(s);
     arrive(s);
+    landed(s);
+}
+
+fn landed(s: &mut App) {
+    if let Screen::Work(id) = s.screen.clone() {
+        worksearch::reread(s, &id);
+    }
 }
 
 pub fn composer_target(s: &App) -> Option<String> {
@@ -195,10 +202,7 @@ pub fn open_session(s: &mut App, id: &str) {
 pub fn open_target(s: &mut App, t: &Target) {
     match t {
         Target::Session(id) => open_session(s, id),
-        Target::Work(id) => {
-            worksearch::reread(s, id);
-            go(s, Screen::Work(id.clone()));
-        }
+        Target::Work(id) => go(s, Screen::Work(id.clone())),
         Target::Project(key) => go(s, Screen::Project(key.clone())),
     }
 }
@@ -402,6 +406,7 @@ pub fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
                 s.screen = prev;
                 crate::switch_composer(s);
                 arrive(s);
+                landed(s);
             }
             true
         }
