@@ -1406,7 +1406,10 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                         fetch_ledger(s, &project);
                     }
                 }
-                s.now = OffsetDateTime::now_utc();
+                let now = OffsetDateTime::now_utc();
+                if feed::wake::minute_of(now) != feed::wake::minute_of(s.now) {
+                    s.now = now;
+                }
                 s.status = "live".into();
                 ui::connect::up(s);
                 link::listed(s);

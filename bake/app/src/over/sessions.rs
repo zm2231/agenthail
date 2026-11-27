@@ -43,7 +43,7 @@ fn state_color(s: &App, x: &Session, k: &Kit) -> Color {
         ui::needs_color(k)
     } else if busy(x) {
         k.c.text_accent
-    } else if x.state(s.ov.d.now) == State::Done {
+    } else if x.state(s.ov.d.shown) == State::Done {
         k.c.success.icon
     } else {
         k.c.text_weak
@@ -74,7 +74,7 @@ pub fn session_row(s: &App, x: &Session, depth: u8, selected: bool, k: &Kit) -> 
     let (line, color, live) = status_line(s, x, k);
     let trailing = if busy(x) {
         Trailing::Live
-    } else if x.state(s.ov.d.now) == State::Done {
+    } else if x.state(s.ov.d.shown) == State::Done {
         Trailing::Done(s.ov.d.ago(&x.last_active))
     } else {
         Trailing::Idle(s.ov.d.ago(&x.last_active))

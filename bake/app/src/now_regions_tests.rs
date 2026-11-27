@@ -191,3 +191,37 @@ fn a_refresh_that_changes_nothing_shown_skips_the_view() {
     assert!(runs(&mut rt, overview("2026-11-27T10:01:45Z", renamed.clone(), &mut sent, true)), "activity that couldn't be read");
     assert!(runs(&mut rt, Bg::OverviewError("offline".into())), "anything else that arrives");
 }
+
+#[test]
+fn a_session_crossing_into_idle_within_the_minute_shows_as_a_fresh_build_would() {
+    if !isolated("now_regions::a_session_crossing_into_idle_within_the_minute_shows_as_a_fresh_build_would") {
+        return;
+    }
+    use super::rows_memo_lines::people;
+    use crate::over::rows::built;
+    let dir = Dir::new("now-regions-done");
+    let mut rt = world(&dir);
+    let mut sessions = people();
+    sessions[0] = session("a", 0, json!({"name": "Alpha one", "lastActive": "2026-11-27T07:00:30Z", "endTurn": {"headline": "Landed the fix", "outcome": "done", "at": "2026-11-27T07:00:30Z"}}));
+    let mut sent = std::sync::Arc::default();
+    send(&rt, overview("2026-11-27T10:00:20Z", sessions.clone(), &mut sent, false));
+    rt.frame(DT);
+    rt.update(|s, _| {
+        crate::over::go(s, Screen::Sessions);
+        let view = serde_json::from_value(json!({
+            "projects": [{"id": "p1", "name": "Alpha", "counts": {"families": 1, "sessions": 1}, "collapsedFamilyIds": ["a"]}],
+            "families": [{"id": "a", "rootId": "a", "projectId": "p1", "members": [{"id": "a"}]}],
+        }))
+        .unwrap();
+        let page = feed::listing::Page { sessions: s.ov.d.sessions.to_vec(), view, next: None };
+        crate::over::listing::show(s, feed::listing::Listing::first(page));
+    });
+    quiet(&mut rt);
+    assert!(rt.presented("srow-a").is_some(), "the session's row is on screen");
+    let views = built::views();
+    send(&rt, overview("2026-11-27T10:00:40Z", sessions, &mut sent, false));
+    rt.frame(DT);
+    rt.frame(DT);
+    assert_eq!(built::views(), views, "a refresh later in the same minute skips the view");
+    matches_fresh(&mut rt, "three hours since the session's turn, passed within the minute");
+}
