@@ -211,7 +211,7 @@ fn settle(s: &mut App, done: Done) {
                     if let Some(id) = started.session_id() {
                         open_session(s, &id);
                         if let Some(failure) = &started.failure {
-                            s.ov.notice = Some(format!("The builder session was made, but its first message didn't run: {failure}"));
+                            s.ov.notice = Some(format!("The builder session was made, but it may not have started: {failure}"));
                         } else if started.unconfirmed() {
                             s.ov.notice = Some("The builder session was made, but the daemon hasn't confirmed its first message ran yet.".into());
                         }
