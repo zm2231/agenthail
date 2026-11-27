@@ -14,6 +14,10 @@ mod ui;
 mod voice;
 mod web;
 
+#[cfg(test)]
+#[path = "loop_tests.rs"]
+mod loop_tests;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
