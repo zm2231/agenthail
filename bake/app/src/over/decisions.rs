@@ -316,7 +316,7 @@ pub fn section(s: &App, k: &Kit, main_kit: &Kit) -> El {
         for h in &found.lead_handling {
             let who = s.ov.d.session(&h.session_id).map(|x| s.ov.d.title(x)).unwrap_or_else(|| crate::over::short_id(&h.session_id));
             let holder = s.ov.d.name_of(&h.held_by);
-            let key = format!("lead-handled-{}|{}|{}", h.ledger_key, h.work_item, h.session_id);
+            let key = format!("lead-handled-{}", h.row_key());
             list = list.child(crate::over::rows::memo(key.clone(), (&who, &holder, &h.reason, &h.session_id), k, || {
                 let id = h.session_id.clone();
                 row()
