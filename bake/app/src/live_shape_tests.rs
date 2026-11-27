@@ -167,10 +167,10 @@ fn probe() {
         let rows = built::take().len();
         if built::views() == views {
             skipped += 1;
+            let kept = drawn(&rt);
             rt.invalidate();
             rt.frame(DT);
             assert_eq!(built::take(), Vec::<String>::new(), "the poll at +{later} s skipped the view, but running it builds rows");
-            let kept = drawn(&rt);
             rt.invalidate_memos_by_prefix("");
             rt.frame(DT);
             built::take();
