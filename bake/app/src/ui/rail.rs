@@ -10,6 +10,9 @@ pub(crate) fn rail_section(title: &str, glyph: &'static Icon, body: El) -> El {
 }
 
 pub(crate) fn phase_stepper(state: &str) -> El {
+    if let Some(word) = feed::derive::phase::off_board(state) {
+        return row().w_full().child(text(word.to_string()).font(META).color(faint()));
+    }
     let current = catalog::phase(state);
     let mut nodes = row().w_full().items_center();
     for i in 0..PHASES.len() {

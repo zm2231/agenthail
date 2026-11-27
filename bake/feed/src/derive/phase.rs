@@ -17,6 +17,10 @@ pub fn state_phase(state: &str) -> usize {
     }
 }
 
+pub fn off_board(state: &str) -> Option<&'static str> {
+    matches!(state, "parked" | "closed").then(|| state_word(state))
+}
+
 pub fn state_word(st: &str) -> &'static str {
     match st {
         "in_progress" => "Build",
@@ -58,6 +62,20 @@ impl World {
             },
             _ if w.assignee.as_deref() == Some(crate::ledger::PERSON) => "You".into(),
             _ => self.worker(w),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parked_and_closed_work_is_off_the_phases() {
+        assert_eq!(off_board("parked"), Some("Parked"));
+        assert_eq!(off_board("closed"), Some("Closed"));
+        for state in ["open", "blocked", "in_progress", "in_review", "done"] {
+            assert_eq!(off_board(state), None, "{state}");
         }
     }
 }
