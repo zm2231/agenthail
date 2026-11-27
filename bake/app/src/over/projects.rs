@@ -867,6 +867,11 @@ pub fn open(s: &App) -> bool {
     s.ov.projects.sheet.is_some() || s.ov.projects.confirm.is_some()
 }
 
+pub fn covering(s: &App) -> bool {
+    let p = &s.ov.projects;
+    open(s) || p.menu.is_some() || p.archived_menu || p.more_menu.is_some()
+}
+
 fn locked(s: &App) -> bool {
     s.ov.projects.saving && matches!(s.ov.projects.sheet, Some(Sheet::Broadcast { .. }))
 }

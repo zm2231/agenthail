@@ -1,4 +1,5 @@
 mod history;
+mod hotkey;
 mod icons;
 mod instance;
 mod link;
@@ -1595,6 +1596,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     menubar::sync_keys(s);
     menubar::warn(s);
     menubar::badge(s);
+    hotkey::tick();
     if let Some(due) = over::worksearch::wait(s) {
         s.wake.after(tx, due);
     }
@@ -1611,6 +1613,10 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         return true;
     }
     (!over::projects::open(s) && ui::new_session::on_key(s, ev, tx)) || over::on_key(s, ev, tx)
+}
+
+fn on_focus(_: &mut App, focused: bool, _: &mut Tx) {
+    hotkey::focus(feed::hotkey::Window::Main, focused);
 }
 
 fn on_quit(s: &mut App, _: &mut Tx) {
@@ -1653,7 +1659,10 @@ fn main() {
         .window_options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
         .srgb_blend(true)
         .on_quit(on_quit)
+        .on_focus(on_focus)
         .on_open_url(link::on_open_url);
+    hotkey::keep(app.handle());
+    app.handle().update(|_, _| hotkey::sync());
     let mut prefs = settings::spec();
     prefs.options = WindowOptions { visible: false, resizable: true, ..Default::default() };
     let (handle, window) = app.window(prefs);

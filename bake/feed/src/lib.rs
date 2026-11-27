@@ -33,6 +33,7 @@ pub mod handoffs;
 pub mod health;
 pub mod history;
 pub mod holders;
+pub mod hotkey;
 pub mod inspect;
 pub mod item;
 pub mod ledger;

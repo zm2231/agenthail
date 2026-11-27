@@ -54,6 +54,10 @@ pub fn open_read(s: &mut App, row: Session) {
     crate::over::open_session(s, &id);
 }
 
+pub fn activity_open(s: &App) -> bool {
+    s.ov.search.activity.panel.is_some()
+}
+
 pub fn activity_view(s: &App, layer: &mut Vec<El>, k: &Kit) {
     activity::view(s, layer, k);
 }

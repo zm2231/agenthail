@@ -21,6 +21,10 @@ pub struct Turns {
     drafts: HashMap<String, Draft>,
 }
 
+pub fn covering(s: &App) -> bool {
+    s.turn.open.is_some()
+}
+
 pub fn takes(x: &Session) -> bool {
     x.surface == feed::create::CODEX
 }
