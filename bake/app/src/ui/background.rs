@@ -52,10 +52,10 @@ pub(crate) fn dock(s: &App, x: &Session, k: &Kit) -> Option<El> {
         .gap(8.0)
         .items_center()
         .on_press(move |s: &mut App| toggle(s, &on))
-        .child(icon(&icons::COG, 13.0).color(faint()))
-        .child(text(b.summary()).font(META_BOLD).color(theme::text()).truncate())
+        .child(icon(&icons::COG, k.text_size(13.0)).color(faint()))
+        .child(text(b.summary()).font(k.text(META_BOLD)).color(theme::text()).truncate())
         .child(spacer())
-        .child(icon(if open { &icons::CHEVRON_UP } else { &icons::CHEVRON_DOWN }, 12.0).color(faint()));
+        .child(icon(if open { &icons::CHEVRON_UP } else { &icons::CHEVRON_DOWN }, k.text_size(12.0)).color(faint()));
     let close = IconButton::new(&icons::CLOSE)
         .variant(IconButtonVariant::GhostMuted)
         .control_size(ControlSize::Small)
@@ -73,9 +73,9 @@ pub(crate) fn dock(s: &App, x: &Session, k: &Kit) -> Option<El> {
             .pb(6.0)
             .children(b.tasks.iter().map(|t| {
                 let line = t.timed_line(s.now, clock(), offset);
-                row().key(format!("background-task-{}", t.id)).w_full().h(LINE_HEIGHT).items_center().help(line.clone()).child(text(line).font(META).color(muted()).truncate())
+                row().key(format!("background-task-{}", t.id)).w_full().h(LINE_HEIGHT).items_center().help(line.clone()).child(text(line).font(k.text(META)).color(muted()).truncate())
             }))
-            .children(b.source_note().map(|n| row().w_full().min_h(NOTE_LINES as f32 * LINE_HEIGHT).items_center().child(text(n).font(META).color(faint()).wrap())));
+            .children(b.source_note().map(|n| row().w_full().min_h(NOTE_LINES as f32 * LINE_HEIGHT).items_center().child(text(n).font(k.text(META)).color(faint()).wrap())));
         c = c.child(col().key("background-tasks-lines").w_full().max_h(LINES_SHOWN as f32 * LINE_HEIGHT + LINES_PAD).scroll(ScrollSpec { stick_bottom: false }).child(list));
     }
     Some(c)

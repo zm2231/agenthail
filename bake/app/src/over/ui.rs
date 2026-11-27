@@ -114,15 +114,15 @@ fn end_line(line: &str, style: TextStyle, width: f32) -> String {
     "…".into()
 }
 
-pub fn title_fit(s: &App, key: &str, t: &str, style: TextStyle, color: Color, lines: usize) -> El {
-    let k = key.to_string();
+pub fn title_fit(s: &App, key: &str, t: &str, style: TextStyle, color: Color, lines: usize, k: &Kit) -> El {
+    let id = key.to_string();
     let body = match s.ov.widths.get(key) {
-        Some(w) if *w > 8.0 => text(fit_lines(t, style, w - 1.0, lines)).font(style).color(color),
-        _ => text(t.to_string()).font(style).color(color).wrap_anywhere().max_lines(lines),
+        Some(w) if *w > 8.0 => text(fit_lines(t, k.text(style), w - 1.0, lines)).font(k.text(style)).color(color),
+        _ => text(t.to_string()).font(k.text(style)).color(color).wrap_anywhere().max_lines(lines),
     };
     col().key(format!("fit-{key}")).w_full().min_w(0.0).shrink().on_layout(move |s: &mut App, r: [f32; 4]| {
-        if s.ov.widths.get(&k).is_none_or(|w| (w - r[2]).abs() > 0.5) {
-            s.ov.widths.insert(k.clone(), r[2]);
+        if s.ov.widths.get(&id).is_none_or(|w| (w - r[2]).abs() > 0.5) {
+            s.ov.widths.insert(id.clone(), r[2]);
         }
     }).child(body)
 }
@@ -132,7 +132,7 @@ pub fn spacer() -> El {
 }
 
 pub fn label(value: &str, k: &Kit) -> El {
-    text(value.to_uppercase()).font(LABEL).color(weak(k))
+    text(value.to_uppercase()).font(k.text(LABEL)).color(weak(k))
 }
 
 pub fn ghost_keys(keys: &[&str], k: &Kit) -> El {
@@ -164,7 +164,7 @@ pub fn kind_icon(kind: NeedKind) -> &'static Icon {
     }
 }
 
-pub fn pill(glyph: &'static Icon, value: &str, color: Color) -> El {
+pub fn pill(glyph: &'static Icon, value: &str, color: Color, k: &Kit) -> El {
     row()
         .gap(5.0)
         .items_center()
@@ -172,12 +172,12 @@ pub fn pill(glyph: &'static Icon, value: &str, color: Color) -> El {
         .py(3.0)
         .radius(6.0)
         .fill(color.alpha(0.13))
-        .child(icon(glyph, 12.0).color(color))
-        .child(text(value.to_string()).font(META_MED).color(color))
+        .child(icon(glyph, k.text_size(12.0)).color(color))
+        .child(text(value.to_string()).font(k.text(META_MED)).color(color))
 }
 
 pub fn kind_pill(kind: NeedKind, k: &Kit) -> El {
-    pill(kind_icon(kind), kind.label(), kind_color(kind, k))
+    pill(kind_icon(kind), kind.label(), kind_color(kind, k), k)
 }
 
 pub fn chip(glyph: &'static Icon, value: &str, k: &Kit) -> El {
@@ -189,12 +189,12 @@ pub fn chip(glyph: &'static Icon, value: &str, k: &Kit) -> El {
         .radius(7.0)
         .fill(k.c.surface_base)
         .border(1.0, edge())
-        .child(icon(glyph, 13.0).color(k.c.icon_base))
-        .child(text(value.to_string()).font(META_MED).color(base(k)))
+        .child(icon(glyph, k.text_size(13.0)).color(k.c.icon_base))
+        .child(text(value.to_string()).font(k.text(META_MED)).color(base(k)))
 }
 
 pub fn id_label(id: &str, k: &Kit) -> El {
-    text(id.to_string()).font(META).color(weak(k))
+    text(id.to_string()).font(k.text(META)).color(weak(k))
 }
 
 pub fn happened_style(kind: Happened, k: &Kit) -> (&'static Icon, Color) {
@@ -216,11 +216,11 @@ pub fn stepper(phase: usize, whose: &str, k: &Kit) -> El {
         let you = current && i == 4;
         let accent = if you { k.c.warning.icon } else { k.c.text_accent };
         let dot = if done {
-            row().size(20.0, 20.0).radius(10.0).center().fill(k.c.success.icon.alpha(0.18)).child(icon(&icons::CHECK_SMALL, 14.0).color(k.c.success.icon))
+            row().size(k.text_size(20.0), k.text_size(20.0)).radius(k.text_size(10.0)).center().fill(k.c.success.icon.alpha(0.18)).child(icon(&icons::CHECK_SMALL, k.text_size(14.0)).color(k.c.success.icon))
         } else if current {
-            row().size(20.0, 20.0).radius(10.0).center().fill(accent.alpha(0.18)).border(1.5, accent).child(el().size(8.0, 8.0).radius(4.0).fill(accent))
+            row().size(k.text_size(20.0), k.text_size(20.0)).radius(k.text_size(10.0)).center().fill(accent.alpha(0.18)).border(1.5, accent).child(el().size(8.0, 8.0).radius(4.0).fill(accent))
         } else {
-            row().size(20.0, 20.0).radius(10.0).center().border(1.5, k.c.border_base)
+            row().size(k.text_size(20.0), k.text_size(20.0)).radius(k.text_size(10.0)).center().border(1.5, k.c.border_base)
         };
         let line_l = el().h(1.5).grow(1.0).fill(if i == 0 { Color::TRANSPARENT } else if done || current { k.c.success.icon.alpha(0.5) } else { k.c.border_base });
         let line_r = el().h(1.5).grow(1.0).fill(if i + 1 == PHASES.len() { Color::TRANSPARENT } else if done { k.c.success.icon.alpha(0.5) } else { k.c.border_base });
@@ -230,9 +230,9 @@ pub fn stepper(phase: usize, whose: &str, k: &Kit) -> El {
             .items_center()
             .gap(7.0)
             .child(row().w_full().items_center().child(line_l).child(dot).child(line_r))
-            .child(text(name.to_string()).font(if current { META_MED } else { META }).color(if current { strong(k) } else if done { base(k) } else { weak(k) }));
+            .child(text(name.to_string()).font(k.text(if current { META_MED } else { META })).color(if current { strong(k) } else if done { base(k) } else { weak(k) }));
         if you {
-            step = step.child(text("Your move".to_string()).font(TextStyle::new(11.5, 600.0)).color(accent));
+            step = step.child(text("Your move".to_string()).font(k.text(TextStyle::new(11.5, 600.0))).color(accent));
         }
         r = r.child(step);
     }
@@ -244,8 +244,8 @@ pub fn stepper(phase: usize, whose: &str, k: &Kit) -> El {
             .w_full()
             .justify_center()
             .gap(6.0)
-            .child(text(format!("{}:", PHASES[phase.min(5)])).font(META_MED).color(k.c.text_accent))
-            .child(text(feed::derive::phase::move_of(whose)).font(META).color(base(k)).truncate().shrink()),
+            .child(text(format!("{}:", PHASES[phase.min(5)])).font(k.text(META_MED)).color(k.c.text_accent))
+            .child(text(feed::derive::phase::move_of(whose)).font(k.text(META)).color(base(k)).truncate().shrink()),
     )
 }
 
@@ -261,11 +261,11 @@ pub fn mini_phase(phase: usize, k: &Kit) -> El {
         };
         r = r.child(el().size(if i == phase { 14.0 } else { 8.0 }, 4.0).radius(2.0).fill(color));
     }
-    r.child(text(PHASES[phase.min(5)].to_string()).font(META).color(weak(k)).ml(6.0))
+    r.child(text(PHASES[phase.min(5)].to_string()).font(k.text(META)).color(weak(k)).ml(6.0))
 }
 
 pub fn section_head(title: &str, count: Option<usize>, trailing: Option<El>, k: &Kit) -> El {
-    let mut r = row().w_full().items_center().gap(8.0).child(text(title.to_string()).font(HEAD).color(strong(k)));
+    let mut r = row().w_full().items_center().gap(8.0).child(text(title.to_string()).font(k.text(HEAD)).color(strong(k)));
     if let Some(n) = count {
         r = r.child(Badge::new(n.to_string()).variant(BadgeVariant::Subtle).build(k));
     }
@@ -342,13 +342,13 @@ pub fn need_actions(s: &App, n: &Need, compact: bool, k: &Kit) -> El {
 
 pub fn need_row(s: &App, i: usize, n: &Need, focused: bool, k: &Kit) -> El {
     let t = n.target.clone();
-    let mut meta = row().gap(8.0).items_center().child(kind_pill(n.kind, k)).child(text(n.project.clone()).font(META_MED).color(base(k)));
+    let mut meta = row().gap(8.0).items_center().child(kind_pill(n.kind, k)).child(text(n.project.clone()).font(k.text(META_MED)).color(base(k)));
     let who = if matches!(n.target, Target::Session(_)) { format!("{} · {}", short_title(&n.who, 24), s.ov.d.ago(&n.at)) } else { s.ov.d.ago(&n.at) };
-    meta = meta.child(text(who).font(META).color(weak(k)));
+    meta = meta.child(text(who).font(k.text(META)).color(weak(k)));
     if let Some(l) = &n.label {
         meta = meta.child(id_label(l, k));
     }
-    let body = col().grow(1.0).shrink().min_w(0.0).gap(6.0).child(title_fit(s, &format!("need-{}", n.title), &n.title, BODY_MED, strong(k), 2)).child(meta);
+    let body = col().grow(1.0).shrink().min_w(0.0).gap(6.0).child(title_fit(s, &format!("need-{}", n.title), &n.title, BODY_MED, strong(k), 2, k)).child(meta);
     let mut r = row()
         .key(format!("need-{i}"))
         .w_full()
@@ -374,12 +374,12 @@ pub fn need_row(s: &App, i: usize, n: &Need, focused: bool, k: &Kit) -> El {
 
 pub fn group_head(g: Group, n: usize, k: &Kit) -> El {
     let color = if g == Group::Holding { needs_color(k) } else { weak(k) };
-    row().w_full().gap(8.0).items_center().px(10.0).pt(8.0).pb(2.0).child(text(g.label().to_uppercase()).font(LABEL).color(color)).child(text(n.to_string()).font(LABEL).color(weak(k)))
+    row().w_full().gap(8.0).items_center().px(10.0).pt(8.0).pb(2.0).child(text(g.label().to_uppercase()).font(k.text(LABEL)).color(color)).child(text(n.to_string()).font(k.text(LABEL)).color(weak(k)))
 }
 
 pub fn new_divider(key: String, k: &Kit) -> El {
     let line = || el().h(1.0).grow(1.0).fill(k.c.text_accent.alpha(0.4));
-    row().key(key).w_full().gap(8.0).items_center().px(10.0).py(4.0).child(line()).child(text("New since you looked".to_string()).font(LABEL).color(k.c.text_accent)).child(line())
+    row().key(key).w_full().gap(8.0).items_center().px(10.0).py(4.0).child(line()).child(text("New since you looked".to_string()).font(k.text(LABEL)).color(k.c.text_accent)).child(line())
 }
 
 pub enum Slot<'a> {
@@ -450,15 +450,15 @@ pub fn strip(s: &App, current: Option<&str>, k: &Kit) -> El {
             .radius(8.0)
             .max_w(176.0)
             .child(avatar(&x.project_name(), 16.0))
-            .child(text(short_title(&s.ov.d.title(x), 18)).font(if on { META_MED } else { META }).color(if on { strong(k) } else { base(k) }).truncate().shrink())
+            .child(text(short_title(&s.ov.d.title(x), 18)).font(k.text(if on { META_MED } else { META })).color(if on { strong(k) } else { base(k) }).truncate().shrink())
             .on_press(move |s: &mut App| crate::over::open_session(s, &id2));
         if busy {
-            tab = tab.child(Spinner::new().size(11.0).build(k));
+            tab = tab.child(Spinner::new().size(k.text_size(11.0)).build(k));
         }
         if i < s.ov.hands_on.len() {
             tab = tab.child(ghost_keys(&[format!("⌘{}", i + 1).as_str()], k));
         } else {
-            tab = tab.child(text("viewing".to_string()).font(META).color(weak(k)));
+            tab = tab.child(text("viewing".to_string()).font(k.text(META)).color(weak(k)));
         }
         tab = if on { tab.fill(k.c.surface_raised_hover).border(1.0, edge()) } else { tab.hover(k.c.surface_raised_hover) };
         r = r.child(tab);
@@ -477,14 +477,14 @@ fn session_row(s: &App, x: &feed::catalog::Session, depth: u8, lead: bool, selec
     let id = x.id.clone();
     let waiting = x.display.label.starts_with("Waiting on");
     let mut r = SidebarRow::new(short_title(&s.ov.d.title(x), 40))
-        .height(44.0)
+        .height(k.text_size(44.0))
         .depth(depth)
         .avatar(avatar(&s.ov.d.title(x), 18.0))
         .subtitle(if waiting { x.display.label.clone() } else if lead { format!("Lead · {}", short_title(&s.ov.d.gist(x), 40)) } else { short_title(&s.ov.d.gist(x), 48) })
         .selected(selected == Some(x.id.as_str()))
         .on_select(move |s: &mut App, _| crate::over::open_session(s, &id));
     if crate::ui::session_menu::has_marks(x) {
-        r = r.trailing(crate::ui::session_menu::marks(x));
+        r = r.trailing(crate::ui::session_menu::marks(x, k));
     }
     if busy(x) {
         r = r.status(RowStatus::Busy);
@@ -526,19 +526,19 @@ pub fn session_key(id: &str) -> String {
 }
 
 pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k: &Kit) -> El {
-    let home = SidebarRow::new("Now").icon(&icons::DOT_GRID).detail("⌘0").height(32.0).selected(matches!(s.screen, Screen::Now)).on_select(|s: &mut App, _| go(s, Screen::Now)).build(k).key("home");
-    let search = SidebarRow::new("Jump to").icon(&icons::MAGNIFYING_GLASS).detail("⌘K").height(32.0).on_select(|s: &mut App, tx: &mut rune::Tx| crate::over::open_jump(s, tx)).build(k).key("jump");
+    let home = SidebarRow::new("Now").icon(&icons::DOT_GRID).detail("⌘0").height(k.text_size(32.0)).selected(matches!(s.screen, Screen::Now)).on_select(|s: &mut App, _| go(s, Screen::Now)).build(k).key("home");
+    let search = SidebarRow::new("Jump to").icon(&icons::MAGNIFYING_GLASS).detail("⌘K").height(k.text_size(32.0)).on_select(|s: &mut App, tx: &mut rune::Tx| crate::over::open_jump(s, tx)).build(k).key("jump");
     let all = SidebarRow::new("Sessions")
         .icon(&icons::BULLET_LIST)
         .detail("⌘⇧S")
-        .height(32.0)
+        .height(k.text_size(32.0))
         .selected(matches!(s.screen, Screen::Sessions))
         .on_select(|s: &mut App, _| go(s, Screen::Sessions))
         .build(k)
         .key("sessions");
     let apps = SidebarRow::new("Apps")
         .icon(&icons::EXTENSIONS)
-        .height(32.0)
+        .height(k.text_size(32.0))
         .selected(matches!(s.screen, Screen::Extensions | Screen::Extension(_)))
         .on_select(|s: &mut App, _| go(s, Screen::Extensions))
         .build(k)
@@ -548,7 +548,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
         let (id, badge) = (entry.id(), entry.badge.clone());
         let mut pin = SidebarRow::new(entry.label.clone())
             .icon(crate::over::extensions::entry_icon(&entry))
-            .height(32.0)
+            .height(k.text_size(32.0))
             .selected(matches!(&s.screen, Screen::Extension(open) if *open == id))
             .on_select(move |s: &mut App, _| crate::over::extensions::open(s, &entry));
         if let Some(badge) = badge {
@@ -575,7 +575,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
             _ => false,
         };
         let mut need = SidebarRow::new(short_title(&n.title, 60))
-            .height(44.0)
+            .height(k.text_size(44.0))
             .avatar(avatar(&n.project, 18.0))
             .subtitle(n.kind.wanted())
             .subtitle_color(needs_color(k))
@@ -586,7 +586,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
             _ => None,
         };
         if let Some(x) = held.filter(|x| crate::ui::session_menu::has_marks(x)) {
-            need = need.trailing(crate::ui::session_menu::marks(x));
+            need = need.trailing(crate::ui::session_menu::marks(x, k));
         }
         let mut need = need.build(k).key(format!("need-{i}"));
         if let Target::Session(id) = &n.target {
@@ -613,7 +613,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
         sec = sec.row(
             SidebarRow::new("All sessions")
                 .icon(&icons::ARROW_RIGHT)
-                .height(30.0)
+                .height(k.text_size(30.0))
                 .detail(format!("{}", p.sessions.len()))
                 .on_select(move |s: &mut App, _| {
                     s.ov.sessions_project = Some(pkey.clone());
@@ -635,7 +635,7 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
         let key = p.key.clone();
         let waiting = s.ov.needs.iter().filter(|n| n.project_key == p.key).count();
         let mut r = SidebarRow::new(p.name.clone())
-            .height(32.0)
+            .height(k.text_size(32.0))
             .avatar(avatar(&p.name, 18.0))
             .detail(s.ov.d.ago(&p.last_active))
             .selected(matches!(&s.screen, Screen::Project(k2) if *k2 == p.key))
@@ -703,8 +703,8 @@ pub fn frame_now(cx: &mut Cx<App>, s: &App, sidebar: Option<El>, main: El, inspe
 
 pub fn pane_strip(i: usize, glyph: &'static Icon, count: Option<(usize, Color)>, k: &Kit) -> El {
     let name = crate::over::layout::PANES[i];
-    let len = 140.0;
-    let label = el().w(16.0).h(len).child(text(name.to_string()).font(META_MED).color(base(k)).w(len).h(16.0).absolute(8.0 - len / 2.0, len / 2.0 - 8.0).rotate(std::f32::consts::FRAC_PI_2));
+    let (len, line) = (k.text_size(140.0), k.text_size(16.0));
+    let label = el().w(line).h(len).child(text(name.to_string()).font(k.text(META_MED)).color(base(k)).w(len).h(line).absolute((line - len) / 2.0, (len - line) / 2.0).rotate(std::f32::consts::FRAC_PI_2));
     let mut c = col()
         .key(format!("strip-{i}"))
         .w(40.0)
@@ -717,9 +717,9 @@ pub fn pane_strip(i: usize, glyph: &'static Icon, count: Option<(usize, Color)>,
         .border(1.0, edge())
         .hover(k.c.surface_raised_hover)
         .on_press(move |s: &mut App| crate::over::layout::expand_pane(s, i))
-        .child(icon(glyph, 15.0).color(k.c.icon_base));
+        .child(icon(glyph, k.text_size(15.0)).color(k.c.icon_base));
     if let Some((n, color)) = count {
-        c = c.child(row().min_w(20.0).h(18.0).px(5.0).radius(9.0).center().fill(color.alpha(0.18)).child(text(n.to_string()).font(LABEL).color(color)));
+        c = c.child(row().min_w(k.text_size(20.0)).h(k.text_size(18.0)).px(5.0).radius(k.text_size(9.0)).center().fill(color.alpha(0.18)).child(text(n.to_string()).font(k.text(LABEL)).color(color)));
     }
     c.child(label).child(spacer()).child(ghost_keys(&[format!("⌥⌘{}", i + 1).as_str()], k).pb(12.0))
 }
@@ -740,9 +740,9 @@ pub fn pane_head(s: &App, i: usize, title: &str, k: &Kit) -> El {
         .help(format!("Collapse to a strip (⌥⌘{})", i + 1))
         .on_press(move |s: &mut App| crate::over::layout::toggle_pane(s, i))
         .build(k);
-    let mut r = row().key(format!("pane-head-{i}")).w_full().h(36.0).px(14.0).gap(6.0).items_center().border_sides([0.0, 0.0, 1.0, 0.0], rule(k)).child(label(title, k));
+    let mut r = row().key(format!("pane-head-{i}")).w_full().h(k.text_size(36.0)).px(14.0).gap(6.0).items_center().border_sides([0.0, 0.0, 1.0, 0.0], rule(k)).child(label(title, k));
     if focused {
-        r = r.child(text("focused".to_string()).font(META).color(k.c.text_accent));
+        r = r.child(text("focused".to_string()).font(k.text(META)).color(k.c.text_accent));
     }
     r.child(spacer()).child(focus).child(hide)
 }
@@ -761,7 +761,7 @@ fn until(s: &App, at: &str) -> String {
 }
 
 pub fn status_bar(s: &App, k: &Kit, main_kit: &Kit) -> El {
-    let mut meters = row().key("usage-meters").h_full().gap(12.0).px(6.0).radius(6.0).items_center().hover(k.c.surface_raised_hover).label("Usage by account").on_press(crate::ui::accounts::open).child(text("Used".to_string()).font(META).color(weak(k)));
+    let mut meters = row().key("usage-meters").h_full().gap(12.0).px(6.0).radius(6.0).items_center().hover(k.c.surface_raised_hover).label("Usage by account").on_press(crate::ui::accounts::open).child(text("Used".to_string()).font(k.text(META)).color(weak(k)));
     for m in &s.ov.d.usage {
         let pct = m.percent.unwrap_or(0.0);
         let color = if pct >= 80.0 { k.c.danger.icon } else if pct >= 60.0 { k.c.warning.icon } else { base(k) };
@@ -775,22 +775,22 @@ pub fn status_bar(s: &App, k: &Kit, main_kit: &Kit) -> El {
             row()
                 .gap(6.0)
                 .items_center()
-                .child(text(who).font(META).color(weak(k)))
+                .child(text(who).font(k.text(META)).color(weak(k)))
                 .child(bar)
-                .child(text(format!("{pct:.0}%")).font(META_MED).color(color))
-                .child(text(until(s, m.resets_at.as_deref().unwrap_or(""))).font(META).color(weak(k))),
+                .child(text(format!("{pct:.0}%")).font(k.text(META_MED)).color(color))
+                .child(text(until(s, m.resets_at.as_deref().unwrap_or(""))).font(k.text(META)).color(weak(k))),
         );
     }
-    let mut r = row().key("status-bar").w_full().h(30.0).px(10.0).gap(12.0).items_center().fill(k.c.bg_deep).child(meters);
+    let mut r = row().key("status-bar").w_full().h(k.text_size(30.0)).px(10.0).gap(12.0).items_center().fill(k.c.bg_deep).child(meters);
     let working = s.ov.d.working();
     r = r.child(spacer());
     if let Some(down) = crate::ui::connect::bar(s, main_kit) {
         r = r.child(down);
     } else if let Some(v) = &s.ov.inbox.version {
         let restart = Button::new(if s.link.starting { "Restarting…" } else { "Restart for this version" }).variant(ButtonVariant::GhostMuted).control_size(ControlSize::Small).disabled(s.link.starting).on_press(crate::ui::connect::start_daemon).build(k).key("version-restart");
-        r = r.child(row().gap(6.0).items_center().shrink().min_w(0.0).child(icon(&rune_theme_opencode::icons::INFO, 12.0).color(k.c.warning.icon)).child(text(v.clone()).font(META).color(k.c.warning.icon).truncate().shrink()).child(restart));
+        r = r.child(row().gap(6.0).items_center().shrink().min_w(0.0).child(icon(&rune_theme_opencode::icons::INFO, k.text_size(12.0)).color(k.c.warning.icon)).child(text(v.clone()).font(k.text(META)).color(k.c.warning.icon).truncate().shrink()).child(restart));
     }
-    r = r.child(row().gap(6.0).items_center().child(el().size(7.0, 7.0).radius(3.5).fill(crate::theme::accent())).child(text(format!("{working} working")).font(META).color(base(k))));
+    r = r.child(row().gap(6.0).items_center().child(el().size(7.0, 7.0).radius(3.5).fill(crate::theme::accent())).child(text(format!("{working} working")).font(k.text(META)).color(base(k))));
     for h in &s.ov.d.hosts {
         let up = matches!(h.state.as_str(), "local" | "connected");
         r = r.child(
@@ -798,19 +798,19 @@ pub fn status_bar(s: &App, k: &Kit, main_kit: &Kit) -> El {
                 .gap(6.0)
                 .items_center()
                 .child(el().size(7.0, 7.0).radius(3.5).fill(if up { k.c.success.icon } else { k.c.text_weak }))
-                .child(text(h.name.clone()).font(META).color(if up { base(k) } else { weak(k) })),
+                .child(text(h.name.clone()).font(k.text(META)).color(if up { base(k) } else { weak(k) })),
         );
     }
     r
 }
 
 pub fn crumb(parts: &[(&str, bool)], k: &Kit) -> El {
-    let mut r = row().gap(8.0).items_center();
+    let mut r = row().gap(8.0).items_center().shrink().min_w(0.0);
     for (i, (p, strong_)) in parts.iter().enumerate() {
         if i > 0 {
-            r = r.child(text("/".to_string()).font(BODY).color(weak(k)));
+            r = r.child(text("/".to_string()).font(k.text(BODY)).color(weak(k)));
         }
-        r = r.child(text(p.to_string()).font(if *strong_ { BODY_MED } else { BODY }).color(if *strong_ { strong(k) } else { weak(k) }).truncate().max_w(380.0));
+        r = r.child(text(p.to_string()).font(k.text(if *strong_ { BODY_MED } else { BODY })).color(if *strong_ { strong(k) } else { weak(k) }).truncate().max_w(380.0).shrink().min_w(0.0));
     }
     r
 }
@@ -839,16 +839,16 @@ pub fn sessions_block(s: &App, compact: bool, k: &Kit) -> El {
                     go(s, Screen::Sessions);
                 })
                 .child(avatar(name, 14.0))
-                .child(text(name.clone()).font(META).color(base(k)))
-                .child(text(n.to_string()).font(META_MED).color(k.c.text_accent)),
+                .child(text(name.clone()).font(k.text(META)).color(base(k)))
+                .child(text(n.to_string()).font(k.text(META_MED)).color(k.c.text_accent)),
         );
     }
     let head = row()
         .w_full()
         .gap(8.0)
         .items_center()
-        .child(text("Sessions".to_string()).font(HEAD).color(strong(k)))
-        .child(text(format!("{total} working of {listed}")).font(META).color(weak(k)))
+        .child(text("Sessions".to_string()).font(k.text(HEAD)).color(strong(k)))
+        .child(text(format!("{total} working of {listed}")).font(k.text(META)).color(weak(k)).truncate().shrink().min_w(0.0))
         .child(spacer())
         .child(open);
     let c = col().w_full().gap(8.0).child(head).child(chips);

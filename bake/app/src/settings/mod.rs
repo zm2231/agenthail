@@ -10,6 +10,7 @@ mod overview;
 mod parts;
 mod signin;
 
+use rune_kit::Kit;
 use std::cell::{Cell, OnceCell};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -37,6 +38,8 @@ pub enum Read {
 }
 
 pub use overview::sessions_changed;
+#[cfg(test)]
+pub use agents::show as show_agent_roles;
 
 const ALL: [Read; 6] = [Read::Base, Read::Settings, Read::Remote, Read::Compaction, Read::Preferences, Read::Devices];
 
@@ -87,6 +90,7 @@ pub struct Prefs {
     pub wake: crate::wake::Wake,
     stream_down: Option<String>,
     pub tab: usize,
+    revealed_tab: Option<(usize, Option<u32>)>,
     pub general_page: usize,
     pub base: Option<Result<Base, Failure>>,
     pub settings: Option<Result<Settings, Failure>>,
@@ -211,7 +215,7 @@ fn fixtures() -> bool {
     args.iter().any(|a| a == "--fixture" || a == "--fixtures") || std::env::var("AGENTHAIL_FIXTURES").is_ok()
 }
 
-fn init() -> Prefs {
+pub(crate) fn init() -> Prefs {
     let (tx, rx) = channel();
     let (client, no_client) = connect();
     Prefs {
@@ -228,6 +232,7 @@ fn init() -> Prefs {
         stream_down: None,
         external: false,
         tab: overview::TAB,
+        revealed_tab: None,
         general_page: 0,
         base: None,
         settings: None,
@@ -613,7 +618,7 @@ pub fn notify(s: &mut Prefs, what: Notify) {
     write(s, what.action(), Section::Notify, &[Read::Settings], move |c| c.notifications(what).inspect(|_| crate::notify::recheck()));
 }
 
-fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
+pub(crate) fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
     let mut changed = false;
     if !s.loaded && (visible() || std::env::args().any(|a| a == "--window")) {
         s.rewatch = true;
@@ -628,6 +633,11 @@ fn poll(s: &mut Prefs, _: f64, tx: &mut Tx) -> bool {
     if crate::look::poll(crate::look::Window::Settings, tx) {
         appearance::changed(s);
         changed = true;
+    }
+    let shown = (s.tab, crate::look::text_scale().map(f32::to_bits));
+    if s.revealed_tab != Some(shown) {
+        s.revealed_tab = Some(shown);
+        tx.scroll_into_view_in("settings-tabs", format!("segment{}", s.tab));
     }
     if let Some(at) = s.retry_base
         && std::time::Instant::now() >= at
@@ -661,7 +671,7 @@ pub fn toggle_select(s: &mut Prefs, key: &'static str) {
     s.open_select = if s.open_select == Some(key) { None } else { Some(key) };
 }
 
-fn unfollowed(s: &Prefs) -> Option<El> {
+fn unfollowed(s: &Prefs, k: &Kit) -> Option<El> {
     let note = match (&s.base, &s.stream_down) {
         (Some(Err(f)), _) => {
             let f = explain(s, f);
@@ -670,7 +680,7 @@ fn unfollowed(s: &Prefs) -> Option<El> {
         (_, Some(why)) => Failure { uncertain: true, ..Failure::new(format!("Can't follow changes made elsewhere right now ({why}), so what shows may be out of date. Settings keeps trying.")) },
         _ => return None,
     };
-    Some(col().w_full().items_center().pb(8.0).child(parts::failure(s, &note).w(parts::WIDTH)))
+    Some(col().w_full().items_center().pb(8.0).child(parts::failure(s, &note, k).w(parts::WIDTH)))
 }
 
 pub const TABS: [&str; 7] = ["Overview", "General", "Appearance", "Devices", "Delivery", "Claude", "Agents"];
@@ -693,8 +703,7 @@ fn general_pages(s: &Prefs, layer: &mut Vec<El>, k: &rune_kit::Kit) -> El {
 }
 
 pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
-    let themes = crate::look::frame(cx, false, false, false);
-    cx.with_kit(&themes.main, |cx| window(s, cx))
+    crate::look::frame(cx, false, false, |cx, _| window(s, cx))
 }
 
 fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
@@ -724,8 +733,8 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         .w_full()
         .h_full()
         .child(el().absolute(0.0, 0.0).w_full().h_full().fill(theme::card_deep()))
-        .child(col().w_full().items_center().pt(14.0).pb(10.0).child(tabs.build(&k)))
-        .children(unfollowed(s))
+        .child(col().key("settings-tabs").w_full().scroll_x().scroll_edge_fade(24.0).child(col().w_full().items_center().pt(14.0).pb(10.0).child(tabs.build(&k))))
+        .children(unfollowed(s, &k))
         .child(parts::scroll(page));
     rune_kit::root(body, layer).on_window_focus(|s: &mut Prefs, focused, _| {
         if !focused {

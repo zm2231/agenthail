@@ -48,13 +48,13 @@ fn name_section(s: &Prefs, person: &Person, writable: bool, k: &Kit) -> El {
         buttons = buttons.child(reset);
     }
     let field = rune::col().w_full().gap(10.0).px(14.0).py(12.0).child(input).child(buttons);
-    section("Your name", vec![field], Some(prefs::name_footer(person)))
+    section("Your name", vec![field], Some(prefs::name_footer(person)), k)
 }
 
 fn composer(k: &Kit) -> El {
     let shown = !feed::notice::shared().hidden;
     let flip = parts::switch("turn-notice", "Show the terminal session note above the composer", shown, false, |_: &mut Prefs| feed::notice::change(|n| n.set_shown(n.hidden)), k);
-    section("Composer", vec![line("Show the terminal session note above the composer", None, flip)], None)
+    section("Composer", vec![line("Show the terminal session note above the composer", None, flip, k)], None, k)
 }
 
 fn delivery(s: &Prefs, current: &str, writable: bool, k: &Kit) -> El {
@@ -68,8 +68,7 @@ fn delivery(s: &Prefs, current: &str, writable: bool, k: &Kit) -> El {
     section(
         "Sending while an agent works",
         vec![row().w_full().px(14.0).py(12.0).child(group).key("settings-delivery")],
-        Some("The Steer now / After this turn chip by the composer switches one message the other way. Agents that can't be steered mid-turn send queued messages after the turn. This setting is shared with your iPhone and other Agenthail apps.".into()),
-    )
+        Some("The Steer now / After this turn chip by the composer switches one message the other way. Agents that can't be steered mid-turn send queued messages after the turn. This setting is shared with your iPhone and other Agenthail apps.".into()), k)
 }
 
 fn recent(s: &Prefs, hours: i64, writable: bool, layer: &mut Vec<El>, k: &Kit) -> El {
@@ -80,7 +79,7 @@ fn recent(s: &Prefs, hours: i64, writable: bool, layer: &mut Vec<El>, k: &Kit) -
             write(s, "delivery", Section::General, GENERAL, move |c| c.change_delivery(prefs::Delivery::Hours(h)));
         }
     }, k);
-    section("Current work", vec![line("Codex recent window", None, pick)], Some("Codex threads stay in Recent this long after their last activity.".into()))
+    section("Current work", vec![line("Codex recent window", None, pick, k)], Some("Codex threads stay in Recent this long after their last activity.".into()), k)
 }
 
 fn limits(s: &Prefs, d: &prefs::Dashboard, writable: bool, k: &Kit) -> El {
@@ -94,9 +93,8 @@ fn limits(s: &Prefs, d: &prefs::Dashboard, writable: bool, k: &Kit) -> El {
     }, k);
     section(
         "After a usage limit",
-        vec![line("Resume sessions after a usage limit resets", None, resume), line("Move stopped sessions to a proxy with room", None, mv)],
-        Some("A Claude session a usage limit stopped is sent its queued messages once the limit resets, or asked to continue when it has none. Turned off, queued messages still wait for the reset. A session Agenthail runs can instead move to a Claude account proxy that has room and resume there.".into()),
-    )
+        vec![line("Resume sessions after a usage limit resets", None, resume, k), line("Move stopped sessions to a proxy with room", None, mv, k)],
+        Some("A Claude session a usage limit stopped is sent its queued messages once the limit resets, or asked to continue when it has none. Turned off, queued messages still wait for the reset. A session Agenthail runs can instead move to a Claude account proxy that has room and resume there.".into()), k)
 }
 
 fn default_root(s: &Prefs, settings: &prefs::Settings, layer: &mut Vec<El>, k: &Kit) -> Option<El> {
@@ -114,9 +112,8 @@ fn default_root(s: &Prefs, settings: &prefs::Settings, layer: &mut Vec<El>, k: &
     }, k);
     Some(section(
         "Claude root",
-        vec![line("Claude root for sessions you start", None, pick)],
-        Some("A session an agent starts stays in the agent's root, and a replacement lead in the old lead's root. Sessions never move to another root on their own.".into()),
-    ))
+        vec![line("Claude root for sessions you start", None, pick, k)],
+        Some("A session an agent starts stays in the agent's root, and a replacement lead in the old lead's root. Sessions never move to another root on their own.".into()), k))
 }
 
 pub fn page(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
@@ -125,13 +122,13 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
     let base = s.base.as_ref().and_then(|r| r.as_ref().ok());
     let writable = settings.is_some();
     match &s.settings {
-        None => out = out.child(parts::reading("settings")),
-        Some(Err(f)) if f.denied && super::token_verified(s) => out = out.child(parts::failure(s, &Failure { message: READ_ONLY.into(), scope: "", ..f.clone() })),
-        Some(Err(f)) => out = out.child(parts::failure(s, f)),
+        None => out = out.child(parts::reading("settings", k)),
+        Some(Err(f)) if f.denied && super::token_verified(s) => out = out.child(parts::failure(s, &Failure { message: READ_ONLY.into(), scope: "", ..f.clone() }, k)),
+        Some(Err(f)) => out = out.child(parts::failure(s, f, k)),
         Some(Ok(_)) => {}
     }
     if let Some(f) = s.notes.get(&Section::General) {
-        out = out.child(parts::failure(s, f));
+        out = out.child(parts::failure(s, f, k));
     }
     if let Some(person) = base.and_then(|b| b.person.as_ref()) {
         out = out.child(name_section(s, person, writable, k));

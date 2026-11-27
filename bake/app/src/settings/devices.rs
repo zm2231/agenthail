@@ -277,8 +277,8 @@ fn qr(pixels: &Pixels) -> El {
     el().size(QR_SIDE, QR_SIDE).radius(4.0).pixels(pixels).image_filter(ImageFilter::Nearest).label("QR code")
 }
 
-fn note(s: &Prefs, f: &Failure) -> El {
-    row().w_full().px(10.0).py(10.0).child(parts::failure(s, f).grow(1.0))
+fn note(s: &Prefs, f: &Failure, k: &Kit) -> El {
+    row().w_full().px(10.0).py(10.0).child(parts::failure(s, f, k).grow(1.0))
 }
 
 fn phone(s: &Prefs, r: &RemoteAccess, k: &Kit) -> El {
@@ -291,11 +291,11 @@ fn phone(s: &Prefs, r: &RemoteAccess, k: &Kit) -> El {
         r.detail()
     };
     let problem = r.problem().is_some() && !saving;
-    let mut rows = vec![line("Phone access", (!problem).then_some(detail), switch)];
+    let mut rows = vec![line("Phone access", (!problem).then_some(detail), switch, k)];
     if problem {
-        rows.push(parts::problem(r.detail()));
+        rows.push(parts::problem(r.detail(), k));
     }
-    section("", rows, None)
+    section("", rows, None, k)
 }
 
 fn browser(s: &Prefs, r: &RemoteAccess, k: &Kit) -> El {
@@ -318,11 +318,11 @@ fn browser(s: &Prefs, r: &RemoteAccess, k: &Kit) -> El {
         .gap(6.0)
         .grow(1.0)
         .min_w(0.0)
-        .child(text(title).font(BODY).color(theme::text()).wrap())
-        .child(text(BROWSER_LINK).font(META).color(muted()).wrap())
+        .child(text(title).font(k.text(BODY)).color(theme::text()).wrap())
+        .child(text(BROWSER_LINK).font(k.text(META)).color(muted()).wrap())
         .child(row().gap(8.0).items_center().pt(2.0).child(copy).child(show));
     let body = row().w_full().gap(14.0).items_start().px(14.0).py(12.0).children(shown.map(qr)).child(words);
-    section("Open in a browser", vec![body], None)
+    section("Open in a browser", vec![body], None, k)
 }
 
 fn pair(s: &Prefs, enabled: bool, k: &Kit) -> El {
@@ -333,9 +333,9 @@ fn pair(s: &Prefs, enabled: bool, k: &Kit) -> El {
             .gap(6.0)
             .grow(1.0)
             .min_w(0.0)
-            .child(text("Waiting for the iPhone").font(BODY).color(theme::text()))
-            .child(text(format!("Scan with the iPhone's camera, or with Scan pairing code in Agenthail. {}", p.deadline(OffsetDateTime::now_utc()))).font(META).color(muted()).wrap())
-            .child(text(p.endpoint.clone()).font(META).color(muted()).wrap())
+            .child(text("Waiting for the iPhone").font(k.text(BODY)).color(theme::text()))
+            .child(text(format!("Scan with the iPhone's camera, or with Scan pairing code in Agenthail. {}", p.deadline(OffsetDateTime::now_utc()))).font(k.text(META)).color(muted()).wrap())
+            .child(text(p.endpoint.clone()).font(k.text(META)).color(muted()).wrap())
             .child(row().pt(2.0).child(cancel));
         rows.push(row().w_full().gap(14.0).items_start().px(14.0).py(12.0).children(pixels.as_ref().map(qr)).child(words));
     } else {
@@ -344,19 +344,19 @@ fn pair(s: &Prefs, enabled: bool, k: &Kit) -> El {
         rows.push(row().w_full().px(14.0).py(10.0).child(button));
     }
     if let Some(n) = &s.dev.notice {
-        rows.push(parts::words(n.clone()));
+        rows.push(parts::words(n.clone(), k));
     }
     if let Some(f) = &s.dev.problem {
-        rows.push(note(s, f));
+        rows.push(note(s, f, k));
     }
-    section("Pair an iPhone", rows, None)
+    section("Pair an iPhone", rows, None, k)
 }
 
 fn devices(s: &Prefs, k: &Kit) -> El {
     let rows = match &s.dev.list {
-        None => vec![parts::words("Reading paired devices…")],
-        Some(Err(f)) => vec![note(s, f)],
-        Some(Ok(list)) if list.is_empty() => vec![parts::words("No devices are paired.")],
+        None => vec![parts::words("Reading paired devices…", k)],
+        Some(Err(f)) => vec![note(s, f, k)],
+        Some(Ok(list)) if list.is_empty() => vec![parts::words("No devices are paired.", k)],
         Some(Ok(list)) => {
             let now = OffsetDateTime::now_utc();
             list.iter()
@@ -369,12 +369,12 @@ fn devices(s: &Prefs, k: &Kit) -> El {
                         .on_press(move |s: &mut Prefs| s.dev.revoking = Some(target.clone()))
                         .build(k)
                         .key(format!("settings-revoke-{}", d.id));
-                    line(&d.name, Some(d.detail(now)), revoke)
+                    line(&d.name, Some(d.detail(now)), revoke, k)
                 })
                 .collect()
         }
     };
-    section("Paired devices", rows, None)
+    section("Paired devices", rows, None, k)
 }
 
 fn confirm(s: &Prefs, layer: &mut Vec<El>, k: &Kit) {
@@ -406,50 +406,50 @@ fn confirm(s: &Prefs, layer: &mut Vec<El>, k: &Kit) {
         .build(k, layer);
 }
 
-fn host_row(h: &Host) -> El {
-    let state = text(h.state_label()).font(BODY).color(if h.healthy() { done() } else { failed() });
-    let mut c = col().w_full().gap(2.0).px(14.0).py(10.0).child(row().w_full().gap(16.0).items_center().child(text(h.name.clone()).font(BODY).color(theme::text()).grow(1.0)).child(state));
+fn host_row(h: &Host, k: &Kit) -> El {
+    let state = text(h.state_label()).font(k.text(BODY)).color(if h.healthy() { done() } else { failed() });
+    let mut c = col().w_full().gap(2.0).px(14.0).py(10.0).child(row().w_full().gap(16.0).items_center().child(text(h.name.clone()).font(k.text(BODY)).color(theme::text()).grow(1.0)).child(state));
     if let Some(detail) = h.detail.clone().filter(|d| !d.is_empty()) {
-        c = c.child(text(detail).font(META).color(muted()).wrap());
+        c = c.child(text(detail).font(k.text(META)).color(muted()).wrap());
     }
     if let Some(build) = &h.build {
-        c = c.child(text(build.label()).font(META).color(muted()));
+        c = c.child(text(build.label()).font(k.text(META)).color(muted()));
     }
     if let Some(notice) = h.notice.clone().filter(|n| !n.is_empty()) {
-        c = c.child(text(notice).font(META).color(failed()).wrap());
+        c = c.child(text(notice).font(k.text(META)).color(failed()).wrap());
     }
     c
 }
 
-fn hosts(s: &Prefs) -> Option<El> {
+fn hosts(s: &Prefs, k: &Kit) -> Option<El> {
     let daemon = &s.base.as_ref()?.as_ref().ok()?.daemon;
     if daemon.host.is_none() && daemon.hosts.is_none() {
         return None;
     }
     let mut rows = Vec::new();
     if let Some(h) = &daemon.host {
-        rows.push(parts::fact("This computer", h.name.clone()));
+        rows.push(parts::fact("This computer", h.name.clone(), k));
     }
     let paired = daemon.hosts.as_deref().unwrap_or_default();
     if paired.is_empty() {
-        rows.push(parts::words(dev::NO_HOSTS));
+        rows.push(parts::words(dev::NO_HOSTS, k));
     }
-    rows.extend(paired.iter().map(host_row));
-    Some(section("Hosts", rows, None))
+    rows.extend(paired.iter().map(|h| host_row(h, k)));
+    Some(section("Hosts", rows, None, k))
 }
 
 pub fn page(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
     let mut out = parts::page();
     if let Some(f) = s.notes.get(&Section::Devices) {
-        out = out.child(parts::failure(s, f));
+        out = out.child(parts::failure(s, f, k));
     }
     let remote = match &s.settings {
         None => {
-            out = out.child(parts::reading("phone access"));
+            out = out.child(parts::reading("phone access", k));
             None
         }
         Some(Err(f)) => {
-            out = out.child(parts::failure(s, f));
+            out = out.child(parts::failure(s, f, k));
             None
         }
         Some(Ok(st)) => st.remote_access.as_ref(),
@@ -461,7 +461,7 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
         }
     }
     out = out.child(pair(s, remote.is_some_and(|r| r.enabled), k)).child(devices(s, k));
-    if let Some(h) = hosts(s) {
+    if let Some(h) = hosts(s, k) {
         out = out.child(h);
     }
     confirm(s, layer, k);

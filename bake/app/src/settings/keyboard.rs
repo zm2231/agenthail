@@ -111,14 +111,14 @@ fn command_row(s: &Prefs, id: &'static str, title: &str, k: &Kit) -> El {
             .key(format!("settings-shortcut-reset-{id}"));
         controls = controls.child(reset);
     }
-    line(title, None, controls.child(recorder.build(k)))
+    line(title, None, controls.child(recorder.build(k)), k)
 }
 
 pub fn page(s: &Prefs, k: &Kit) -> El {
     let mut out = parts::page();
     for group in Group::ALL {
         let rows = COMMANDS.iter().filter(|c| c.group == group).map(|c| command_row(s, c.id, c.title, k)).collect();
-        out = out.child(section(group.title(), rows, None));
+        out = out.child(section(group.title(), rows, None, k));
     }
     let restore = Button::new("Restore Defaults")
         .control_size(ControlSize::Small)
@@ -128,7 +128,7 @@ pub fn page(s: &Prefs, k: &Kit) -> El {
         .key("settings-shortcuts-restore");
     let current = s.keyboard.kept_at == bindings::generation();
     for (title, owner) in s.keyboard.kept.iter().filter(|_| current) {
-        out = out.child(text(format!("{title} kept its shortcut: its default is used by {owner}.")).font(crate::theme::META).color(crate::theme::muted()).wrap().px(4.0));
+        out = out.child(text(format!("{title} kept its shortcut: its default is used by {owner}.")).font(k.text(crate::theme::META)).color(crate::theme::muted()).wrap().px(4.0));
     }
     out.child(row().w_full().child(el().grow(1.0)).child(restore))
 }

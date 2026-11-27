@@ -283,10 +283,10 @@ pub(crate) fn card(s: &App, x: &Session, stop: &Stop, k: &Kit) -> El {
         .grow(1.0)
         .min_w(0.0)
         .gap(8.0)
-        .child(text("USAGE LIMIT").font(LABEL).color(attention()))
-        .child(text(stop.label.clone()).font(TITLE).color(theme::text()).wrap());
+        .child(text("USAGE LIMIT").font(k.text(LABEL)).color(attention()))
+        .child(text(stop.label.clone()).font(k.text(TITLE)).color(theme::text()).wrap());
     if !x.display.detail.is_empty() && x.display.detail != stop.label {
-        body = body.child(text(x.display.detail.clone()).font(META).color(muted()).wrap());
+        body = body.child(text(x.display.detail.clone()).font(k.text(META)).color(muted()).wrap());
     }
     if stop.held && !x.read_only {
         let mut actions = row().gap(8.0).pt(4.0).items_center().flex_wrap();
@@ -320,7 +320,7 @@ pub(crate) fn card(s: &App, x: &Session, stop: &Stop, k: &Kit) -> El {
         body = body.child(actions);
     }
     if let Some((note, bad, _)) = s.limits.note.get(&x.id).filter(|n| n.2 == stop.since) {
-        body = body.child(text(note.clone()).font(META).color(if *bad { failed() } else { muted() }).wrap());
+        body = body.child(text(note.clone()).font(k.text(META)).color(if *bad { failed() } else { muted() }).wrap());
     }
     let card_el = row()
         .key("limit-card")
@@ -333,16 +333,16 @@ pub(crate) fn card(s: &App, x: &Session, stop: &Stop, k: &Kit) -> El {
         .radius(16.0)
         .linear_gradient(135.0, [(0.0, attention().alpha(0.14)), (1.0, attention().alpha(0.03))])
         .border_gradient(1.0, attention().alpha(0.5), attention().alpha(0.12))
-        .child(col().size(34.0, 34.0).radius(10.0).items_center().justify_center().fill(attention().alpha(0.18)).child(icon(&icons::GAUGE, 17.0).color(attention())))
+        .child(col().size(34.0, 34.0).radius(10.0).items_center().justify_center().fill(attention().alpha(0.18)).child(icon(&icons::GAUGE, k.text_size(17.0)).color(attention())))
         .child(body);
     col().w_full().items_center().px(32.0).pb(12.0).child(card_el)
 }
 
-fn target_row(id: &str, since: &str, t: &Target, busy: bool, unread: bool) -> El {
+fn target_row(id: &str, since: &str, t: &Target, busy: bool, unread: bool, k: &Kit) -> El {
     let usable = !t.full && !busy;
-    let mut name = row().gap(8.0).items_center().child(text(t.name.clone()).font(BODY_BOLD).color(if usable { theme::text() } else { faint() }).truncate());
+    let mut name = row().gap(8.0).items_center().child(text(t.name.clone()).font(k.text(BODY_BOLD)).color(if usable { theme::text() } else { faint() }).truncate());
     if t.offered {
-        name = name.child(row().px(7.0).py(2.0).radius(6.0).fill(attention().alpha(0.2)).child(text("Suggested").font(META).color(attention())));
+        name = name.child(row().px(7.0).py(2.0).radius(6.0).fill(attention().alpha(0.2)).child(text("Suggested").font(k.text(META)).color(attention())));
     }
     let detail = match (t.full, t.detail.clone(), unread) {
         (true, _, _) => Some("Out of usage".to_string()),
@@ -360,14 +360,14 @@ fn target_row(id: &str, since: &str, t: &Target, busy: bool, unread: bool) -> El
         .radius(10.0)
         .fill(crate::theme::ink(0.04))
         .border(1.0, crate::theme::ink(0.08))
-        .child(col().grow(1.0).min_w(0.0).gap(2.0).child(name).children(detail.map(|d| text(d).font(META).color(muted()).truncate())));
+        .child(col().grow(1.0).min_w(0.0).gap(2.0).child(name).children(detail.map(|d| text(d).font(k.text(META)).color(muted()).truncate())));
     if usable {
         let (id, since, target) = (id.to_string(), since.to_string(), t.clone());
         r = r.hover(crate::theme::ink(0.09)).on_press(move |s: &mut App| {
             s.limits.picking = None;
             s.limits.confirm = Some(Confirm { session: id.clone(), since: since.clone(), target: target.clone() });
         });
-        r = r.child(icon(&icons::ARROW_RIGHT, 13.0).color(faint()));
+        r = r.child(icon(&icons::ARROW_RIGHT, k.text_size(13.0)).color(faint()));
     } else {
         r = r.opacity(0.6);
     }
@@ -381,8 +381,8 @@ fn picker(s: &App, id: &str, since: &str, layer: &mut Vec<El>, k: &Kit) {
     let current = x.claude_config_root.as_ref().map(|r| r.root.as_str());
     let mut body = col().w_full().gap(6.0).px(16.0).pb(16.0);
     match s.limits.roots.get(&host_key(x)) {
-        None if s.client.is_some() => body = body.child(text("Reading this computer's Claude accounts…").font(META).color(muted())),
-        Some(Err(error)) => body = body.child(text(format!("Couldn't read the accounts: {error}")).font(META).color(failed()).wrap()),
+        None if s.client.is_some() => body = body.child(text("Reading this computer's Claude accounts…").font(k.text(META)).color(muted())),
+        Some(Err(error)) => body = body.child(text(format!("Couldn't read the accounts: {error}")).font(k.text(META)).color(failed()).wrap()),
         _ => {
             let roots = match s.limits.roots.get(&host_key(x)) {
                 Some(Ok(roots)) => roots.as_slice(),
@@ -390,19 +390,19 @@ fn picker(s: &App, id: &str, since: &str, layer: &mut Vec<El>, k: &Kit) {
             };
             let list = targets(&stop, current, roots, s.now);
             if list.is_empty() {
-                body = body.child(text("No other Claude account is set up on this computer.").font(META).color(muted()).wrap());
+                body = body.child(text("No other Claude account is set up on this computer.").font(k.text(META)).color(muted()).wrap());
             }
             let host = host_key(x);
-            body = body.children(list.iter().map(|t| target_row(id, since, t, busy, s.limits.unread.contains(&(host.clone(), t.root.clone())))));
+            body = body.children(list.iter().map(|t| target_row(id, since, t, busy, s.limits.unread.contains(&(host.clone(), t.root.clone())), k)));
             if let Some(error) = s.limits.refresh_error.get(&host) {
-                body = body.child(text(format!("Couldn't refresh the accounts, so this list may be out of date: {error}")).font(META).color(failed()).wrap());
+                body = body.child(text(format!("Couldn't refresh the accounts, so this list may be out of date: {error}")).font(k.text(META)).color(failed()).wrap());
             } else if s.limits.reading.contains_key(&host) {
-                body = body.child(text("Checking for changes…").font(META).color(faint()));
+                body = body.child(text("Checking for changes…").font(k.text(META)).color(faint()));
             }
         }
     }
     if let Some(root) = x.claude_config_root.as_ref().filter(|r| !r.name.is_empty()) {
-        body = body.child(text(format!("Now under {}", root.name)).font(META).color(faint()).pt(4.0));
+        body = body.child(text(format!("Now under {}", root.name)).font(k.text(META)).color(faint()).pt(4.0));
     }
     body = body.child(row().w_full().pt(6.0).child(el().grow(1.0)).child(Button::new("Cancel").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).on_press(|s: &mut App| s.limits.picking = None).build(k).key("limit-pick-cancel")));
     Dialog::new("limit-pick", format!("Move {} to another account", x.title()))

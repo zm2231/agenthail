@@ -213,7 +213,7 @@ pub fn matches(s: &Prefs, who: Who, off: bool, k: &Kit) -> Option<El> {
     }
     let mut list = col().w_full().gap(2.0).px(10.0).pb(8.0);
     if found.is_empty() {
-        list = list.child(text("No session matches.").font(META).color(muted()).px(4.0));
+        list = list.child(text("No session matches.").font(k.text(META)).color(muted()).px(4.0));
     }
     for (i, p) in found.iter().take(6).enumerate() {
         let target = p.target();
@@ -250,12 +250,12 @@ pub fn remove(key: &str, off: bool, press: impl Fn(&mut Prefs) + 'static, k: &Ki
     Button::new("Remove").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).disabled(off).on_press(press).build(k).key(format!("settings-{key}"))
 }
 
-pub fn status(s: &Prefs, section: Section) -> Option<El> {
+pub fn status(s: &Prefs, section: Section, k: &Kit) -> Option<El> {
     let note = s.notes.get(&section).filter(|f| !(refused(f) && !writable(s)));
     let shown = match (s.handoffs.problems.get(&section), note) {
-        (Some(p), _) => text(p.to_string()).font(META).color(failed()).wrap().px(4.0),
-        (_, Some(f)) => parts::failure(s, f),
-        _ if section == Section::Channels => text(s.handoffs.sent.lock().unwrap().clone()?).font(META).color(muted()).wrap().px(4.0),
+        (Some(p), _) => text(p.to_string()).font(k.text(META)).color(failed()).wrap().px(4.0),
+        (_, Some(f)) => parts::failure(s, f, k),
+        _ if section == Section::Channels => text(s.handoffs.sent.lock().unwrap().clone()?).font(k.text(META)).color(muted()).wrap().px(4.0),
         _ => return None,
     };
     Some(row().w_full().px(10.0).py(8.0).child(shown.grow(1.0)))
@@ -277,14 +277,14 @@ fn read_only(s: &Prefs) -> Failure {
 pub fn page(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
     let mut out = parts::page();
     let h = match &s.base {
-        None => return out.child(parts::reading("channels and handoffs")),
-        Some(Err(f)) => return out.child(parts::failure(s, f)),
+        None => return out.child(parts::reading("channels and handoffs", k)),
+        Some(Err(f)) => return out.child(parts::failure(s, f, k)),
         Some(Ok(b)) => &b.handoffs,
     };
     let writable = writable(s);
     if !writable {
-        out = out.child(parts::failure(s, &read_only(s)));
+        out = out.child(parts::failure(s, &read_only(s), k));
     }
     let off = !writable || busy(s);
-    out.child(queue::waiting(s, h, off, k)).child(queue::recent(h)).child(relays::section(s, h, off, layer, k)).child(channels::section(s, h, off, layer, k))
+    out.child(queue::waiting(s, h, off, k)).child(queue::recent(h, k)).child(relays::section(s, h, off, layer, k)).child(channels::section(s, h, off, layer, k))
 }

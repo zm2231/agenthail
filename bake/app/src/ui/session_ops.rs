@@ -194,11 +194,11 @@ fn buttons(children: Vec<El>) -> El {
 
 fn adopt_dialog(a: &Adopting, layer: &mut Vec<El>, k: &Kit) {
     let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0);
-    let line = |t: &str| text(t.to_string()).font(META).color(muted()).wrap().w_full();
+    let line = |t: &str| text(t.to_string()).font(k.text(META)).color(muted()).wrap().w_full();
     match &a.phase {
         Phase::Ready | Phase::Adopting => {}
         Phase::Confirm(message) | Phase::Done(message) => body = body.child(line(message)),
-        Phase::Failed(message) => body = body.child(text(message.clone()).font(META).color(failed()).wrap().w_full()),
+        Phase::Failed(message) => body = body.child(text(message.clone()).font(k.text(META)).color(failed()).wrap().w_full()),
     }
     let cancel = small("Cancel", ButtonVariant::Ghost).on_press(close_adopt).build(k).key("adopt-cancel");
     let actions = match &a.phase {
@@ -226,7 +226,7 @@ fn adopt_dialog(a: &Adopting, layer: &mut Vec<El>, k: &Kit) {
     Dialog::new("adopt", format!("Open {} in Agenthail", a.title)).description(adopt::ABOUT).open(true).fit().width(460.0).on_close(close_adopt).child(body.child(buttons(actions))).build(k, layer);
 }
 
-fn host_row(h: &Host, picked: bool) -> El {
+fn host_row(h: &Host, picked: bool, k: &Kit) -> El {
     let id = h.id.clone();
     let up = h.available();
     let mut r = row()
@@ -239,8 +239,8 @@ fn host_row(h: &Host, picked: bool) -> El {
         .radius(8.0)
         .label(h.name.clone())
         .child(el().size(12.0, 12.0).radius(6.0).border(if picked { 4.0 } else { 1.5 }, if picked { theme::accent() } else { faint() }))
-        .child(icon(&icons::SERVER, 13.0).color(if up { muted() } else { faint() }))
-        .child(text(h.name.clone()).font(BODY).color(if up { theme::text() } else { faint() }).truncate().shrink())
+        .child(icon(&icons::SERVER, k.text_size(13.0)).color(if up { muted() } else { faint() }))
+        .child(text(h.name.clone()).font(k.text(BODY)).color(if up { theme::text() } else { faint() }).truncate().shrink())
         .child(el().grow(1.0));
     if up {
         r = r.hover(theme::ink(0.06)).on_press(move |s: &mut App| {
@@ -249,7 +249,7 @@ fn host_row(h: &Host, picked: bool) -> El {
             }
         });
     } else {
-        r = r.child(text(feed::devices::Host { state: h.state.clone(), ..Default::default() }.state_label()).font(META).color(faint()));
+        r = r.child(text(feed::devices::Host { state: h.state.clone(), ..Default::default() }.state_label()).font(k.text(META)).color(faint()));
     }
     if picked {
         r = r.fill(theme::wash());
@@ -260,15 +260,15 @@ fn host_row(h: &Host, picked: bool) -> El {
 fn move_dialog(m: &Moving, layer: &mut Vec<El>, k: &Kit) {
     let mut body = col().w_full().gap(4.0).px(16.0).pb(16.0);
     match &m.hosts {
-        None => body = body.child(text("Looking for your other computers…".to_string()).font(META).color(muted())),
-        Some(Err(error)) => body = body.child(text(format!("Couldn't list your other computers: {error}")).font(META).color(failed()).wrap().w_full()),
+        None => body = body.child(text("Looking for your other computers…".to_string()).font(k.text(META)).color(muted())),
+        Some(Err(error)) => body = body.child(text(format!("Couldn't list your other computers: {error}")).font(k.text(META)).color(failed()).wrap().w_full()),
         Some(Ok(_)) => {
             let hosts = targets(m);
             if hosts.is_empty() {
-                body = body.child(text(feed::devices::NO_HOSTS.to_string()).font(META).color(muted()).wrap().w_full());
+                body = body.child(text(feed::devices::NO_HOSTS.to_string()).font(k.text(META)).color(muted()).wrap().w_full());
             }
             for h in &hosts {
-                body = body.child(host_row(h, m.picked.as_deref() == Some(h.id.as_str())));
+                body = body.child(host_row(h, m.picked.as_deref() == Some(h.id.as_str()), k));
             }
         }
     }
@@ -298,7 +298,7 @@ fn notice_dialog(n: &Notice, layer: &mut Vec<El>, k: &Kit) {
     };
     let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0);
     if !n.message.is_empty() {
-        body = body.child(text(n.message.clone()).font(META).color(muted()).wrap().w_full());
+        body = body.child(text(n.message.clone()).font(k.text(META)).color(muted()).wrap().w_full());
     }
     Dialog::new("move-notice", n.title.clone()).open(true).fit().width(420.0).on_close(dismiss).child(body.child(buttons(actions))).build(k, layer);
 }

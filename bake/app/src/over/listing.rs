@@ -146,6 +146,12 @@ pub fn more(s: &mut App) {
     ask(s, Read::More, request);
 }
 
+#[cfg(test)]
+pub fn show(s: &mut App, listing: Listing) {
+    s.ov.list.shown = Some(request(s));
+    s.ov.list.listing = Some(listing);
+}
+
 pub fn current(s: &App) -> bool {
     s.ov.list.shown.as_ref() == Some(&request(s))
 }

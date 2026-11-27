@@ -74,7 +74,7 @@ pub(crate) fn open_request<'a>(s: &'a App, x: &Session) -> Option<&'a OpenReques
     shown_of(s, &x.id, &open_requests(s, x))
 }
 
-pub(crate) fn switcher(owner: &str, open: &[&OpenRequest], shown: &str) -> Option<El> {
+pub(crate) fn switcher(owner: &str, open: &[&OpenRequest], shown: &str, k: &Kit) -> Option<El> {
     if open.len() < 2 {
         return None;
     }
@@ -82,7 +82,7 @@ pub(crate) fn switcher(owner: &str, open: &[&OpenRequest], shown: &str) -> Optio
     let step = |by: isize, glyph: &'static rune::Icon, key: &str| {
         let target = at.checked_add_signed(by).and_then(|i| open.get(i)).map(|r| r.id.clone());
         let owner = owner.to_string();
-        let el = col().key(format!("ask-switch-{key}")).size(22.0, 22.0).radius(6.0).items_center().justify_center().fill(crate::theme::ink(0.06)).child(icon(glyph, 12.0).color(if target.is_some() { theme::text() } else { faint() }));
+        let el = col().key(format!("ask-switch-{key}")).size(k.text_size(22.0), k.text_size(22.0)).radius(6.0).items_center().justify_center().fill(crate::theme::ink(0.06)).child(icon(glyph, k.text_size(12.0)).color(if target.is_some() { theme::text() } else { faint() }));
         match target {
             Some(id) => el.hover(crate::theme::ink(0.12)).on_press(move |s: &mut App| {
                 s.asks.shown.insert(owner.clone(), id.clone());
@@ -90,12 +90,12 @@ pub(crate) fn switcher(owner: &str, open: &[&OpenRequest], shown: &str) -> Optio
             None => el.opacity(0.5),
         }
     };
-    Some(row().key("ask-switcher").gap(6.0).items_center().child(step(-1, &icons::CHEVRON_LEFT, "back")).child(text(format!("{} of {}", at + 1, open.len())).font(META_BOLD).color(muted())).child(step(1, &icons::CHEVRON_RIGHT, "next")))
+    Some(row().key("ask-switcher").gap(6.0).items_center().child(step(-1, &icons::CHEVRON_LEFT, "back")).child(text(format!("{} of {}", at + 1, open.len())).font(k.text(META_BOLD)).color(muted())).child(step(1, &icons::CHEVRON_RIGHT, "next")))
 }
 
-fn clock_line(s: &App, request: &OpenRequest) -> Option<El> {
+fn clock_line(s: &App, request: &OpenRequest, k: &Kit) -> Option<El> {
     let offset = |t: time::OffsetDateTime| rune::time::LocalTime::at(t.unix_timestamp() * 1000).offset;
-    request.deadline_label(s.now, super::background::clock(), offset).map(|t| row().key("request-deadline").gap(5.0).items_center().child(icon(&icons::CLOCK, 12.0).color(attention())).child(text(t).font(META_BOLD).color(attention())))
+    request.deadline_label(s.now, super::background::clock(), offset).map(|t| row().key("request-deadline").gap(5.0).items_center().child(icon(&icons::CLOCK, k.text_size(12.0)).color(attention())).child(text(t).font(k.text(META_BOLD)).color(attention())))
 }
 
 fn replaced_note(s: &App, request: &OpenRequest, route: &Route, busy: bool, k: &Kit) -> Option<El> {
@@ -103,7 +103,7 @@ fn replaced_note(s: &App, request: &OpenRequest, route: &Route, busy: bool, k: &
         return None;
     }
     let lead = session(s, &request.replaced_by).map(|x| x.title()).unwrap_or_else(|| crate::over::short_id(&request.replaced_by));
-    let mut note = row().key("request-replaced").w_full().gap(10.0).items_center().child(text(format!("From a replaced lead. {lead} leads this project now, so this request no longer needs you.")).font(META).color(muted()).wrap().grow(1.0).min_w(0.0));
+    let mut note = row().key("request-replaced").w_full().gap(10.0).items_center().child(text(format!("From a replaced lead. {lead} leads this project now, so this request no longer needs you.")).font(k.text(META)).color(muted()).wrap().grow(1.0).min_w(0.0));
     if matches!(route, Route::Session) {
         let id = request.id.clone();
         let withdraw = Button::new("Withdraw").variant(ButtonVariant::Neutral).build(k).key("request-withdraw");
@@ -121,7 +121,7 @@ pub(crate) fn settled_request<'a>(s: &'a App, x: &Session) -> Option<&'a feed::c
     settled.max_by_key(|r| s.settled.get(&r.id).copied().flatten().map_or((1, None), |at| (0, Some(at))))
 }
 
-pub(crate) fn question_context(q: &feed::catalog::RequestQuestion) -> Option<El> {
+pub(crate) fn question_context(q: &feed::catalog::RequestQuestion, k: &Kit) -> Option<El> {
     let links: Vec<&feed::catalog::RequestLink> = q.links.iter().filter(|l| l.is_web() && !l.title.trim().is_empty()).collect();
     if q.detail.trim().is_empty() && links.is_empty() {
         return None;
@@ -130,7 +130,7 @@ pub(crate) fn question_context(q: &feed::catalog::RequestQuestion) -> Option<El>
         col()
             .w_full()
             .gap(4.0)
-            .children((!q.detail.trim().is_empty()).then(|| text(q.detail.trim().to_string()).font(META).color(muted()).wrap()))
+            .children((!q.detail.trim().is_empty()).then(|| text(q.detail.trim().to_string()).font(k.text(META)).color(muted()).wrap()))
             .children((!links.is_empty()).then(|| {
                 row().gap(10.0).items_center().children(links.into_iter().enumerate().map(|(i, l)| {
                     let url = l.url.clone();
@@ -138,15 +138,15 @@ pub(crate) fn question_context(q: &feed::catalog::RequestQuestion) -> Option<El>
                         .key(format!("link-{i}-{}", l.url))
                         .gap(4.0)
                         .items_center()
-                        .child(icon(&icons::ARROW_RIGHT, 11.0).color(accent()))
-                        .child(text(l.title.clone()).font(META_BOLD).color(accent()))
+                        .child(icon(&icons::ARROW_RIGHT, k.text_size(11.0)).color(accent()))
+                        .child(text(l.title.clone()).font(k.text(META_BOLD)).color(accent()))
                         .on_press(move |_: &mut App| open_link(&url))
                 }))
             })),
     )
 }
 
-fn pick_el(request: &str, (qi, count): (usize, usize), siblings: Vec<String>, option: &feed::catalog::RequestOption, multi: bool, picked: bool, recommended: bool, busy: bool) -> El {
+fn pick_el(request: &str, (qi, count): (usize, usize), siblings: Vec<String>, option: &feed::catalog::RequestOption, multi: bool, picked: bool, recommended: bool, busy: bool, k: &Kit) -> El {
     let label = option.label.replace(" (Recommended)", "").replace(" (recommended)", "");
     let mut el = row()
         .key(format!("pick-{}", option.id))
@@ -159,9 +159,9 @@ fn pick_el(request: &str, (qi, count): (usize, usize), siblings: Vec<String>, op
         .fill(if picked { attention().alpha(0.22) } else { crate::theme::ink(0.05) })
         .border(1.0, if picked { attention().alpha(0.6) } else { crate::theme::ink(0.10) })
         .hover(crate::theme::ink(0.10))
-        .child(icon(if picked { &icons::CHECK_CIRCLE } else { &icons::TARGET }, 14.0).color(if picked { attention() } else { faint() }))
-        .child(col().grow(1.0).min_w(0.0).gap(2.0).child(text(label).font(BODY_BOLD).color(theme::text()).wrap()).children((!option.description.is_empty()).then(|| text(option.description.clone()).font(META).color(muted()).wrap().max_lines(2))))
-        .children(recommended.then(|| row().px(7.0).py(2.0).radius(6.0).fill(attention().alpha(0.2)).child(text("Recommended").font(META_BOLD).color(attention()))));
+        .child(icon(if picked { &icons::CHECK_CIRCLE } else { &icons::TARGET }, k.text_size(14.0)).color(if picked { attention() } else { faint() }))
+        .child(col().grow(1.0).min_w(0.0).gap(2.0).child(text(label).font(k.text(BODY_BOLD)).color(theme::text()).wrap()).children((!option.description.is_empty()).then(|| text(option.description.clone()).font(k.text(META)).color(muted()).wrap().max_lines(2))))
+        .children(recommended.then(|| row().px(7.0).py(2.0).radius(6.0).fill(attention().alpha(0.2)).child(text("Recommended").font(k.text(META_BOLD)).color(attention()))));
     if busy {
         return el.opacity(0.5);
     }
@@ -180,11 +180,11 @@ fn pick_el(request: &str, (qi, count): (usize, usize), siblings: Vec<String>, op
     el
 }
 
-fn own_words(s: &App, key: String, placeholder: &str, submit: Option<Box<dyn Fn(&mut App, String)>>) -> El {
+fn own_words(s: &App, key: String, placeholder: &str, submit: Option<Box<dyn Fn(&mut App, String)>>, k: &Kit) -> El {
     let empty = rune::TextEdit::new("");
     let edit = s.typed.get(&key).unwrap_or(&empty);
     let lens = key.clone();
-    let input = text_input(edit, META)
+    let input = text_input(edit, k.text(META))
         .key(format!("other-{key}"))
         .w_full()
         .px(12.0)
@@ -251,17 +251,17 @@ fn compound_el(s: &App, request: &OpenRequest, route: &Route, busy: bool, k: &Ki
                     put_down_composer(s, tx);
                     s.asks.step.insert(rid.clone(), at);
                 })
-                .child(row().gap(8.0).items_center().children((questions.len() > 1).then(|| text(format!("{}/{}", qi + 1, questions.len())).font(META_BOLD).color(if current { attention() } else { faint() }))).child(text(q.question.clone()).font(BODY_BOLD).color(theme::text()).wrap()).child(text(hint).font(META).color(faint())))
-                .children(question_context(q))
+                .child(row().gap(8.0).items_center().children((questions.len() > 1).then(|| text(format!("{}/{}", qi + 1, questions.len())).font(k.text(META_BOLD)).color(if current { attention() } else { faint() }))).child(text(q.question.clone()).font(k.text(BODY_BOLD)).color(theme::text()).wrap()).child(text(hint).font(k.text(META)).color(faint())))
+                .children(question_context(q, k))
                 .children(q.options.iter().enumerate().map(|(i, o)| {
                     let recommended = feed::catalog::suggests(q.suggested, i, &o.label);
-                    pick_el(&request.id, (qi, questions.len()), siblings.clone(), o, q.multi_select, picks.contains(&o.id) && typed_for(qi).is_empty(), recommended, busy)
+                    pick_el(&request.id, (qi, questions.len()), siblings.clone(), o, q.multi_select, picks.contains(&o.id) && typed_for(qi).is_empty(), recommended, busy, k)
                 }))
-                .children((!request.options_only).then(|| own_words(s, key.clone(), "Or answer in your own words", None))),
+                .children((!request.options_only).then(|| own_words(s, key.clone(), "Or answer in your own words", None, k))),
         );
     }
     if request.takes_note() {
-        list = list.child(own_words(s, format!("{}|note", request.id), "Add a note for the agent (optional)", None));
+        list = list.child(own_words(s, format!("{}|note", request.id), "Add a note for the agent (optional)", None, k));
     }
     let response = if busy { None } else { compound_answer(s, request) };
     let submit = Button::new("Send answers").variant(if response.is_some() { ButtonVariant::Submit } else { ButtonVariant::Neutral }).icon(&icons::ARROW_UP).build(k).key("pick-submit");
@@ -354,7 +354,7 @@ fn field_el(s: &App, request: &str, field: &Field, busy: bool, k: &Kit) -> El {
         c = c.child(Switch::new(form.is_on(field)).label(field.label()).disabled(busy).on_toggle(move |s: &mut App| s.asks.forms.entry(rid.clone()).or_default().flip(&f)).build(k));
     } else if field.is_choice() {
         let picked = form.picked(field);
-        c = c.child(text(field.label()).font(META_BOLD).color(muted())).child(row().w_full().flex_wrap().gap(6.0).children(field.options.iter().map(|o| {
+        c = c.child(text(field.label()).font(k.text(META_BOLD)).color(muted())).child(row().w_full().flex_wrap().gap(6.0).children(field.options.iter().map(|o| {
             let on = picked.contains(&o.value);
             let pill = row()
                 .key(format!("field-{}-{}", field.name, o.value))
@@ -365,8 +365,8 @@ fn field_el(s: &App, request: &str, field: &Field, busy: bool, k: &Kit) -> El {
                 .radius(8.0)
                 .fill(if on { attention().alpha(0.22) } else { crate::theme::ink(0.05) })
                 .border(1.0, if on { attention().alpha(0.6) } else { crate::theme::ink(0.10) })
-                .child(icon(if on { &icons::CHECK_CIRCLE } else { &icons::TARGET }, 12.0).color(if on { attention() } else { faint() }))
-                .child(text(if o.label.is_empty() { o.value.clone() } else { o.label.clone() }).font(META_BOLD).color(theme::text()));
+                .child(icon(if on { &icons::CHECK_CIRCLE } else { &icons::TARGET }, k.text_size(12.0)).color(if on { attention() } else { faint() }))
+                .child(text(if o.label.is_empty() { o.value.clone() } else { o.label.clone() }).font(k.text(META_BOLD)).color(theme::text()));
             if busy {
                 return pill.opacity(0.5);
             }
@@ -378,8 +378,8 @@ fn field_el(s: &App, request: &str, field: &Field, busy: bool, k: &Kit) -> El {
         let fresh = rune::TextEdit::new(field.default_text());
         let edit = s.typed.get(&key).unwrap_or(&fresh);
         let (lens, initial) = (key.clone(), field.default_text());
-        c = c.child(text(field.label()).font(META_BOLD).color(muted())).child(
-            text_input(edit, META)
+        c = c.child(text(field.label()).font(k.text(META_BOLD)).color(muted())).child(
+            text_input(edit, k.text(META))
                 .key(format!("field-input-{key}"))
                 .w_full()
                 .px(12.0)
@@ -392,11 +392,11 @@ fn field_el(s: &App, request: &str, field: &Field, busy: bool, k: &Kit) -> El {
                 .on_edit(move |s: &mut App| s.typed.entry(lens.clone()).or_insert_with(|| rune::TextEdit::new(initial.clone()))),
         );
     }
-    c.children((!field.description.trim().is_empty()).then(|| text(field.description.clone()).font(META).color(muted()).wrap()))
+    c.children((!field.description.trim().is_empty()).then(|| text(field.description.clone()).font(k.text(META)).color(muted()).wrap()))
 }
 
 fn input_el(s: &App, request: &OpenRequest, e: &feed::request::Elicitation, route: &Route, busy: bool, k: &Kit) -> El {
-    let mut c = col().w_full().gap(10.0).pt(4.0).child(row().gap(6.0).items_center().child(icon(&icons::MESSAGE, 12.0).color(muted())).child(text(format!("{} asks for input", e.asker())).font(META_BOLD).color(muted())));
+    let mut c = col().w_full().gap(10.0).pt(4.0).child(row().gap(6.0).items_center().child(icon(&icons::MESSAGE, k.text_size(12.0)).color(muted())).child(text(format!("{} asks for input", e.asker())).font(k.text(META_BOLD)).color(muted())));
     let answer = |label: &str, variant: ButtonVariant, response: Option<Response>, key: &str| {
         let b = Button::new(label.to_string()).variant(variant).build(k).key(format!("input-{key}"));
         match response.filter(|_| !busy) {
@@ -410,9 +410,9 @@ fn input_el(s: &App, request: &OpenRequest, e: &feed::request::Elicitation, rout
     if e.is_link() {
         let link = match e.web_url() {
             Some(url) => {
-                text(url.clone()).font(META_BOLD).color(accent()).wrap().on_press(move |_: &mut App| open_link(&url))
+                text(url.clone()).font(k.text(META_BOLD)).color(accent()).wrap().on_press(move |_: &mut App| open_link(&url))
             }
-            None => text(e.url.clone()).font(META).color(muted()).wrap(),
+            None => text(e.url.clone()).font(k.text(META)).color(muted()).wrap(),
         };
         return c.child(link).child(row().gap(8.0).child(answer("Opened, continue", ButtonVariant::Submit, Some(Response::choose("allow")), "continue")).child(spacer()).child(answer("Decline", ButtonVariant::Neutral, Some(Response::choose("deny")), "decline")));
     }
@@ -438,12 +438,12 @@ fn reply_box(s: &App, request: &OpenRequest, route: &Route, busy: bool, k: &Kit)
         let send = send.clone();
         button.on_press(move |s: &mut App| send(s, words.clone()))
     };
-    let input = own_words(s, key, "Tell the agent why, or what to do instead", if busy { None } else { Some(Box::new(send)) });
+    let input = own_words(s, key, "Tell the agent why, or what to do instead", if busy { None } else { Some(Box::new(send)) }, k);
     row().w_full().gap(8.0).items_center().child(col().grow(1.0).min_w(0.0).child(input)).child(button)
 }
 
 pub(crate) fn request_body(s: &App, request: &OpenRequest, route: Route, busy: bool, k: &Kit) -> El {
-    let mut c = col().w_full().gap(8.0).children(clock_line(s, request)).children(replaced_note(s, request, &route, busy, k));
+    let mut c = col().w_full().gap(8.0).children(clock_line(s, request, k)).children(replaced_note(s, request, &route, busy, k));
     if let Some(e) = request.elicitation.as_ref().filter(|_| request.is_input()) {
         return c.child(input_el(s, request, e, &route, busy, k));
     }
@@ -452,20 +452,20 @@ pub(crate) fn request_body(s: &App, request: &OpenRequest, route: Route, busy: b
     }
     let question = single_question(request);
     if let Some(q) = question {
-        c = c.children(question_context(q));
+        c = c.children(question_context(q, k));
     } else {
         c = c
-            .children(request.description.as_ref().filter(|d| !d.trim().is_empty() && request.title.is_some()).map(|d| text(d.clone()).font(META).color(muted()).wrap()))
-            .children(request.reason.as_ref().filter(|r| !r.trim().is_empty()).map(|r| text(r.clone()).font(META).color(muted()).wrap()))
-            .children(request.shown_detail().map(|d| col().key("request-detail").w_full().max_h(140.0).scroll(ScrollSpec { stick_bottom: false }).px(10.0).py(8.0).radius(8.0).fill(crate::theme::ink(0.06)).child(text(d).font(META.mono()).color(theme::text()).wrap())))
-            .children((!request.blocked_path.trim().is_empty()).then(|| text(request.blocked_path.clone()).font(META.mono()).color(muted()).wrap()));
+            .children(request.description.as_ref().filter(|d| !d.trim().is_empty() && request.title.is_some()).map(|d| text(d.clone()).font(k.text(META)).color(muted()).wrap()))
+            .children(request.reason.as_ref().filter(|r| !r.trim().is_empty()).map(|r| text(r.clone()).font(k.text(META)).color(muted()).wrap()))
+            .children(request.shown_detail().map(|d| col().key("request-detail").w_full().max_h(140.0).scroll(ScrollSpec { stick_bottom: false }).px(10.0).py(8.0).radius(8.0).fill(crate::theme::ink(0.06)).child(text(d).font(k.text(META.mono())).color(theme::text()).wrap())))
+            .children((!request.blocked_path.trim().is_empty()).then(|| text(request.blocked_path.clone()).font(k.text(META.mono())).color(muted()).wrap()));
     }
     let replying = s.asks.replying.contains(&request.id);
-    c = c.child(col().w_full().gap(6.0).pt(4.0).children(request_choices(request).into_iter().enumerate().map(|(i, choice)| choice_el(i, choice, busy, &route))));
+    c = c.child(col().w_full().gap(6.0).pt(4.0).children(request_choices(request).into_iter().enumerate().map(|(i, choice)| choice_el(i, choice, busy, &route, k))));
     if let Some(q) = question.filter(|_| !request.options_only) {
         let (id, to, asked) = (request.id.clone(), route.clone(), q.question.clone());
         let send = move |s: &mut App, words: String| to.answer(s, &id, Response::picks(Vec::new(), [(asked.clone(), words)].into_iter().collect()));
-        c = c.child(own_words(s, format!("{}|0", request.id), "Or answer in your own words, then press Return", if busy { None } else { Some(Box::new(send)) })).child(row().gap(10.0).items_center().children(decline(request, &route, busy, k)).child(spacer()).child(pager_hint(k)));
+        c = c.child(own_words(s, format!("{}|0", request.id), "Or answer in your own words, then press Return", if busy { None } else { Some(Box::new(send)) }, k)).child(row().gap(10.0).items_center().children(decline(request, &route, busy, k)).child(spacer()).child(pager_hint(k)));
     } else if replying {
         c = c.child(reply_box(s, request, &route, busy, k));
     }
@@ -500,7 +500,7 @@ pub(crate) fn waiting_choices(s: &App, x: &Session) -> (Option<String>, Vec<Choi
     (recent.first().and_then(|(_, b)| question_in(b)), Vec::new())
 }
 
-pub(crate) fn choice_el(i: usize, c: Choice, busy: bool, route: &Route) -> El {
+pub(crate) fn choice_el(i: usize, c: Choice, busy: bool, route: &Route, k: &Kit) -> El {
     let accent_on = c.recommended;
     let mut card_el = row()
         .key(format!("choice-{i}"))
@@ -515,19 +515,19 @@ pub(crate) fn choice_el(i: usize, c: Choice, busy: bool, route: &Route) -> El {
         .hover(if accent_on { attention().alpha(0.22) } else { crate::theme::ink(0.10) })
         .press_scale(0.985)
         .motion(SPRING)
-        .child(col().size(24.0, 24.0).radius(7.0).items_center().justify_center().fill(crate::theme::ink(0.08)).child(text((i + 1).to_string()).font(META_BOLD).color(theme::text())))
+        .child(col().size(k.text_size(24.0), k.text_size(24.0)).radius(7.0).items_center().justify_center().fill(crate::theme::ink(0.08)).child(text((i + 1).to_string()).font(k.text(META_BOLD)).color(theme::text())))
         .child(
             col()
                 .grow(1.0)
                 .min_w(0.0)
                 .gap(2.0)
-                .child(text(c.label.clone()).font(BODY_BOLD).color(theme::text()).wrap())
-                .children((!c.detail.is_empty()).then(|| text(c.detail.clone()).font(META).color(muted()).wrap().max_lines(2))),
+                .child(text(c.label.clone()).font(k.text(BODY_BOLD)).color(theme::text()).wrap())
+                .children((!c.detail.is_empty()).then(|| text(c.detail.clone()).font(k.text(META)).color(muted()).wrap().max_lines(2))),
         );
     if accent_on {
-        card_el = card_el.child(row().px(7.0).py(2.0).radius(6.0).fill(attention().alpha(0.2)).child(text("Recommended").font(META_BOLD).color(attention())));
+        card_el = card_el.child(row().px(7.0).py(2.0).radius(6.0).fill(attention().alpha(0.2)).child(text("Recommended").font(k.text(META_BOLD)).color(attention())));
     }
-    card_el = card_el.child(icon(&icons::ARROW_RIGHT, 13.0).color(faint()));
+    card_el = card_el.child(icon(&icons::ARROW_RIGHT, k.text_size(13.0)).color(faint()));
     if busy {
         return card_el.opacity(0.5);
     }
@@ -627,12 +627,12 @@ pub(crate) fn waiting_card(s: &App, x: &Session, k: &Kit) -> El {
         .grow(1.0)
         .min_w(0.0)
         .gap(8.0)
-        .child(row().w_full().gap(8.0).items_center().child(text("WAITING ON YOU").font(LABEL).color(attention())).children(source.map(|t| text(t).font(META).color(faint()))).child(spacer()).children(shown.and_then(|r| switcher(&x.id, &open, &r.id))))
-        .child(text(question).font(TITLE).color(theme::text()).wrap());
+        .child(row().w_full().gap(8.0).items_center().child(text("WAITING ON YOU").font(k.text(LABEL)).color(attention())).children(source.map(|t| text(t).font(k.text(META)).color(faint()))).child(spacer()).children(shown.and_then(|r| switcher(&x.id, &open, &r.id, k))))
+        .child(text(question).font(k.text(TITLE)).color(theme::text()).wrap());
     if let Some(request) = shown {
         body = body.child(request_body(s, request, Route::Session, busy, k));
     } else if !choices.is_empty() {
-        body = body.child(col().w_full().gap(6.0).pt(4.0).children(choices.into_iter().enumerate().map(|(i, c)| choice_el(i, c, busy, &Route::Session))));
+        body = body.child(col().w_full().gap(6.0).pt(4.0).children(choices.into_iter().enumerate().map(|(i, c)| choice_el(i, c, busy, &Route::Session, k))));
     }
     body = body.child(row().gap(8.0).pt(4.0).items_center().child(reply).child(next).child(spacer()).child(keys(&["⌘", "J"], k)));
     let card_el = row()
@@ -651,7 +651,7 @@ pub(crate) fn waiting_card(s: &App, x: &Session, k: &Kit) -> El {
         .key("waiting-card")
         .focusable(true)
         .on_key(|s: &mut App, ev: &KeyEvent, _: &mut Tx| pager_key(s, ev, &Route::Session))
-        .child(col().size(34.0, 34.0).radius(10.0).items_center().justify_center().fill(attention().alpha(0.18)).child(icon(&icons::HAND, 17.0).color(attention())))
+        .child(col().size(34.0, 34.0).radius(10.0).items_center().justify_center().fill(attention().alpha(0.18)).child(icon(&icons::HAND, k.text_size(17.0)).color(attention())))
         .child(body);
     col().w_full().items_center().px(32.0).pb(12.0).child(card_el)
 }

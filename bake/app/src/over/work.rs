@@ -21,7 +21,7 @@ use crate::{App, Screen};
 
 fn phase_badge(phase: usize, k: &Kit) -> El {
     let color = if phase == CHECK { k.c.warning.icon } else if phase == SHIP { k.c.success.icon } else { k.c.text_accent };
-    ui::pill(&icons::STATUS, PHASES[phase.min(SHIP)], color)
+    ui::pill(&icons::STATUS, PHASES[phase.min(SHIP)], color, k)
 }
 
 fn tile(i: usize, expected: &str, observed: &str, passed: Option<bool>, k: &Kit) -> El {
@@ -30,7 +30,7 @@ fn tile(i: usize, expected: &str, observed: &str, passed: Option<bool>, k: &Kit)
         Some(false) => ("Failed", &icons::CIRCLE_X, k.c.danger.icon),
         None => ("Not run", &icons::DASH, k.c.text_weak),
     };
-    let section = |t: &str| text(t.to_uppercase()).font(rune::TextStyle::new(10.5, 600.0)).color(weak(k));
+    let section = |t: &str| text(t.to_uppercase()).font(k.text(rune::TextStyle::new(10.5, 600.0))).color(weak(k));
     col()
         .key(format!("tile-{i}"))
         .w(380.0)
@@ -40,11 +40,11 @@ fn tile(i: usize, expected: &str, observed: &str, passed: Option<bool>, k: &Kit)
         .radius(12.0)
         .fill(k.c.surface_base)
         .border(1.0, if passed.is_none() { ui::rule(k) } else { color.alpha(0.3) })
-        .child(row().w_full().items_center().child(text(format!("Check {}", i + 1)).font(META_MED).color(base(k))).child(ui::spacer()).child(ui::pill(glyph, label, color)))
+        .child(row().w_full().items_center().child(text(format!("Check {}", i + 1)).font(k.text(META_MED)).color(base(k))).child(ui::spacer()).child(ui::pill(glyph, label, color, k)))
         .child(section("Expected"))
-        .child(text(expected.to_string()).font(BODY).color(strong(k)).wrap())
+        .child(text(expected.to_string()).font(k.text(BODY)).color(strong(k)).wrap())
         .child(section("Observed").mt(4.0))
-        .child(text(observed.to_string()).font(META.lh(18.0)).color(if passed.is_some() { base(k) } else { weak(k) }).wrap())
+        .child(text(observed.to_string()).font(k.text(META.lh(18.0))).color(if passed.is_some() { base(k) } else { weak(k) }).wrap())
 }
 
 pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>, main_kit: &Kit) -> El {
@@ -64,7 +64,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>, main_kit:
         .w_full()
         .gap(8.0)
         .child({
-            let mut r = row().gap(8.0).items_center().child(match off_board(&w.state) { Some(word) => ui::pill(&icons::STATUS, word, weak(&k)), None => phase_badge(phase, &k) }).child(ui::id_label(&short_id(&w.id), &k)).child(ui::chip(&icons::TASK, &format!("{} · {}", w.priority, w.kind), &k));
+            let mut r = row().gap(8.0).items_center().child(match off_board(&w.state) { Some(word) => ui::pill(&icons::STATUS, word, weak(&k), &k), None => phase_badge(phase, &k) }).child(ui::id_label(&short_id(&w.id), &k)).child(ui::chip(&icons::TASK, &format!("{} · {}", w.priority, w.kind), &k));
             if let Some(c) = &commit {
                 r = r.child(ui::chip(&icons::BRANCH, c, &k));
             }
@@ -73,8 +73,8 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>, main_kit:
             }
             r
         })
-        .child(text(plain(&w.text)).font(TITLE.lh(30.0)).color(strong(&k)).wrap())
-        .child(text(plain(&w.description)).font(BODY).color(base(&k)).wrap().max_lines(3));
+        .child(text(plain(&w.text)).font(k.text(TITLE.lh(30.0))).color(strong(&k)).wrap())
+        .child(text(plain(&w.description)).font(k.text(BODY)).color(base(&k)).wrap().max_lines(3));
 
     let listed = crate::over::work_review(s, id);
     let review = listed.clone().unwrap_or_default();
@@ -91,20 +91,20 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>, main_kit:
             .w_full()
             .gap(14.0)
             .padding(20.0)
-            .child(row().gap(8.0).items_center().child(ui::pill(&icons::CHECKLIST, &heading, if held.is_some() { k.c.text_accent } else { k.c.warning.icon })).child(text(format!("submitted {} ago", s.ov.d.ago(&w.submitted_at()))).font(META).color(weak(&k))))
-            .child(text("Does this revision do what was agreed?".to_string()).font(HEAD.lh(22.0)).color(strong(&k)))
+            .child(row().gap(8.0).items_center().child(ui::pill(&icons::CHECKLIST, &heading, if held.is_some() { k.c.text_accent } else { k.c.warning.icon }, &k)).child(text(format!("submitted {} ago", s.ov.d.ago(&w.submitted_at()))).font(k.text(META)).color(weak(&k))))
+            .child(text("Does this revision do what was agreed?".to_string()).font(k.text(HEAD.lh(22.0))).color(strong(&k)))
             .children((!w.acceptance.trim().is_empty()).then(|| {
                 col()
                     .w_full()
                     .gap(4.0)
                     .pl(12.0)
                     .border_sides([0.0, 0.0, 0.0, 2.0], k.c.border_strong)
-                    .child(text("What was asked".to_string()).font(META_MED).color(weak(&k)))
-                    .child(text(plain(&w.acceptance)).font(BODY).color(base(&k)).wrap())
+                    .child(text("What was asked".to_string()).font(k.text(META_MED)).color(weak(&k)))
+                    .child(text(plain(&w.acceptance)).font(k.text(BODY)).color(base(&k)).wrap())
             }))
             .child(verdict_row(s, w, listed.as_ref(), &revision, &k))
             .child(links)
-            .child(row().gap(6.0).items_center().child(icon(&icons::INFO, 13.0).color(weak(&k))).child(text(format!("Approval covers {revision} only. A new commit asks again. Merging is a separate step.").to_string()).font(META).color(weak(&k))));
+            .child(row().gap(6.0).items_center().child(icon(&icons::INFO, k.text_size(13.0)).color(weak(&k))).child(text(format!("Approval covers {revision} only. A new commit asks again. Merging is a separate step.").to_string()).font(k.text(META)).color(weak(&k))));
         col().w_full().radius(14.0).fill(k.c.surface_raised).border(1.0, k.c.warning.icon.alpha(0.4)).child(c)
     } else {
         ui::card(col().w_full().padding(16.0).gap(8.0).child(text(match s.ov.d.whose_move(w).as_str() {
@@ -112,7 +112,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>, main_kit:
             _ if w.state == "closed" => "Closed without shipping. Reopen it to put it back on the board.".to_string(),
             "You" => "Your move. You hold it.".to_string(),
             whose => format!("{whose}'s move. Nothing waits on you yet."),
-        }).font(BODY_MED).color(strong(&k))).child(links), &k)
+        }).font(k.text(BODY_MED)).color(strong(&k))).child(links), &k)
     };
 
     let first_result = w.timeline.iter().rev().find(|t| t.kind == "log" && t.log_type.as_deref() == Some("result")).and_then(|t| t.text.clone()).unwrap_or_default();
@@ -134,11 +134,11 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>, main_kit:
                 .items_start()
                 .padding(10.0)
                 .radius(8.0)
-                .child(text(format!("{}", i + 1)).font(META_MED).color(weak(&k)).w(14.0))
-                .child(col().grow(1.0).w(1.0).gap(3.0).child(text(t.to_uppercase()).font(rune::TextStyle::new(11.0, 600.0)).color(k.c.text_accent)).child(text(b.clone()).font(BODY).color(strong(&k)).wrap())),
+                .child(text(format!("{}", i + 1)).font(k.text(META_MED)).color(weak(&k)).w(14.0))
+                .child(col().grow(1.0).w(1.0).gap(3.0).child(text(t.to_uppercase()).font(k.text(rune::TextStyle::new(11.0, 600.0))).color(k.c.text_accent)).child(text(b.clone()).font(k.text(BODY)).color(strong(&k)).wrap())),
         );
     }
-    let brief = col().w_full().gap(10.0).child(ui::section_head("Review brief", None, Some(text("read this before the evidence".to_string()).font(META).color(weak(&k))), &k)).child(ui::card(brief, &k));
+    let brief = col().w_full().gap(10.0).child(ui::section_head("Review brief", None, Some(text("read this before the evidence".to_string()).font(k.text(META)).color(weak(&k))), &k)).child(ui::card(brief, &k));
     let mut tiles = row().w_full().gap(12.0).flex_wrap().items_stretch();
     for (i, p) in steps.iter().enumerate() {
         tiles = tiles.child(tile(i, &p.expected, &p.observed, p.passed, &k));
@@ -146,7 +146,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>, main_kit:
     let proof = col()
         .w_full()
         .gap(10.0)
-        .child(ui::section_head("Evidence", Some(steps.len()), Some(text(format!("{passed} passed · {not_run} not run · from the workers' logged results")).font(META).color(weak(&k))), &k))
+        .child(ui::section_head("Evidence", Some(steps.len()), Some(text(format!("{passed} passed · {not_run} not run · from the workers' logged results")).font(k.text(META)).color(weak(&k))), &k))
         .child(tiles);
 
     let mut gaps = col().w_full().gap(8.0).child(ui::section_head("What wasn't checked", Some(unchecked.len() + not_run), None, &k));
@@ -157,7 +157,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>, main_kit:
         gaps = gaps.child(gap_line(&format!("Raised after it was submitted: {u}"), &k));
     }
     if unchecked.is_empty() && not_run == 0 {
-        gaps = gaps.child(text("Every expected step has a recorded result.".to_string()).font(BODY).color(weak(&k)));
+        gaps = gaps.child(text("Every expected step has a recorded result.".to_string()).font(k.text(BODY)).color(weak(&k)));
     }
 
     let body = col()
@@ -187,7 +187,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, id: &str, _layer: &mut Vec<El>, main_kit:
     let mut who = col().w_full().gap(8.0).child(ui::label("Who's working", &k));
     for (i, n) in people.iter().take(4).enumerate() {
         let role = if Some(n) == w.assignee.as_ref().map(|a| s.ov.d.name_of(a)).as_ref() { "Holds it" } else if i == 0 { "Last to act" } else { "Worked on it" };
-        who = who.child(row().w_full().gap(8.0).items_center().child(ui::avatar(n, 20.0)).child(text(n.clone()).font(META_MED).color(strong(&k)).truncate().shrink()).child(ui::spacer()).child(text(role.to_string()).font(META).color(weak(&k))));
+        who = who.child(row().w_full().gap(8.0).items_center().child(ui::avatar(n, 20.0)).child(text(n.clone()).font(k.text(META_MED)).color(strong(&k)).truncate().shrink()).child(ui::spacer()).child(text(role.to_string()).font(k.text(META)).color(weak(&k))));
     }
     let rail = col()
         .key("work-rail")
@@ -240,13 +240,13 @@ fn verdict_row(s: &App, w: &crate::over::Work, d: Option<&feed::decisions::Decis
         st.notes.get(&d.id()).filter(|(hold, _)| d.holds(hold)).map(|(_, n)| n.clone()).or_else(|| crate::over::inbox::too_old(st, d).then(feed::review::needs_newer_note))
     };
     if let Some(n) = note {
-        r = r.child(text(n).font(META).color(ui::needs_color(k)).wrap());
+        r = r.child(text(n).font(k.text(META)).color(ui::needs_color(k)).wrap());
     }
     r
 }
 
 fn gap_line(t: &str, k: &Kit) -> El {
-    row().w_full().gap(10.0).items_start().child(row().pt(3.0).child(icon(&icons::WARNING, 14.0).color(k.c.warning.icon))).child(text(t.to_string()).font(BODY).color(base(k)).wrap().grow(1.0).w(1.0))
+    row().w_full().gap(10.0).items_start().child(row().pt(3.0).child(icon(&icons::WARNING, k.text_size(14.0)).color(k.c.warning.icon))).child(text(t.to_string()).font(k.text(BODY)).color(base(k)).wrap().grow(1.0).w(1.0))
 }
 
 fn clip(t: &str, n: usize) -> String {
@@ -274,8 +274,8 @@ fn timeline(s: &App, w: &crate::over::Work, max: usize, k: &Kit) -> El {
                         .min_w(0.0)
                         .gap(2.0)
                         .pb(12.0)
-                        .child(row().gap(6.0).child(text(s.ov.d.name_of(&t.actor)).font(META_MED).color(base(k)).truncate().shrink()).child(text(s.ov.d.ago(&t.at)).font(META).color(weak(k))))
-                        .child(text(clip(&step.what, 180)).font(META).color(weak(k)).wrap().max_lines(3)),
+                        .child(row().gap(6.0).child(text(s.ov.d.name_of(&t.actor)).font(k.text(META_MED)).color(base(k)).truncate().shrink()).child(text(s.ov.d.ago(&t.at)).font(k.text(META)).color(weak(k))))
+                        .child(text(clip(&step.what, 180)).font(k.text(META)).color(weak(k)).wrap().max_lines(3)),
                 ),
         );
     }
@@ -427,9 +427,9 @@ fn moves(s: &App, w: &crate::over::Work, k: &Kit) -> Option<El> {
         r = r.child(Button::new("Send as new").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).help("Sends it again as a fresh request, so it can show up twice if the first one landed").on_press(move |s: &mut App| send_new(s, &id, m)).build(k).key("work-send-new"));
     }
     if busy {
-        r = r.child(text("Sending…".to_string()).font(META).color(weak(k)));
+        r = r.child(text("Sending…".to_string()).font(k.text(META)).color(weak(k)));
     } else if let Some((failed, n)) = note {
-        r = r.child(text(n.clone()).font(META).color(if *failed { ui::needs_color(k) } else { base(k) }).wrap().shrink());
+        r = r.child(text(n.clone()).font(k.text(META)).color(if *failed { ui::needs_color(k) } else { base(k) }).wrap().shrink());
     }
     Some(r)
 }
@@ -444,7 +444,7 @@ pub fn words_dialog(s: &App, layer: &mut Vec<El>, k: &Kit) {
         Move::Park => ("Park", "Why it waits", "What should happen before anyone picks this up?", "Park", "It leaves the board until someone unparks it."),
         _ => ("Comment on", "Comment", "Your note for whoever works on this", "Add comment", "It goes on the item's timeline, where its workers read it."),
     };
-    let input = text_input(&n.text, BODY)
+    let input = text_input(&n.text, k.text(BODY))
         .key("work-words-input")
         .label(label)
         .w_full()
@@ -462,9 +462,9 @@ pub fn words_dialog(s: &App, layer: &mut Vec<El>, k: &Kit) {
         .child(Button::new(yes).variant(ButtonVariant::Contrast).control_size(ControlSize::Small).disabled(problem.is_some()).on_press(send_words).build(k).key("work-words-send"));
     let mut body = col().w_full().gap(10.0).px(16.0).pb(16.0).child(field);
     if held {
-        body = body.child(text(ledger::CHANGED_WORDS.to_string()).font(META).color(ui::needs_color(k)).wrap().w_full());
+        body = body.child(text(ledger::CHANGED_WORDS.to_string()).font(k.text(META)).color(ui::needs_color(k)).wrap().w_full());
     } else if settled {
-        body = body.child(text(ledger::SETTLED_WHILE_OPEN.to_string()).font(META).color(ui::needs_color(k)).wrap().w_full());
+        body = body.child(text(ledger::SETTLED_WHILE_OPEN.to_string()).font(k.text(META)).color(ui::needs_color(k)).wrap().w_full());
     }
     let body = body.child(buttons);
     Dialog::new("work-words", format!("{title} {}", ui::short_title(&n.title, 48)))

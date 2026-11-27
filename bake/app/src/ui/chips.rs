@@ -8,7 +8,7 @@ use crate::icons;
 use crate::theme::{META, faint, line, muted, wash};
 use crate::ui::session_menu::{chips_for, compact};
 
-fn chip_el(s: &App, x: &Session, chip: &Chip) -> El {
+fn chip_el(s: &App, x: &Session, chip: &Chip, k: &Kit) -> El {
     let busy = s.menus.busy.contains(&(x.id.clone(), chip.key));
     let label = if busy { "Changing…".to_string() } else { chip.label() };
     let mut el = row()
@@ -21,7 +21,7 @@ fn chip_el(s: &App, x: &Session, chip: &Chip) -> El {
         .fill(wash())
         .border(1.0, line())
         .label(format!("{}, {}", chip.name, chip.label()))
-        .child(text(label).font(META).color(muted()).truncate().max_w(200.0));
+        .child(text(label).font(k.text(META)).color(muted()).truncate().max_w(200.0));
     if let Some(note) = &chip.note {
         el = el.description(note.clone());
     }
@@ -37,7 +37,7 @@ fn chip_el(s: &App, x: &Session, chip: &Chip) -> El {
                 _ => Some((id.clone(), key)),
             };
         })
-        .child(icon(&icons::SELECTOR, 11.0).color(faint()))
+        .child(icon(&icons::SELECTOR, k.text_size(11.0)).color(faint()))
 }
 
 fn context_el(usage: &ContextUsage, k: &Kit) -> El {
@@ -46,10 +46,10 @@ fn context_el(usage: &ContextUsage, k: &Kit) -> El {
         r = r.child(ProgressCircle::new(f).size(14.0).label("Context used").build(k));
     }
     let words = if usage.compacting { "Compacting…".to_string() } else { usage.label() };
-    r.child(text(words).font(META).color(faint()))
+    r.child(text(words).font(k.text(META)).color(faint()))
 }
 
-fn compact_el(s: &App, x: &Session) -> El {
+fn compact_el(s: &App, x: &Session, k: &Kit) -> El {
     let busy = s.menus.busy.contains(&(x.id.clone(), "compact"));
     let id = x.id.clone();
     let mut b = row()
@@ -60,8 +60,8 @@ fn compact_el(s: &App, x: &Session) -> El {
         .py(3.0)
         .radius(7.0)
         .border(1.0, line())
-        .child(icon(&icons::SHRINK, 11.0).color(faint()))
-        .child(text(if busy { "Compacting…" } else { "Compact" }).font(META).color(muted()));
+        .child(icon(&icons::SHRINK, k.text_size(11.0)).color(faint()))
+        .child(text(if busy { "Compacting…" } else { "Compact" }).font(k.text(META)).color(muted()));
     if !busy {
         b = b.hover(crate::theme::ink(0.08)).on_press(move |s: &mut App| compact(s, &id));
     }
@@ -71,18 +71,18 @@ fn compact_el(s: &App, x: &Session) -> El {
 pub fn turn(s: &App, x: &Session, k: &Kit) -> El {
     let mut r = row().key("turn-chips").w_full().flex_wrap().gap(6.0).items_center();
     for chip in chips_for(s, &x.id) {
-        r = r.child(chip_el(s, x, &chip));
+        r = r.child(chip_el(s, x, &chip, k));
     }
     if let Some(usage) = s.menus.context.get(&x.id) {
         r = r.child(context_el(usage, k));
     } else if let Some(error) = s.menus.context_error.get(&x.id) {
-        r = r.child(text(format!("Context use unknown: {error}")).font(META).color(faint()).truncate().max_w(280.0).key("context-use"));
+        r = r.child(text(format!("Context use unknown: {error}")).font(k.text(META)).color(faint()).truncate().max_w(280.0).key("context-use"));
     }
     if x.capabilities.compact {
-        r = r.child(compact_el(s, x));
+        r = r.child(compact_el(s, x, k));
     }
     if let Some(note) = s.menus.note.get(&x.id) {
-        r = r.child(text(note.clone()).font(META).color(faint()));
+        r = r.child(text(note.clone()).font(k.text(META)).color(faint()));
     }
     r
 }

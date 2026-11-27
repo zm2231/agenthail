@@ -156,12 +156,12 @@ pub fn fixed(s: &mut App, id: &str, seq: u64, fix: Fix, result: Result<(), feed:
 }
 
 fn banner(m: &Missing, g: &Gone, k: &Kit) -> El {
-    let mut text_col = col().grow(1.0).min_w(0.0).gap(3.0).child(text(g.note()).font(BODY_BOLD).color(theme::text()).wrap());
+    let mut text_col = col().grow(1.0).min_w(0.0).gap(3.0).child(text(g.note()).font(k.text(BODY_BOLD)).color(theme::text()).wrap());
     if let Some(e) = &g.read_error {
-        text_col = text_col.child(text(format!("Couldn't read all of its conversation: {e}")).font(META).color(attention()).wrap());
+        text_col = text_col.child(text(format!("Couldn't read all of its conversation: {e}")).font(k.text(META)).color(attention()).wrap());
     }
     if let Some(e) = &m.error {
-        text_col = text_col.child(text(e.clone()).font(META).color(failed()).wrap());
+        text_col = text_col.child(text(e.clone()).font(k.text(META)).color(failed()).wrap());
     }
     let mut r = row()
         .key("gone-note")
@@ -173,7 +173,7 @@ fn banner(m: &Missing, g: &Gone, k: &Kit) -> El {
         .radius(12.0)
         .fill(attention().alpha(0.10))
         .border(1.0, attention().alpha(0.25))
-        .child(icon(&icons::CLOCK, 16.0).color(attention()))
+        .child(icon(&icons::CLOCK, k.text_size(16.0)).color(attention()))
         .child(text_col);
     if let Some(f) = g.fix {
         let label = match (m.fixing, m.fresh) {
@@ -194,15 +194,15 @@ fn failed_view(message: &str, k: &Kit) -> El {
         .items_center()
         .justify_center()
         .gap(12.0)
-        .child(text(message.to_string()).font(BODY_BOLD).color(muted()).wrap())
+        .child(text(message.to_string()).font(k.text(BODY_BOLD)).color(muted()).wrap())
         .child(Button::new("Go to Now").variant(ButtonVariant::Ghost).build(k).key("gone-now").on_press(|s: &mut App| crate::over::go(s, Screen::Now)))
         .child(el().h(80.0))
 }
 
-fn exchanges(g: &Gone) -> El {
-    let turn = |who: &str, body: &str, color: Color| col().w_full().gap(4.0).child(label(who)).child(text(body.to_string()).font(BODY).color(color).wrap());
+fn exchanges(g: &Gone, k: &Kit) -> El {
+    let turn = |who: &str, body: &str, color: Color| col().w_full().gap(4.0).child(label(who, k)).child(text(body.to_string()).font(k.text(BODY)).color(color).wrap());
     let mut head = row().w_full().gap(10.0).items_center();
-    head = head.child(text(g.history.note()).font(META).color(faint()));
+    head = head.child(text(g.history.note()).font(k.text(META)).color(faint()));
     let list = col().w_full().max_w(780.0).gap(18.0).px(32.0).py(16.0).child(head).children(g.exchanges.iter().map(|e| {
         let mut c = col().w_full().gap(10.0);
         if !e.user.is_empty() {
@@ -224,11 +224,11 @@ pub fn screen(s: &App, id: &str, k: &Kit) -> El {
         Look::Found(g) => {
             let center = col().grow(1.0).h_full().min_w(0.0).child(header(s, &g.row, k)).child(banner(m, g, k));
             if !g.exchanges.is_empty() {
-                center.child(exchanges(g))
+                center.child(exchanges(g, k))
             } else if s.panes.get(id).is_some_and(|p| !p.blocks.is_empty()) {
                 conversation(s, id, center, k)
             } else {
-                center.child(col().key("gone-empty").w_full().grow(1.0).items_center().justify_center().child(text(g.empty_note()).font(BODY_BOLD).color(faint()).wrap()).child(el().h(80.0)))
+                center.child(col().key("gone-empty").w_full().grow(1.0).items_center().justify_center().child(text(g.empty_note()).font(k.text(BODY_BOLD)).color(faint()).wrap()).child(el().h(80.0)))
             }
         }
     }

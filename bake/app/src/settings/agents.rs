@@ -65,6 +65,14 @@ pub fn escape(s: &mut Prefs) -> bool {
     s.agents.open.take().is_some() || s.agents.creating.take().is_some() || std::mem::take(&mut s.agents.removing)
 }
 
+#[cfg(test)]
+pub fn show(s: &mut Prefs, roles: Roles, selected: &str) {
+    s.agents.page = 1;
+    s.agents.selected = Some(selected.to_string());
+    s.agents.read = Some(Ok(Loaded { roles, read_only: None }));
+    settle(s);
+}
+
 pub fn opened(s: &mut Prefs) {
     if s.tab == TAB {
         reload(s);
@@ -281,25 +289,25 @@ fn small(label: &str, key: &str, disabled: bool, press: impl Fn(&mut Prefs) + 's
     Button::new(label).control_size(ControlSize::Small).disabled(disabled).on_press(press).build(k).key(format!("settings-{key}"))
 }
 
-fn notices(s: &Prefs) -> Vec<El> {
+fn notices(s: &Prefs, k: &Kit) -> Vec<El> {
     let mut out = Vec::new();
     if let Some(reason) = &s.agents.read_only {
-        out.push(text(reason.clone()).font(META).color(muted()).wrap().px(4.0).key("agent-roles-read-only"));
+        out.push(text(reason.clone()).font(k.text(META)).color(muted()).wrap().px(4.0).key("agent-roles-read-only"));
     }
     if let Some(Err(f)) = &s.agents.read {
-        out.push(parts::failure(s, f));
+        out.push(parts::failure(s, f, k));
     }
     out
 }
 
-fn role_list(s: &Prefs, r: &Roles) -> El {
+fn role_list(s: &Prefs, r: &Roles, k: &Kit) -> El {
     let mut list = col().w(170.0).radius(10.0).fill(theme::card()).border(1.0, theme::line()).py(4.0);
     for role in &r.roles {
         let chosen = s.agents.selected.as_deref() == Some(role.name.as_str());
         let name = role.name.clone();
         let kind = if s.agents.kept.contains_key(&role.name) { format!("{} · not saved", agents::role_kind(role)) } else { agents::role_kind(role).to_string() };
-        let note = text(kind).font(META).color(if role.edited { accent() } else { muted() });
-        let mut item = col().w_full().gap(2.0).px(12.0).py(7.0).radius(7.0).child(text(role.name.clone()).font(BODY).color(theme::text())).child(note);
+        let note = text(kind).font(k.text(META)).color(if role.edited { accent() } else { muted() }).wrap();
+        let mut item = col().w_full().gap(2.0).px(12.0).py(7.0).radius(7.0).child(text(role.name.clone()).font(k.text(BODY)).color(theme::text()).wrap_anywhere()).child(note);
         if chosen {
             item = item.fill(theme::wash());
         }
@@ -321,15 +329,15 @@ fn decision_row(s: &Prefs, d: &Draft, role: &RoleView, a: &ActionView, locked: b
     let name = a.name.clone();
     let control = picker(s, format!("agent-decision-{}", a.name), &a.detail, choices, Some(&current), 150.0, locked, layer, move |s, i| edit(s, |d| d.set_decision(&name, i.checked_sub(1).map(|i| Decision::ALL[i]))), k);
     let dot = el().w(6.0).h(6.0).radius(3.0).fill(if chosen.is_some() { accent() } else { theme::line() });
-    let words = col().gap(1.0).grow(1.0).min_w(0.0).child(text(a.detail.clone()).font(BODY).color(theme::text()).wrap()).child(text(a.name.clone()).font(META).color(faint()));
+    let words = col().gap(1.0).grow(1.0).min_w(0.0).child(text(a.detail.clone()).font(k.text(BODY)).color(theme::text()).wrap()).child(text(a.name.clone()).font(k.text(META)).color(faint()));
     row().w_full().gap(10.0).items_center().px(14.0).py(8.0).child(dot).child(words).child(control)
 }
 
 fn limit_row(label: &str, key: &str, value: i64, fallback: i64, range: std::ops::RangeInclusive<i64>, locked: bool, set: fn(&mut Draft, i64), k: &Kit) -> El {
-    let shown = text(agents::limit_label(value, fallback)).font(BODY).color(muted());
+    let shown = text(agents::limit_label(value, fallback)).font(k.text(BODY)).color(muted());
     let less = small("−", &format!("{key}-less"), locked || value <= *range.start(), move |s| edit(s, |d| set(d, value - 1)), k);
     let more = small("+", &format!("{key}-more"), locked || value >= *range.end(), move |s| edit(s, |d| set(d, value + 1)), k);
-    line(label, None, row().gap(8.0).items_center().child(shown).child(less).child(more))
+    line(label, None, row().gap(8.0).items_center().child(shown).child(less).child(more), k)
 }
 
 fn detail(s: &Prefs, r: &Roles, role: &RoleView, d: &Draft, layer: &mut Vec<El>, k: &Kit) -> El {
@@ -350,41 +358,40 @@ fn detail(s: &Prefs, r: &Roles, role: &RoleView, d: &Draft, layer: &mut Vec<El>,
     let reaches: Vec<String> = agents::REACHES.iter().map(|(_, t)| t.to_string()).collect();
     let reach = picker(s, "agent-role-reach".into(), "Reach", reaches, Some(agents::reach_title(&d.definition.reach)), 200.0, locked, layer, |s, i| edit(s, |d| d.definition.reach = agents::REACHES[i].0.into()), k);
     let mut out = col().w_full().gap(18.0);
-    out = out.child(section(&role.name, vec![row().w_full().px(14.0).py(10.0).child(description.grow(1.0)), line("Reach", None, reach)], None));
+    out = out.child(section(&role.name, vec![row().w_full().px(14.0).py(10.0).child(description.grow(1.0)), line("Reach", None, reach, k)], None, k));
     let actions = r.actions.iter().map(|a| decision_row(s, d, role, a, locked, layer, k)).collect();
-    out = out.child(section("Actions", actions, None));
+    out = out.child(section("Actions", actions, None, k));
     out = out.child(section(
         "Limits",
         vec![
             limit_row("Spawn depth", "agent-role-depth", d.depth(), agents::DEFAULT_DEPTH, agents::DEPTH_RANGE, locked, Draft::set_depth, k),
             limit_row("Running sessions", "agent-role-running", d.running(), agents::DEFAULT_RUNNING, agents::RUNNING_RANGE, locked, Draft::set_running, k),
         ],
-        None,
-    ));
+        None, k));
     let seen = role.tools.clone().unwrap_or_else(|| r.tools.clone());
     let on = d.default_tools();
-    let mut tools = vec![line("Default tools", None, parts::switch("agent-role-default-tools", "Default tools", on, locked, move |s| edit(s, |d| d.set_default_tools(!on, &seen)), k))];
+    let mut tools = vec![line("Default tools", None, parts::switch("agent-role-default-tools", "Default tools", on, locked, move |s| edit(s, |d| d.set_default_tools(!on, &seen)), k), k)];
     if on {
-        tools.push(parts::words(agents::DEFAULT_TOOLS_HINT));
+        tools.push(parts::words(agents::DEFAULT_TOOLS_HINT, k));
     } else {
         for tool in &r.tools {
             let sees = d.sees(tool);
             let (name, every) = (tool.clone(), r.tools.clone());
             let switch = Switch::new(sees).label(tool.clone()).hide_label().disabled(locked).on_toggle(move |s: &mut Prefs| edit(s, |d| d.set_tool(&name, !sees, &every))).build(k).key(format!("settings-agent-tool-{tool}"));
-            tools.push(row().w_full().gap(16.0).items_center().px(14.0).py(6.0).child(text(tool.clone()).font(META).color(theme::text()).grow(1.0)).child(switch));
+            tools.push(row().w_full().gap(16.0).items_center().px(14.0).py(6.0).child(text(tool.clone()).font(k.text(META)).color(theme::text()).grow(1.0)).child(switch));
         }
     }
-    out = out.child(section("Agenthail tools", tools, None));
+    out = out.child(section("Agenthail tools", tools, None, k));
     out.child(footer(s, role, d, locked, k))
 }
 
 fn footer(s: &Prefs, role: &RoleView, d: &Draft, locked: bool, k: &Kit) -> El {
     let mut out = col().w_full().gap(8.0);
     if d.conflicts(role) {
-        out = out.child(text(format!("{} changed elsewhere while you edited it. Save replaces that change; Revert shows it.", role.name)).font(META).color(muted()).wrap().key("agent-role-conflict"));
+        out = out.child(text(format!("{} changed elsewhere while you edited it. Save replaces that change; Revert shows it.", role.name)).font(k.text(META)).color(muted()).wrap().key("agent-role-conflict"));
     }
     if let Some(f) = &s.agents.save_error {
-        out = out.child(parts::failure(s, f).key("agent-role-error"));
+        out = out.child(parts::failure(s, f, k).key("agent-role-error"));
     }
     let changed = d.changed();
     let remove = if role.built_in {
@@ -480,10 +487,10 @@ fn new_dialog(s: &Prefs, r: &Roles, from: &RoleView, layer: &mut Vec<El>, k: &Ki
             .key("agent-role-new-name"),
     );
     if let Some(hint) = agents::name_hint(&edit.text, &taken) {
-        body = body.child(text(hint).font(META).color(muted()).wrap());
+        body = body.child(text(hint).font(k.text(META)).color(muted()).wrap());
     }
     if let Some(f) = &s.agents.save_error {
-        body = body.child(parts::failure(s, f));
+        body = body.child(parts::failure(s, f, k));
     }
     let close = |s: &mut Prefs| {
         s.agents.creating = None;
@@ -517,13 +524,13 @@ fn orphans(s: &Prefs, k: &Kit) -> Option<El> {
                 write(s, After::Created(name.clone()), move |c| c.create_agent_role(&name, &from));
             }, k);
             let discard = small("Discard", &format!("agent-orphan-discard-{}", d.name), false, move |s| s.agents.orphans.retain(|x| x.name != drop), k);
-            let words = text(format!("{} was removed elsewhere while it had changes you hadn't saved.", d.name)).font(META).color(theme::text()).wrap();
+            let words = text(format!("{} was removed elsewhere while it had changes you hadn't saved.", d.name)).font(k.text(META)).color(theme::text()).wrap();
             row().w_full().gap(8.0).items_center().px(14.0).py(10.0).child(col().grow(1.0).min_w(0.0).child(words)).child(discard).child(recreate)
         })
         .collect();
-    let mut out = col().w_full().gap(8.0).child(section("Unsaved changes", rows, None));
+    let mut out = col().w_full().gap(8.0).child(section("Unsaved changes", rows, None, k));
     if let Some(f) = s.agents.save_error.as_ref().filter(|_| s.agents.draft.is_none()) {
-        out = out.child(parts::failure(s, f));
+        out = out.child(parts::failure(s, f, k));
     }
     Some(out)
 }
@@ -536,9 +543,9 @@ fn roles_page(s: &Prefs, r: &Roles, layer: &mut Vec<El>, k: &Kit) -> El {
             new_dialog(s, r, role, layer, k);
             detail(s, r, role, d, layer, k)
         }
-        _ => col().w_full().py(20.0).items_center().child(text("Choose a role.").font(BODY).color(muted())),
+        _ => col().w_full().py(20.0).items_center().child(text("Choose a role.").font(k.text(BODY)).color(muted())),
     };
-    let split = row().w_full().gap(16.0).items_start().child(role_list(s, r)).child(col().grow(1.0).min_w(0.0).child(right));
+    let split = row().w_full().gap(16.0).items_start().child(role_list(s, r, k)).child(col().grow(1.0).min_w(0.0).child(right));
     col().w_full().gap(18.0).children(orphans(s, k)).child(split)
 }
 
@@ -547,13 +554,13 @@ fn session_name(s: &Prefs, id: &str) -> Option<String> {
 }
 
 fn assignment_row(s: &Prefs, a: &Assignment, locked: bool, k: &Kit) -> El {
-    let mut words = col().gap(2.0).grow(1.0).min_w(0.0).child(text(agents::assignment_line(a, |id| session_name(s, id))).font(BODY).color(theme::text())).child(text(agents::assignment_kind(a)).font(META).color(muted()));
+    let mut words = col().gap(2.0).grow(1.0).min_w(0.0).child(text(agents::assignment_line(a, |id| session_name(s, id))).font(k.text(BODY)).color(theme::text())).child(text(agents::assignment_kind(a)).font(k.text(META)).color(muted()));
     if let Some(stale) = a.stale.as_deref().filter(|x| !x.is_empty()) {
-        words = words.child(text(format!("Applies to no session: {stale}")).font(META).color(failed()).wrap());
+        words = words.child(text(format!("Applies to no session: {stale}")).font(k.text(META)).color(failed()).wrap());
     }
     let gone = a.clone();
     let unassign = small("Unassign", &format!("agent-unassign-{}", a.target), locked, move |s| send(s, Request::Unassign(gone.clone()), After::Unassigned), k);
-    row().w_full().gap(12.0).items_center().px(14.0).py(10.0).child(words).child(text(a.role.clone()).font(BODY).color(muted())).child(unassign).key(format!("agent-assignment-{}", a.target))
+    row().w_full().gap(12.0).items_center().px(14.0).py(10.0).child(words).child(text(a.role.clone()).font(k.text(BODY)).color(muted())).child(unassign).key(format!("agent-assignment-{}", a.target))
 }
 
 fn target(s: &Prefs) -> String {
@@ -573,7 +580,7 @@ fn assignments_page(s: &Prefs, r: &Roles, layer: &mut Vec<El>, k: &Kit) -> El {
     let locked = !editable(s);
     let mut assigned: Vec<El> = r.assignments.iter().map(|a| assignment_row(s, a, locked, k)).collect();
     if assigned.is_empty() {
-        assigned.push(parts::words("No session, identity or alias has an assigned role. Each acts under its usual role."));
+        assigned.push(parts::words("No session, identity or alias has an assigned role. Each acts under its usual role.", k));
     }
     let kinds: Vec<&str> = Kind::ALL.iter().map(|x| x.title()).collect();
     let picker_kind = SegmentedControl::new(&kinds, Some(s.agents.kind)).label("Kind").fit().on_pick(|s: &mut Prefs, i, _| {
@@ -582,7 +589,7 @@ fn assignments_page(s: &Prefs, r: &Roles, layer: &mut Vec<El>, k: &Kit) -> El {
             s.agents.typed = TextEdit::new("");
         }
     });
-    let mut rows = vec![line("Kind", None, picker_kind.build(k).key("settings-agent-assign-kind"))];
+    let mut rows = vec![line("Kind", None, picker_kind.build(k).key("settings-agent-assign-kind"), k)];
     if kind(s) == Kind::Session {
         let labels: Vec<String> = s.agents.sessions.iter().map(|(_, l)| l.clone()).collect();
         let current = session_name(s, &s.agents.session);
@@ -590,28 +597,28 @@ fn assignments_page(s: &Prefs, r: &Roles, layer: &mut Vec<El>, k: &Kit) -> El {
             if let Some((id, _)) = s.agents.sessions.get(i) {
                 s.agents.session = id.clone();
             }
-        }, k)));
+        }, k), k));
     }
     let (label, hint) = kind(s).field();
     let typed = TextInput::new(&s.agents.typed).label(label).placeholder(hint).width(Some(220.0)).disabled(locked).on_edit(|s: &mut Prefs| &mut s.agents.typed).build(k).key("settings-agent-assign-target");
-    rows.push(line(label, None, typed));
+    rows.push(line(label, None, typed, k));
     let names: Vec<String> = r.roles.iter().map(|x| x.name.clone()).collect();
     let current = (!s.agents.role.is_empty()).then_some(s.agents.role.as_str());
-    rows.push(line("Role", None, picker(s, "agent-assign-role".into(), "Role", names.clone(), current, 220.0, locked, layer, move |s, i| s.agents.role = names[i].clone(), k)));
+    rows.push(line("Role", None, picker(s, "agent-assign-role".into(), "Role", names.clone(), current, 220.0, locked, layer, move |s, i| s.agents.role = names[i].clone(), k), k));
     let status = match &s.agents.save_error {
-        Some(f) => parts::failure(s, f),
+        Some(f) => parts::failure(s, f, k),
         None => text(""),
     };
     let ready = !target(s).is_empty() && !s.agents.role.is_empty();
     rows.push(row().w_full().gap(12.0).items_center().px(14.0).py(10.0).child(col().grow(1.0).min_w(0.0).child(status)).child(small("Assign", "agent-assign", locked || !ready, assign, k)));
-    col().w_full().gap(22.0).child(section("Assigned", assigned, None)).child(section("Assign a role", rows, Some(kind(s).footer().into())))
+    col().w_full().gap(22.0).child(section("Assigned", assigned, None, k)).child(section("Assign a role", rows, Some(kind(s).footer().into()), k))
 }
 
 fn this_mac(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
-    let mut out = col().w_full().gap(22.0).child(section("", vec![parts::words(feed::prefs::AGENT_SWITCH_NOTE)], None));
+    let mut out = col().w_full().gap(22.0).child(section("", vec![parts::words(feed::prefs::AGENT_SWITCH_NOTE, k)], None, k));
     let list = match &s.settings {
-        None => return out.child(parts::reading("agents")),
-        Some(Err(f)) => return out.child(parts::failure(s, f)),
+        None => return out.child(parts::reading("agents", k)),
+        Some(Err(f)) => return out.child(parts::failure(s, f, k)),
         Some(Ok(st)) => &st.agents,
     };
     let labels: Vec<String> = feed::prefs::AGENT_MODES.iter().map(|(_, t)| t.to_string()).collect();
@@ -624,13 +631,13 @@ fn this_mac(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
                 let (id, mode) = (id.clone(), feed::prefs::AGENT_MODES[i].0);
                 super::write(s, format!("agent-mode-{id}"), Section::Agents, &[Read::Settings], move |c| c.set_agent_mode(&id, mode));
             }, k);
-            let state = text(a.state_line()).font(META).color(if a.missing() { failed() } else { muted() }).wrap();
-            row().w_full().gap(16.0).items_center().px(14.0).py(10.0).child(col().gap(2.0).grow(1.0).min_w(0.0).child(text(a.label.clone()).font(BODY).color(theme::text())).child(state)).child(control)
+            let state = text(a.state_line()).font(k.text(META)).color(if a.missing() { failed() } else { muted() }).wrap();
+            row().w_full().gap(16.0).items_center().px(14.0).py(10.0).child(col().gap(2.0).grow(1.0).min_w(0.0).child(text(a.label.clone()).font(k.text(BODY)).color(theme::text())).child(state)).child(control)
         })
         .collect();
-    out = out.child(section("Agents", rows, None));
+    out = out.child(section("Agents", rows, None, k));
     if let Some(f) = s.notes.get(&Section::Agents) {
-        out = out.child(parts::failure(s, f));
+        out = out.child(parts::failure(s, f, k));
     }
     out
 }
@@ -649,10 +656,10 @@ pub fn page(s: &Prefs, layer: &mut Vec<El>, k: &Kit) -> El {
     if s.agents.page == 0 {
         return out.child(this_mac(s, layer, k));
     }
-    out = out.children(notices(s));
+    out = out.children(notices(s, k));
     let Some(r) = roles(s) else {
         return match &s.agents.read {
-            None => out.child(parts::reading("agent roles")),
+            None => out.child(parts::reading("agent roles", k)),
             Some(_) => out,
         };
     };

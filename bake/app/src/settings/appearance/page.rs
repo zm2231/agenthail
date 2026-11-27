@@ -14,20 +14,20 @@ pub fn page(s: &Prefs, k: &Kit) -> El {
     let mut out = parts::page().key("appearance-page");
     let Some(view) = crate::look::view() else {
         return out.child(match crate::look::problem() {
-            Some(p) => parts::problem(p),
-            None if s.client.is_none() => parts::problem(super::super::unread(s).message),
-            None => parts::reading("appearance settings"),
+            Some(p) => parts::problem(p, k),
+            None if s.client.is_none() => parts::problem(super::super::unread(s).message, k),
+            None => parts::reading("appearance settings", k),
         });
     };
     if !view.problems.is_empty() {
-        let rows = view.problems.iter().map(|p| parts::problem(format!("ui.conf line {}: {}", p.line, p.message))).collect();
-        out = out.child(parts::section("Problems in ui.conf", rows, Some("These lines are skipped; the rest of the file still applies.".into())));
+        let rows = view.problems.iter().map(|p| parts::problem(format!("ui.conf line {}: {}", p.line, p.message), k)).collect();
+        out = out.child(parts::section("Problems in ui.conf", rows, Some("These lines are skipped; the rest of the file still applies.".into()), k));
     }
     if let Some(p) = crate::look::problem() {
-        out = out.child(text(p).font(META).color(theme::attention()).wrap().px(4.0));
+        out = out.child(text(p).font(k.text(META)).color(theme::attention()).wrap().px(4.0));
     }
     if let Some(f) = s.appearance.error.clone() {
-        out = out.child(parts::failure(s, &f));
+        out = out.child(parts::failure(s, &f, k));
     }
     let device = crate::look::device();
     let scope_control = SegmentedControl::new(&["All devices", "This computer only"], Some(usize::from(s.appearance.here)))
@@ -38,13 +38,13 @@ pub fn page(s: &Prefs, k: &Kit) -> El {
         .key("appearance-scope");
     let scope_detail = (!device.is_empty()).then(|| format!("This computer is {device}."));
     let mut general = vec![
-        parts::line("Apply changes to", scope_detail, scope_control),
+        parts::line("Apply changes to", scope_detail, scope_control, k),
         segmented(s, &view, "theme", "Appearance", &[("System", "system"), ("Light", "light"), ("Dark", "dark")], "system", false, k),
         accents(s, &view, k),
     ];
     general.extend(accent_editor(s, k));
     general.push(slider(s, &view, "text.scale", "Text size", (0.8, 1.6), 1.0, "×", false, k));
-    out = out.child(parts::section("", general, None));
+    out = out.child(parts::section("", general, None, k));
     let chosen_background = chosen(&view, "background", "");
     let is_image = chosen_background.starts_with("image:") || chosen_background.starts_with("art:");
     let mut background = vec![grid(s, &view, k)];
@@ -56,7 +56,7 @@ pub fn page(s: &Prefs, k: &Kit) -> El {
         background.push(segmented(s, &view, "background.fit", "Fit", &[("Cover", "cover"), ("Contain", "contain"), ("Center", "center"), ("Tile", "tile")], "cover", false, k));
         background.push(segmented(s, &view, "background.position", "Position", &[("Center", "center"), ("Top", "top"), ("Bottom", "bottom"), ("Left", "left"), ("Right", "right")], "center", false, k));
     }
-    out = out.child(parts::section("Background", background, None));
+    out = out.child(parts::section("Background", background, None, k));
     let glass_off = chosen(&view, "glass", "on") != "on";
     out = out.child(parts::section(
         "Glass",
@@ -68,8 +68,7 @@ pub fn page(s: &Prefs, k: &Kit) -> El {
             segmented(s, &view, "glass.tint", "Tint colour", &[("Window", "ground"), ("Accent", "accent")], "ground", glass_off, k),
             switch(s, &view, "glass.readability", "Keep text readable", "auto", glass_off, k),
         ],
-        Some("Panes are translucent only in dark appearance; light appearance uses solid panes.".into()),
-    ));
+        Some("Panes are translucent only in dark appearance; light appearance uses solid panes.".into()), k));
     let no_texture = chosen(&view, "texture", "none") == "none";
     out = out.child(parts::section(
         "Texture",
@@ -77,9 +76,8 @@ pub fn page(s: &Prefs, k: &Kit) -> El {
             segmented(s, &view, "texture", "Texture", &[("None", "none"), ("Grain", "grain"), ("Scanlines", "scanlines")], "none", false, k),
             slider(s, &view, "texture.strength", "Strength", (0.0, 0.6), 0.2, "", no_texture, k),
         ],
-        None,
-    ));
+        None, k));
     out = out.child(history(s, k));
-    let notes = fl::NOT_DRAWN.iter().map(|n| parts::words(*n)).collect();
-    out.child(parts::section("Not drawn in this app yet", notes, Some("These still apply on the other Agenthail apps.".into())))
+    let notes = fl::NOT_DRAWN.iter().map(|n| parts::words(*n, k)).collect();
+    out.child(parts::section("Not drawn in this app yet", notes, Some("These still apply on the other Agenthail apps.".into()), k))
 }

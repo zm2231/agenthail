@@ -202,8 +202,8 @@ fn session_row(s: &App, i: usize, x: &Session, k: &Kit) -> El {
         .radius(8.0)
         .hover(k.c.surface_raised_hover)
         .on_press(move |s: &mut App| open(s, &it))
-        .child(row().w_full().gap(6.0).items_center().child(text(ui::short_title(&s.ov.d.title(x), 34)).font(META_MED).color(strong(k)).truncate().shrink()).child(ui::spacer()).child(text(s.ov.d.ago(&x.last_active)).font(META).color(weak(k))))
-        .children((!place.is_empty()).then(|| text(place).font(META).color(weak(k)).truncate()))
+        .child(row().w_full().gap(6.0).items_center().child(text(ui::short_title(&s.ov.d.title(x), 34)).font(k.text(META_MED)).color(strong(k)).truncate().shrink()).child(ui::spacer()).child(text(s.ov.d.ago(&x.last_active)).font(k.text(META)).color(weak(k))))
+        .children((!place.is_empty()).then(|| text(place).font(k.text(META)).color(weak(k)).truncate()))
 }
 
 pub fn section(s: &App, key: &str, k: &Kit) -> El {
@@ -223,18 +223,18 @@ pub fn section(s: &App, key: &str, k: &Kit) -> El {
     let rows = if open { earlier(&s.ov.d.sessions, fetched, key, lead.as_deref(), s.now) } else { Vec::new() };
     let mut c = col().w_full().gap(6.0).child(ui::section_head("Earlier", open.then_some(rows.len()), Some(toggle), k));
     if !open {
-        return c.child(text("Sessions quiet for more than a day.".to_string()).font(META).color(weak(k)));
+        return c.child(text("Sessions quiet for more than a day.".to_string()).font(k.text(META)).color(weak(k)));
     }
     let loading = shown.is_some_and(|x| x.asked.is_some());
     if rows.is_empty() && !loading && shown.is_some_and(|x| x.read && x.next.is_none()) {
-        c = c.child(text("No earlier sessions.".to_string()).font(META).color(weak(k)));
+        c = c.child(text("No earlier sessions.".to_string()).font(k.text(META)).color(weak(k)));
     }
     c = c.children(rows.iter().enumerate().map(|(i, x)| session_row(s, i, x, k)));
     if let Some(error) = shown.and_then(|x| x.error.clone()) {
-        c = c.child(text(error).font(META).color(ui::needs_color(k)).wrap());
+        c = c.child(text(error).font(k.text(META)).color(ui::needs_color(k)).wrap());
     }
     if loading {
-        c = c.child(text("Loading…".to_string()).font(META).color(weak(k)));
+        c = c.child(text("Loading…".to_string()).font(k.text(META)).color(weak(k)));
     } else if shown.is_some_and(|x| x.next.is_some() || x.error.is_some()) {
         let id = key.to_string();
         let label = if shown.is_some_and(|x| x.error.is_some()) { "Try again" } else { "Show more" };
@@ -244,7 +244,7 @@ pub fn section(s: &App, key: &str, k: &Kit) -> El {
 }
 
 pub fn activity_note(s: &App, k: &Kit) -> Option<El> {
-    s.earlier.activity_missing.then(|| text(feed::activity::ACTIVITY_UNREAD.to_string()).font(META).color(ui::needs_color(k)).wrap().px(10.0).py(6.0).key("activity-unread"))
+    s.earlier.activity_missing.then(|| text(feed::activity::ACTIVITY_UNREAD.to_string()).font(k.text(META)).color(ui::needs_color(k)).wrap().px(10.0).py(6.0).key("activity-unread"))
 }
 
 pub fn folders(s: &App, key: &str, k: &Kit) -> Option<El> {
@@ -263,8 +263,8 @@ pub fn folders(s: &App, key: &str, k: &Kit) -> Option<El> {
                 .gap(10.0)
                 .items_center()
                 .px(8.0)
-                .child(text(host).font(META).color(weak(k)).truncate().w(96.0))
-                .child(text(checkout.root_path.clone()).font(META.mono()).color(base(k)).truncate().shrink().min_w(0.0).selectable(true)),
+                .child(text(host).font(k.text(META)).color(weak(k)).truncate().w(96.0))
+                .child(text(checkout.root_path.clone()).font(k.text(META.mono())).color(base(k)).truncate().shrink().min_w(0.0).selectable(true)),
         );
     }
     Some(c)

@@ -45,7 +45,7 @@ pub fn rekey(s: &mut App, old: &str, new: &str) {
     }
 }
 
-pub fn chip(s: &App, x: &Session) -> Option<El> {
+pub fn chip(s: &App, x: &Session, k: &Kit) -> Option<El> {
     if !takes(x) {
         return None;
     }
@@ -66,8 +66,8 @@ pub fn chip(s: &App, x: &Session) -> Option<El> {
             .label(format!("Turn options, {label}"))
             .help("Service tier and output schema for messages you send to this session")
             .on_press(move |s: &mut App| open(s, &id))
-            .child(text(label).font(META_BOLD).color(color))
-            .child(icon(&icons::SELECTOR, 11.0).color(faint())),
+            .child(text(label).font(k.text(META_BOLD)).color(color))
+            .child(icon(&icons::SELECTOR, k.text_size(11.0)).color(faint())),
     )
 }
 
@@ -118,11 +118,11 @@ fn dialog(s: &App, id: &str, layer: &mut Vec<El>, k: &Kit) {
             .role("button")
             .label(label)
             .on_press(move |s: &mut App| pick(s, value))
-            .child(text(label).font(META_BOLD).color(if chosen { theme::text() } else { faint() }));
+            .child(text(label).font(k.text(META_BOLD)).color(if chosen { theme::text() } else { faint() }));
         t = if chosen { t.fill(crate::theme::ink(0.10)) } else { t.hover(crate::theme::ink(0.06)) };
         tiers = tiers.child(t);
     }
-    let input = text_input(&d.schema, META.mono())
+    let input = text_input(&d.schema, k.text(META.mono()))
         .key("turn-schema-input")
         .label("Output JSON schema")
         .w_full()
@@ -136,14 +136,14 @@ fn dialog(s: &App, id: &str, layer: &mut Vec<El>, k: &Kit) {
         .gap(10.0)
         .px(16.0)
         .pb(16.0)
-        .child(text("Service tier").font(META_BOLD).color(muted()))
+        .child(text("Service tier").font(k.text(META_BOLD)).color(muted()))
         .child(tiers)
-        .child(text("Output JSON schema").font(META_BOLD).color(muted()))
+        .child(text("Output JSON schema").font(k.text(META_BOLD)).color(muted()))
         .child(field);
     if let Some(problem) = TurnOptions::read(&d.tier, &d.schema.text).err() {
-        body = body.child(text(problem).font(META).color(failed()).wrap().w_full());
+        body = body.child(text(problem).font(k.text(META)).color(failed()).wrap().w_full());
     }
-    body = body.child(text("Applies to each message you send here until you clear it. Steer can't carry these, so a message with them waits for the turn to end.").font(META).color(faint()).wrap().w_full());
+    body = body.child(text("Applies to each message you send here until you clear it. Steer can't carry these, so a message with them waits for the turn to end.").font(k.text(META)).color(faint()).wrap().w_full());
     let buttons = row()
         .w_full()
         .gap(8.0)
