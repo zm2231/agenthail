@@ -105,6 +105,9 @@ pub fn write(s: &mut Prefs, change: Change) {
     if s.appearance.writing {
         return;
     }
+    if change.touches("text.scale") {
+        crate::ui::text_size::supersede();
+    }
     let device = crate::look::device();
     s.appearance.error = None;
     s.appearance.confirm_reset = false;

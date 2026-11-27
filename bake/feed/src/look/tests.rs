@@ -305,4 +305,9 @@ fn text_size_steps_by_a_tenth_within_its_range_and_writes_for_this_computer() {
     assert_eq!(text_scale_step(1.4, None), 1.0);
     assert_eq!(Change::text_scale(1.1, "Studio").0, json!({"action": "set", "set": ["text.scale@device:Studio = 1.1"], "message": "Text size 110%"}));
     assert_eq!(Change::text_scale(1.0, "").0["set"], json!(["text.scale@mac = 1"]));
+    assert!(Change::text_scale(1.2, "Studio").touches("text.scale"));
+    assert!(Change::set(&Scope::Everywhere, "text.scale", "1.3", "Text size").touches("text.scale"));
+    assert!(Change::reset(&Scope::Everywhere).touches("text.scale"));
+    assert!(!Change::set(&Scope::Everywhere, "glass.blur", "3", "Blur").touches("text.scale"));
+    assert!(!Change::undo(None).touches("text.scale"));
 }

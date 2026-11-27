@@ -97,6 +97,10 @@ impl Change {
         Change(json!({"action": "set", "set": [format!("text.scale@{place} = {}", percent as f64 / 100.0)], "message": format!("Text size {percent}%")}))
     }
 
+    pub fn touches(&self, key: &str) -> bool {
+        ["set", "unset"].iter().flat_map(|field| self.0[*field].as_array().into_iter().flatten()).filter_map(Value::as_str).any(|line| line.trim_start().starts_with(key))
+    }
+
     pub fn clear_override(key: &str, line: &str, owner: &str) -> Change {
         Change(json!({"action": "unset", "unset": [format!("{key}@{line}")], "message": format!("Reset {key} for {owner}")}))
     }

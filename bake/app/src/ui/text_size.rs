@@ -37,6 +37,14 @@ pub fn step(s: &mut App, steps: Option<i32>) {
     });
 }
 
+pub fn supersede() {
+    STATE.with_borrow_mut(|st| {
+        st.due = None;
+        st.latest = None;
+    });
+    crate::look::hold_text_scale(None);
+}
+
 pub fn pump(s: &mut App) -> bool {
     let (due, wrote, latest) = STATE.with_borrow_mut(|st| {
         if st.tx.is_none() {
