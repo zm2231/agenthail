@@ -50,6 +50,7 @@ pub struct Inspect {
     overlay: inspect::Overlay,
     expanded: std::collections::HashSet<String>,
     missed: HashMap<String, Missed>,
+    adopted: std::collections::HashSet<u64>,
     pub editing: Option<Editing>,
     pub logs: Option<(String, String)>,
     seq: u64,
@@ -60,7 +61,7 @@ pub struct Inspect {
 impl Inspect {
     pub fn new() -> Inspect {
         let (tx, rx) = channel();
-        Inspect { meta: HashMap::new(), reads: inspect::Reads::default(), process: HashMap::new(), goal_busy: HashMap::new(), goal_note: HashMap::new(), overlay: inspect::Overlay::default(), expanded: Default::default(), missed: Default::default(), editing: None, logs: None, seq: 0, tx, rx }
+        Inspect { meta: HashMap::new(), reads: inspect::Reads::default(), process: HashMap::new(), goal_busy: HashMap::new(), goal_note: HashMap::new(), overlay: inspect::Overlay::default(), expanded: Default::default(), missed: Default::default(), adopted: Default::default(), editing: None, logs: None, seq: 0, tx, rx }
     }
 }
 
@@ -87,15 +88,22 @@ pub(crate) fn rekey(s: &mut App, old: &str, new: &str) {
     s.inspect.reads.rekey(old, new);
     crate::move_key(&mut s.inspect.meta, old, new);
     if let Some(gone) = s.inspect.process.remove(old) {
-        let into = s.inspect.process.entry(new.to_string()).or_default();
-        into.running.extend(gone.running);
-        into.status = into.status.take().or(gone.status);
-        into.outcome = into.outcome.take().or(gone.outcome);
-        into.logs = into.logs.take().or(gone.logs);
-        into.error = into.error.take().or(gone.error);
+        match s.inspect.process.get_mut(new) {
+            Some(into) => {
+                s.inspect.adopted.extend(gone.running.keys());
+                into.running.extend(gone.running);
+            }
+            None => drop(s.inspect.process.insert(new.to_string(), gone)),
+        }
     }
     if let Some(gone) = s.inspect.goal_busy.remove(old) {
-        s.inspect.goal_busy.entry(new.to_string()).or_default().extend(gone);
+        match s.inspect.goal_busy.get_mut(new) {
+            Some(into) => {
+                s.inspect.adopted.extend(&gone);
+                into.extend(gone);
+            }
+            None => drop(s.inspect.goal_busy.insert(new.to_string(), gone)),
+        }
     }
     crate::move_key(&mut s.inspect.goal_note, old, new);
     crate::move_member(&mut s.inspect.expanded, old, new);
@@ -244,6 +252,16 @@ pub fn busy(s: &App, id: &str) -> (bool, bool) {
 }
 
 #[cfg(test)]
+pub fn status_of(s: &App, id: &str) -> Option<String> {
+    s.inspect.process.get(id).and_then(|p| p.status.as_ref()).and_then(|r| r.state.clone())
+}
+
+#[cfg(test)]
+pub fn note_of(s: &App, id: &str) -> Option<String> {
+    s.inspect.goal_note.get(id).map(|(_, n)| n.clone())
+}
+
+#[cfg(test)]
 pub fn holds_any(s: &App, id: &str) -> bool {
     s.inspect.overlay.holds(id, "goal") || s.inspect.overlay.holds(id, "context")
 }
@@ -372,6 +390,9 @@ fn settled(s: &mut App, done: Done) {
                     s.inspect.goal_busy.remove(&id);
                 }
             }
+            if s.inspect.adopted.remove(&token) {
+                return;
+            }
             let note = match result {
                 Ok(true) => None,
                 Ok(false) => Some((false, format!("{} was sent, not confirmed yet.", act.doing()))),
@@ -388,6 +409,9 @@ fn settled(s: &mut App, done: Done) {
             let elsewhere = (to.is_none() || super::window::is_open(s, super::window::Kind::Logs)).then(|| session(s, &id).map(|x| x.title()).unwrap_or_default());
             let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.running.contains_key(&ticket)) else { return };
             p.running.remove(&ticket);
+            if s.inspect.adopted.remove(&ticket) {
+                return;
+            }
             if tell || elsewhere.is_some() {
                 let line = match &result {
                     Ok(r) if act == LifecycleAct::Status => Some(r.line()).filter(|l| !l.is_empty()),
@@ -434,6 +458,9 @@ fn settled(s: &mut App, done: Done) {
             let id = current(s, &id);
             let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.running.contains_key(&ticket)) else { return };
             p.running.remove(&ticket);
+            if s.inspect.adopted.remove(&ticket) {
+                return;
+            }
             match result {
                 Ok(result) => p.status = Some(result),
                 Err(error) => p.error = Some(format!("Couldn't read its status: {}", failure(&error))),

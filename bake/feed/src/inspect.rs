@@ -359,6 +359,8 @@ pub fn can_save(act: GoalAct, text: &str, budget: Option<i64>) -> bool {
     }
 }
 
+const KINDS: [&str; 2] = ["context", "goal"];
+
 #[derive(Default)]
 pub struct Overlay {
     sessions: std::collections::HashMap<String, std::collections::HashMap<&'static str, u64>>,
@@ -379,13 +381,11 @@ impl Overlay {
             self.sessions.insert(new.to_string(), kinds);
             return Vec::new();
         };
-        for kept in into.values_mut() {
+        for kind in KINDS {
+            let kept = into.entry(kind).or_insert(at);
             *kept = (*kept).max(at);
         }
-        let mut reread: Vec<&'static str> = into.keys().chain(kinds.keys()).copied().collect();
-        reread.sort();
-        reread.dedup();
-        reread
+        KINDS.to_vec()
     }
 
     pub fn stream(&mut self, id: &str, kind: &'static str, shown: bool, at: u64) -> bool {
@@ -699,9 +699,10 @@ mod tests {
         o.stream("a", "goal", true, 3);
         o.stream("b", "goal", true, 7);
         o.stream("b", "context", true, 2);
-        assert_eq!(o.rekey("b", "a", 9), ["context", "goal"], "both ids' streams are read again");
+        assert_eq!(o.rekey("b", "a", 9), ["context", "goal"], "both kinds are read again");
         assert!(o.streamed_since("a", "goal", 9) && !o.streamed_since("a", "goal", 10), "the held id's stream outranks every read asked before the rekey");
-        assert!(!o.holds("a", "context") && !o.holds("b", "goal"));
+        assert!(o.streamed_since("a", "context", 9) && !o.streamed_since("a", "context", 10), "so does its read-derived context");
+        assert!(!o.holds("b", "goal"));
         o.stream("c", "goal", true, 5);
         assert!(o.rekey("c", "d", 9).is_empty());
         assert!(o.streamed_since("d", "goal", 5), "a rekey onto a free id carries its streams");
