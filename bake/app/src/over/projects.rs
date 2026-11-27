@@ -380,7 +380,9 @@ fn settled(s: &mut App, job: Job, from_sheet: Option<u64>, result: Result<(Strin
             s.ov.projects.confirm = Some((projects::confirm_replace(&error), again, from_sheet));
         }
         Err(error) => {
-            let message = if error.maybe_delivered { format!("{} may have gone through anyway: {}. Check before trying again.", job.what(), error.message) } else { format!("{} didn't work: {}", job.what(), error.message) };
+            let message = if error.code == "partial" {
+                format!("{} was only partly done. {}.", job.what(), error.message)
+            } else if error.maybe_delivered { format!("{} may have gone through anyway: {}. Check before trying again.", job.what(), error.message) } else { format!("{} didn't work: {}", job.what(), error.message) };
             if let Job::Clean { session, .. } = &job {
                 s.ov.projects.kept.insert(session.clone(), message.clone());
             }

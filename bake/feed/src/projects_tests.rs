@@ -436,3 +436,21 @@ fn ordering_keeps_working_while_a_save_is_out() {
     let next = tiles.answered(TileReply::Saved(TileOrder { revision: 2, ..first })).unwrap();
     assert_eq!(next.order, ids(&["c", "b", "a"]));
 }
+
+#[test]
+fn an_answer_without_its_result_is_not_reported_as_done() {
+    let (client, _seen) = daemon(replies(&[(200, r#"{"ok":true}"#), (200, r#"{"ok":true,"coordinator":{"name":""}}"#), (200, r#"{"ok":true,"worktree":"x"}"#)]));
+    for e in [client.lead_set("s1", false).unwrap_err(), client.lead_start("claude", "/w", "", "", false).unwrap_err(), client.work_clean("s1", &[]).unwrap_err()] {
+        assert!(e.maybe_delivered && e.code == "unreadable_reply", "{e:?}");
+    }
+}
+
+#[test]
+fn a_change_that_failed_on_some_computers_says_where() {
+    let body = r#"{"ok":false,"projectId":"p1","checkouts":[{"host":"mac","ok":true},{"host":"forge","ok":false,"error":"host is no longer paired"}],"archived":true}"#;
+    let (client, _seen) = daemon(replies(&[(502, body), (502, r#"{"ok":false,"checkouts":[{"host":"forge","ok":false}]}"#)]));
+    let e = client.project_archive("p1", true).unwrap_err();
+    assert_eq!((e.code.as_str(), e.maybe_delivered), ("partial", false));
+    assert_eq!(e.message, "It changed on mac but failed on forge (host is no longer paired)");
+    assert_eq!(client.project_rename("p1", "New").unwrap_err().message, "It failed on forge (no reason given)");
+}

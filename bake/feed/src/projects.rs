@@ -591,7 +591,7 @@ impl Client {
     }
 
     pub fn project_rename(&self, project: &str, title: &str) -> Outcome<()> {
-        self.action("project-rename", json!({"projectId": project, "title": title})).and_then(confirmed).map(drop)
+        self.action("project-rename", json!({"projectId": project, "title": title})).map_err(partial).and_then(confirmed).map(drop)
     }
 
     pub fn project_remove(&self, project: &str) -> Outcome<()> {
@@ -599,7 +599,7 @@ impl Client {
     }
 
     pub fn project_archive(&self, project: &str, archived: bool) -> Outcome<()> {
-        self.action(if archived { "project-archive" } else { "project-unarchive" }, json!({"projectId": project})).and_then(confirmed).map(drop)
+        self.action(if archived { "project-archive" } else { "project-unarchive" }, json!({"projectId": project})).map_err(partial).and_then(confirmed).map(drop)
     }
 
     pub fn project_tools(&self, project: &str, on: bool) -> Outcome<()> {
@@ -651,12 +651,31 @@ impl Client {
             payload["removeIgnored"] = json!(remove_ignored);
         }
         let reply = self.action("work-clean", payload).and_then(confirmed)?;
-        Ok(serde_json::from_value(reply["worktree"].clone()).unwrap_or_default())
+        serde_json::from_value(reply["worktree"].clone()).map_err(|e| unreadable("the worktree", e, reply))
     }
 }
 
 fn lead(reply: Value) -> Outcome<Lead> {
-    Ok(serde_json::from_value(reply["coordinator"].clone()).unwrap_or_default())
+    match serde_json::from_value::<Lead>(reply["coordinator"].clone()) {
+        Ok(lead) if !lead.name.is_empty() => Ok(lead),
+        Ok(_) => Err(unreadable("the lead", "it had no name", reply)),
+        Err(e) => Err(unreadable("the lead", e, reply)),
+    }
+}
+
+fn unreadable(what: &str, why: impl std::fmt::Display, reply: Value) -> RespondError {
+    RespondError { message: format!("Agenthail's answer didn't say what happened to {what} ({why})"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply, status: 0 }
+}
+
+fn partial(mut e: RespondError) -> RespondError {
+    let Some(checkouts) = e.reply["checkouts"].as_array().filter(|c| !c.is_empty()) else { return e };
+    let host = |c: &Value| c["host"].as_str().unwrap_or("a computer").to_string();
+    let done: Vec<String> = checkouts.iter().filter(|c| c["ok"] == json!(true)).map(host).collect();
+    let failed: Vec<String> = checkouts.iter().filter(|c| c["ok"] != json!(true)).map(|c| format!("{} ({})", host(c), c["error"].as_str().unwrap_or("no reason given"))).collect();
+    e.message = if done.is_empty() { format!("It failed on {}", failed.join(", ")) } else { format!("It changed on {} but failed on {}", done.join(", "), failed.join(", ")) };
+    e.code = "partial".into();
+    e.maybe_delivered = false;
+    e
 }
 
 #[cfg(test)]
