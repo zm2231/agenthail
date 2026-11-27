@@ -28,8 +28,8 @@ extension AgenthailAPI {
         return "/api/v1/extensions/history/\(segment)/undo"
     }
 
-    func buildExtension(_ message: String, host: String? = nil) async throws -> ExtensionBuildStarted {
-        try await extensionsRequest(Self.onHost("/api/v1/extensions/build", host), method: "POST", body: ["message": message], idempotencyKey: UUID().uuidString)
+    func buildExtension(_ message: String, host: String? = nil, idempotencyKey: String) async throws -> ExtensionBuildStarted {
+        try await extensionsRequest(Self.onHost("/api/v1/extensions/build", host), method: "POST", body: ["message": message], idempotencyKey: idempotencyKey)
     }
 
     private func extensionsRequest<T: Decodable>(_ path: String, method: String, body: [String: String]?, idempotencyKey: String? = nil) async throws -> T {
@@ -47,3 +47,20 @@ extension AgenthailAPI {
 }
 
 private struct ExtensionsUndone: Decodable {}
+
+struct ExtensionBuildKey {
+    private var value: String?
+
+    mutating func current() -> String {
+        if let value { return value }
+        let fresh = UUID().uuidString
+        value = fresh
+        return fresh
+    }
+
+    mutating func reset() { value = nil }
+
+    mutating func failed(_ error: Error) {
+        if SendOutcome.of(error) != .unconfirmed { value = nil }
+    }
+}

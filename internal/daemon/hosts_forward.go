@@ -27,6 +27,14 @@ func writeHostReadError(w http.ResponseWriter, host *pairedHost, err error) {
 	writeAPIErrorWith(w, http.StatusServiceUnavailable, "host_unreachable", fmt.Sprintf("Host %s is unreachable: %s", host.record.Name, err), map[string]any{"host": host.record.ID})
 }
 
+func writeHostSendError(w http.ResponseWriter, host *pairedHost, method string, err error) {
+	if method == http.MethodGet || method == http.MethodHead {
+		writeHostReadError(w, host, err)
+		return
+	}
+	writeHostError(w, host, err)
+}
+
 const maxForwardedBodyBytes = uploads.MaxFileBytes + 1
 
 func (d *Daemon) forwardHostRequest(w http.ResponseWriter, r *http.Request, host *pairedHost, method string, query url.Values, body []byte) {
@@ -39,7 +47,7 @@ func (d *Daemon) forwardHostRequest(w http.ResponseWriter, r *http.Request, host
 	}
 	response, err := host.client.Do(r.Context(), method, apiPath(r.URL.Path), query, body, header)
 	if err != nil {
-		writeHostReadError(w, host, err)
+		writeHostSendError(w, host, method, err)
 		return
 	}
 	writeHostResponse(w, host, response)

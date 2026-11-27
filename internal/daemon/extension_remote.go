@@ -400,7 +400,7 @@ func (d *Daemon) forwardRemoteExtension(w http.ResponseWriter, r *http.Request, 
 				return
 			}
 			if r.Context().Err() == nil {
-				writeHostReadError(w, host, err)
+				writeHostSendError(w, host, r.Method, err)
 			}
 		},
 		ErrorLog: d.log,
@@ -450,7 +450,7 @@ func (t *remoteRoundTripper) RoundTrip(request *http.Request) (*http.Response, e
 	if request.Body != nil && request.Body != http.NoBody {
 		head, err := io.ReadAll(io.LimitReader(request.Body, remoteRetryBodyLimit+1))
 		if err != nil {
-			return nil, err
+			return nil, hosts.NotSentError{Err: err}
 		}
 		if len(head) > remoteRetryBodyLimit {
 			retry = false
@@ -464,7 +464,7 @@ func (t *remoteRoundTripper) RoundTrip(request *http.Request) (*http.Response, e
 	if err != nil {
 		return nil, err
 	}
-	response, err := t.base.RoundTrip(t.signed(request, value))
+	response, err := t.send(t.signed(request, value))
 	if err != nil || response.StatusCode != http.StatusUnauthorized || !retry {
 		return response, err
 	}
@@ -477,7 +477,13 @@ func (t *remoteRoundTripper) RoundTrip(request *http.Request) (*http.Response, e
 	if buffered != nil {
 		again.Body = io.NopCloser(bytes.NewReader(buffered))
 	}
-	return t.base.RoundTrip(t.signed(again, fresh))
+	return t.send(t.signed(again, fresh))
+}
+
+func (t *remoteRoundTripper) send(request *http.Request) (*http.Response, error) {
+	ctx, sent := hosts.TraceSend(request.Context())
+	response, err := t.base.RoundTrip(request.WithContext(ctx))
+	return response, sent(err)
 }
 
 func (t *remoteRoundTripper) signed(request *http.Request, value string) *http.Request {

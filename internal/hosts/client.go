@@ -241,10 +241,22 @@ func (c *Client) Open(ctx context.Context, path string, query url.Values, header
 	return c.do(ctx, c.stream, http.MethodGet, path, query, nil, header)
 }
 
-func (c *Client) do(ctx context.Context, client *http.Client, method, path string, query url.Values, body io.Reader, header http.Header) (*http.Response, error) {
+// TraceSend's returned func marks an error NotSentError only if no header
+// field was written: a request without its headers cannot be acted on.
+func TraceSend(ctx context.Context) (context.Context, func(error) error) {
 	var wrote atomic.Bool
 	trace := &httptrace.ClientTrace{WroteHeaderField: func(string, []string) { wrote.Store(true) }}
-	request, err := http.NewRequestWithContext(httptrace.WithClientTrace(ctx, trace), method, c.url(path, query), body)
+	return httptrace.WithClientTrace(ctx, trace), func(err error) error {
+		if err == nil || wrote.Load() {
+			return err
+		}
+		return NotSentError{Err: err}
+	}
+}
+
+func (c *Client) do(ctx context.Context, client *http.Client, method, path string, query url.Values, body io.Reader, header http.Header) (*http.Response, error) {
+	ctx, sent := TraceSend(ctx)
+	request, err := http.NewRequestWithContext(ctx, method, c.url(path, query), body)
 	if err != nil {
 		return nil, NotSentError{Err: err}
 	}
@@ -261,11 +273,7 @@ func (c *Client) do(ctx context.Context, client *http.Client, method, path strin
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		err = fmt.Errorf("reach host %s: %w", c.endpoint.Host, scrub(err, c.token))
-		if !wrote.Load() {
-			return nil, NotSentError{Err: err}
-		}
-		return nil, err
+		return nil, sent(fmt.Errorf("reach host %s: %w", c.endpoint.Host, scrub(err, c.token)))
 	}
 	if response.Header.Get(ResponseHeader) == "" {
 		response.Body.Close()

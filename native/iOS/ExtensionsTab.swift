@@ -281,6 +281,7 @@ struct NewExtensionForm: View {
     @State private var message = ""
     @State private var starting = false
     @State private var failure: String?
+    @State private var buildKey = ExtensionBuildKey()
 
     private var dirty: Bool { !message.isEmpty }
 
@@ -299,6 +300,7 @@ struct NewExtensionForm: View {
         }
         .navigationTitle("New Extension")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: message) { buildKey.reset() }
         .toolbar {
             ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             ToolbarItem(placement: .confirmationAction) {
@@ -312,10 +314,12 @@ struct NewExtensionForm: View {
         starting = true
         defer { starting = false }
         do {
-            let created = try await api.buildExtension(message.trimmingCharacters(in: .whitespacesAndNewlines))
+            let created = try await api.buildExtension(message.trimmingCharacters(in: .whitespacesAndNewlines), idempotencyKey: buildKey.current())
+            buildKey.reset()
             dismiss()
             if let id = created.session?.id { started(id) }
         } catch {
+            buildKey.failed(error)
             failure = error.localizedDescription
         }
     }
