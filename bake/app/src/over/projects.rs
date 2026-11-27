@@ -397,9 +397,22 @@ pub fn drain(s: &mut App) -> bool {
     let mut changed = false;
     if let crate::Screen::Project(key) = &s.screen
         && s.ov.d.project(key).is_none()
-        && !s.ov.d.records.is_empty()
     {
         crate::over::go(s, crate::Screen::Now);
+        changed = true;
+    }
+    let started: Vec<(String, String)> = s.ov.projects.lead_drafts.keys().filter_map(|k| Some((k.clone(), s.ov.d.project(k)?.lead.clone()?))).collect();
+    for (key, lead) in started {
+        if let Some(draft) = s.ov.projects.lead_drafts.remove(&key)
+            && !draft.text.trim().is_empty()
+        {
+            let held = if s.composer_for.as_deref() == Some(lead.as_str()) { s.composer.text.clone() } else { s.drafts.get(&lead).to_string() };
+            let text = if held.trim().is_empty() { draft.text.clone() } else { format!("{}\n{}", held.trim_end(), draft.text) };
+            s.drafts.set(&lead, &text);
+            if s.composer_for.as_deref() == Some(lead.as_str()) {
+                s.composer = TextEdit::new(text.as_str());
+            }
+        }
         changed = true;
     }
     let remote = s.ov.d.tile_order.clone().or_else(|| s.client.is_none().then(TileOrder::default));
@@ -455,10 +468,10 @@ pub fn menu_button(key: &str) -> El {
         .key("project-menu-trigger")
 }
 
-fn entry_item(key: &str, entry: Entry, busy: bool) -> MenuItem {
+fn entry_item(key: &str, entry: Entry) -> MenuItem {
     let key = key.to_string();
     let item = entry.item.clone();
-    let mut m = MenuItem::new(entry.label).disabled(!entry.enabled || busy);
+    let mut m = MenuItem::new(entry.label).disabled(!entry.enabled);
     if let Some(note) = entry.note {
         m = m.description(note);
     }
@@ -472,14 +485,12 @@ fn project_menu(s: &App, key: &str, at: Option<PointerPress>, layer: &mut Vec<El
         Some(p) => m.at(p.x, p.y),
         None => m.placement(Placement::BottomEnd),
     };
-    let busy = s.ov.projects.tiles.sending();
     for (i, group) in projects::entries(p, &s.ov.projects.tiles.arrangement, &arranged(s)).into_iter().enumerate() {
         if i > 0 {
             m = m.separator();
         }
         for entry in group {
-            let tiles = matches!(entry.item, Item::Pin(_) | Item::Earlier | Item::Later);
-            m = m.item(entry_item(key, entry, tiles && busy));
+            m = m.item(entry_item(key, entry));
         }
     }
     let _ = m.build(kit(), layer);
@@ -617,7 +628,11 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
         Sheet::Add { host, folder, title } => {
             let mut body = col().w_full().gap(12.0);
             if s.ov.projects.hosts.len() > 1 {
-                let choices = s.ov.projects.hosts.iter().map(|h| (if h.is_local() { format!("{} · this computer", h.name) } else { h.name.clone() }, h.id.clone())).collect();
+                let labels = projects::host_labels(s.ov.projects.hosts.iter().map(|h| (h.id.as_str(), h.name.as_str())));
+                let choices = s.ov.projects.hosts.iter().map(|h| {
+                    let name = labels.get(&h.id).cloned().unwrap_or_else(|| h.name.clone());
+                    (if h.is_local() { format!("{name} · this computer") } else { name }, h.id.clone())
+                }).collect();
                 body = body.child(field("Computer", select("project-host", Pick::Host, choices, host, "This computer", open == Some(Pick::Host), pick_host, &mut popups)));
             }
             body = body.child(field("Folder", line_input(folder, "project-folder", "Folder", |sh| if let Sheet::Add { folder, .. } = sh { Some(folder) } else { None })));
@@ -642,7 +657,8 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
             let places = p.lead_places();
             let mut body = col().w_full().gap(12.0);
             if places.len() > 1 {
-                let choices = places.iter().map(|c| (format!("{}: {}", c.host.name, c.root_path), p.checkouts.iter().position(|x| x == *c).unwrap_or(0).to_string())).collect();
+                let labels = projects::host_labels(p.checkouts.iter().map(|c| (c.host.id.as_str(), c.host.name.as_str())));
+                let choices = places.iter().map(|c| (format!("{}: {}", labels.get(&c.host.id).cloned().unwrap_or_else(|| c.host.name.clone()), c.root_path), p.checkouts.iter().position(|x| x == *c).unwrap_or(0).to_string())).collect();
                 body = body.child(field("Checkout", select("lead-checkout", Pick::Checkout, choices, &checkout.to_string(), "Choose…", open == Some(Pick::Checkout), pick_checkout, &mut popups)));
             }
             let at = SURFACES.iter().position(|(id, _)| id == surface);

@@ -102,6 +102,7 @@ fn encode(s: &App) -> String {
         "queueTaking": feed::queue::Taking::to_json(&s.queue_taking),
         "backgroundDock": s.dock.to_json(),
         "projectTiles": serde_json::to_value(s.ov.projects.tiles.saved()).unwrap_or(Value::Null),
+        "leadDrafts": s.ov.projects.lead_drafts.iter().filter(|(_, d)| !d.text.trim().is_empty()).map(|(k, d)| (k.clone(), Value::String(d.text.clone()))).collect::<serde_json::Map<String, Value>>(),
     })
     .to_string()
 }
@@ -144,6 +145,9 @@ pub fn load(s: &mut App) {
     s.dock = feed::background::DockChoices::from_json(&v["backgroundDock"]);
     if let Ok(saved) = serde_json::from_value(v["projectTiles"].clone()) {
         s.ov.projects.tiles = feed::projects::Tiles::restore(saved);
+    }
+    if let Some(m) = v["leadDrafts"].as_object() {
+        s.ov.projects.lead_drafts = m.iter().filter_map(|(k, t)| t.as_str().map(|t| (k.clone(), rune::TextEdit::new(t)))).collect();
     }
     crate::ui::queue::recover(s);
     s.ov.arrange();

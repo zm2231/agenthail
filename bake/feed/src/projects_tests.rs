@@ -409,3 +409,30 @@ fn a_project_without_sessions_starts_new_work_in_its_own_folder_here_first() {
     assert_eq!(far.start_place().map(|c| c.host.target()), Some("h2"));
     assert_eq!(record(json!({"id": "p3"})).start_place(), None);
 }
+
+#[test]
+fn computers_with_the_same_name_get_distinct_labels() {
+    let labels = host_labels([("h1", "mac.local"), ("h2", "mac.local"), ("h3", "forge.lan"), ("h4", "studio.a"), ("h5", "studio.b")].into_iter());
+    assert_eq!(labels["h1"], "mac.local (h1)");
+    assert_eq!(labels["h2"], "mac.local (h2)");
+    assert_eq!(labels["h3"], "forge");
+    assert_eq!((labels["h4"].as_str(), labels["h5"].as_str()), ("studio.a", "studio.b"));
+    let p = record(json!({"id": "p1", "checkouts": [
+        {"host": {"id": "h1", "name": "mac", "state": "local"}, "projectId": "p1", "rootPath": "/a", "added": true},
+        {"host": {"id": "h2", "name": "mac", "state": "connected"}, "projectId": "h2::p1", "rootPath": "/b", "added": true},
+    ]}));
+    let removes: Vec<String> = entries(&p, &Arrangement::default(), &[]).into_iter().flatten().filter(|e| matches!(e.item, Item::Remove { .. })).map(|e| e.label).collect();
+    assert_eq!(removes, vec!["Remove on mac (h1)…", "Remove on mac (h2)…"]);
+}
+
+#[test]
+fn ordering_keeps_working_while_a_save_is_out() {
+    let mut tiles = Tiles::default();
+    tiles.poll(Some(&order(&["a", "b", "c"], &[], 1)), true);
+    let first = tiles.change(&TileChange::Pin("c".into(), true), &ids(&["a", "b", "c"])).unwrap();
+    let p = record(json!({"id": "a"}));
+    assert!(entries(&p, &tiles.arrangement, &ids(&["c", "a", "b"]))[1].iter().all(|e| e.label != "Move Later" || e.enabled), "the menu stays usable");
+    assert_eq!(tiles.change(&TileChange::Step("a".into(), 1), &ids(&["c", "a", "b"])), None, "it waits for the save");
+    let next = tiles.answered(TileReply::Saved(TileOrder { revision: 2, ..first })).unwrap();
+    assert_eq!(next.order, ids(&["c", "b", "a"]));
+}

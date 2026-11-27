@@ -99,7 +99,12 @@ impl ProjectRecord {
 
     pub fn place(&self, checkout: &Checkout) -> String {
         let hosts: BTreeSet<&str> = self.checkouts.iter().map(|c| c.host.id.as_str()).collect();
-        if hosts.len() > 1 || !checkout.host.local() { format!(" on {}", checkout.host.name) } else { String::new() }
+        if hosts.len() > 1 || !checkout.host.local() {
+            let labels = host_labels(self.checkouts.iter().map(|c| (c.host.id.as_str(), c.host.name.as_str())));
+            format!(" on {}", labels.get(&checkout.host.id).cloned().unwrap_or_else(|| checkout.host.name.clone()))
+        } else {
+            String::new()
+        }
     }
 
     pub fn start_place(&self) -> Option<&Checkout> {
@@ -153,6 +158,33 @@ pub fn entries(p: &ProjectRecord, tiles: &Arrangement, arranged: &[String]) -> V
         keep.push(Entry::on(Item::Remove { project_id: c.project_id.clone(), place: place.clone() }, format!("Remove{place}…")));
     }
     [lead, order, keep].into_iter().filter(|g| !g.is_empty()).collect()
+}
+
+pub fn short_host(name: &str) -> &str {
+    name.split('.').next().unwrap_or(name)
+}
+
+pub fn host_labels<'a>(hosts: impl Iterator<Item = (&'a str, &'a str)>) -> std::collections::HashMap<String, String> {
+    let mut names: Vec<(&str, &str)> = Vec::new();
+    for (id, name) in hosts {
+        if !names.iter().any(|(i, _)| *i == id) {
+            names.push((id, name));
+        }
+    }
+    let count = |f: &dyn Fn(&str) -> &str, n: &str| names.iter().filter(|(_, x)| f(x) == f(n)).count();
+    names
+        .iter()
+        .map(|(id, name)| {
+            let label = if count(&|x| x, name) > 1 {
+                format!("{name} ({id})")
+            } else if count(&short_host, name) > 1 {
+                name.to_string()
+            } else {
+                short_host(name).to_string()
+            };
+            (id.to_string(), label)
+        })
+        .collect()
 }
 
 pub fn lead_session_id(c: &Coordinator) -> Option<String> {
