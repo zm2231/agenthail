@@ -15,6 +15,7 @@ pub struct Form {
     kept: Vec<(&'static str, &'static str)>,
     kept_at: u64,
     seen: u64,
+    unsaved: Option<String>,
 }
 
 pub const PAGE: usize = 2;
@@ -25,6 +26,7 @@ pub fn opened(s: &mut Prefs) {
     }
     bindings::refresh();
     s.keyboard.kept.clear();
+    s.keyboard.unsaved = None;
     sync_rows(s);
 }
 
@@ -105,13 +107,27 @@ fn message(id: &'static str, error: &ShortcutError, shortcut: Option<&Shortcut>)
 }
 
 fn reset(s: &mut Prefs, id: &'static str) {
-    if bindings::change(|sc| sc.reset(id)).is_ok_and(|r| r.is_ok()) {
-        *row_state(s, id) = ShortcutRecorderState::new(bindings::shortcut(id));
+    match bindings::change(|sc| sc.reset(id)) {
+        Ok(Ok(())) => {
+            s.keyboard.unsaved = None;
+            *row_state(s, id) = ShortcutRecorderState::new(bindings::shortcut(id));
+        }
+        Ok(Err(_)) => {}
+        Err(error) => s.keyboard.unsaved = Some(format!("The default couldn't be saved: {error}.")),
     }
 }
 
 fn restore(s: &mut Prefs) {
-    s.keyboard.kept = bindings::change(Shortcuts::reset_all).unwrap_or_default();
+    s.keyboard.kept = match bindings::change(Shortcuts::reset_all) {
+        Ok(kept) => {
+            s.keyboard.unsaved = None;
+            kept
+        }
+        Err(error) => {
+            s.keyboard.unsaved = Some(format!("The defaults couldn't be saved: {error}."));
+            Vec::new()
+        }
+    };
     s.keyboard.kept_at = bindings::generation();
     s.keyboard.rows.clear();
     s.keyboard.any_app = ShortcutRecorderState::default();
@@ -182,6 +198,9 @@ pub fn page(s: &Prefs, k: &Kit) -> El {
     let current = s.keyboard.kept_at == bindings::generation();
     for (title, owner) in s.keyboard.kept.iter().filter(|_| current) {
         out = out.child(text(format!("{title} kept its shortcut: its default is used by {owner}.")).font(k.text(crate::theme::META)).color(crate::theme::muted()).wrap().px(4.0));
+    }
+    if let Some(unsaved) = &s.keyboard.unsaved {
+        out = out.child(text(unsaved.clone()).font(k.text(crate::theme::META)).color(crate::theme::muted()).wrap().px(4.0));
     }
     out.child(row().w_full().child(el().grow(1.0)).child(restore))
 }

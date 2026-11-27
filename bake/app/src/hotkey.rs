@@ -14,6 +14,7 @@ thread_local! {
     static REFUSED: RefCell<Option<(Refusal, Option<Stored>)>> = const { RefCell::new(None) };
     static RETURN: RefCell<Return> = RefCell::new(Return::default());
     static SENT: RefCell<Option<Option<Stored>>> = const { RefCell::new(None) };
+    static OFF: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 struct Live<'a>(&'a AppHandle<App>);
@@ -75,6 +76,7 @@ pub fn keep(handle: AppHandle<App>) {
     let spawned = std::thread::Builder::new().name("agenthail-shortcut".into()).spawn(move || run(worker, rx));
     if let Err(error) = spawned {
         eprintln!("agenthail: the shortcut from any app is off: {error}");
+        OFF.set(Some(error.to_string()));
         return;
     }
     HANDLE.with(|h| {
@@ -129,6 +131,9 @@ pub fn keycaps(shortcut: &Shortcut) -> String {
 }
 
 pub fn note() -> Option<String> {
+    if let Some(error) = OFF.with_borrow(Clone::clone) {
+        return Some(format!("Shortcuts from other apps are off: {error}."));
+    }
     current().map(|(refusal, shortcut)| feed::hotkey::note(&refusal, &shortcut.map_or_else(|| "The shortcut".to_string(), |s| keycaps(&s))))
 }
 

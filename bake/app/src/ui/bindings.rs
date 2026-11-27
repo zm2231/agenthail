@@ -156,17 +156,23 @@ mod store {
     fn write(name: &str, bytes: Option<Vec<u8>>) -> Result<(), String> {
         let path = path(name).ok_or("HOME isn't set")?;
         let result = match bytes {
-            Some(bytes) => std::fs::write(&path, bytes),
+            Some(bytes) => {
+                let staged = path.with_extension("json.new");
+                std::fs::write(&staged, bytes).and_then(|()| std::fs::rename(&staged, &path))
+            }
             None => std::fs::remove_file(&path).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }),
         };
         result.map_err(|e| e.to_string())
     }
 
     pub fn save(before: &Shortcuts, saved: &Shortcuts) -> Result<(), String> {
-        if before.any_app() != saved.any_app() {
-            write(ANY_APP, saved.any_app_json().map(String::into_bytes))?;
+        write(COMMANDS, saved.data())?;
+        if before.any_app() == saved.any_app() {
+            return Ok(());
         }
-        write(COMMANDS, saved.data())
+        write(ANY_APP, saved.any_app_json().map(String::into_bytes)).inspect_err(|_| {
+            let _ = write(COMMANDS, before.data());
+        })
     }
 }
 
