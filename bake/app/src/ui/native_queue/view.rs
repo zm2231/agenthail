@@ -21,13 +21,13 @@ fn item_row(session: &str, item: &nq::Submission, can_write: bool, busy: bool, k
     let shown = item.shown_text();
     let mut r = row().key(format!("codex-queue-row-{}", item.id)).w_full().gap(6.0).items_start().child(text(shown.clone()).font(k.text(META)).color(theme::text()).wrap_anywhere().max_lines(3).grow(1.0).min_w(0.0).help(shown));
     if can_write {
-        let open = (session.to_string(), item.id.clone());
+        let (session, id) = (session.to_string(), item.id.clone());
         let more = IconButton::new(&icons::MORE)
             .variant(IconButtonVariant::GhostMuted)
             .control_size(ControlSize::Small)
             .label("Queue item actions")
             .disabled(busy)
-            .on_press(move |s: &mut App| s.native_queue.menu = if s.native_queue.menu.as_ref() == Some(&open) { None } else { Some(open.clone()) })
+            .on_press(move |s: &mut App| super::open_row_menu(s, &session, &id))
             .build(k)
             .key(format!("{}-trigger", menu_key(&item.id)));
         r = r.child(more);

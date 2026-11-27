@@ -639,7 +639,7 @@ pub fn run(s: &mut App, id: &str, tx: &mut Tx) -> bool {
         return true;
     }
     if command == Slash::Goal {
-        if unknown_goal(s, id).as_deref() == Some(argument.as_str()) {
+        if unknown_goals(s, id).contains(&argument) {
             crate::note(s, id, GOAL_ASKED_UNKNOWN.into());
             return true;
         }
@@ -821,15 +821,17 @@ pub const GOAL_AS_NEW: &str = "Set goal again as new";
 
 const GOAL_ASKED_UNKNOWN: &str = "Agenthail can't tell whether this goal was set, and sending it the same way gets the same answer. Check the session, then use Set goal again as new in its Goal section.";
 
-pub fn unknown_goal(s: &App, id: &str) -> Option<String> {
-    s.complete.goal_keys.iter().find(|((sess, _), (key, _))| sess == id && s.complete.told_unknown.contains(key)).map(|((_, goal), _)| goal.clone())
+pub fn unknown_goals(s: &App, id: &str) -> Vec<String> {
+    let mut goals: Vec<String> = s.complete.goal_keys.iter().filter(|((sess, _), (key, _))| sess == id && s.complete.told_unknown.contains(key)).map(|((_, goal), _)| goal.clone()).collect();
+    goals.sort();
+    goals
 }
 
-pub fn goal_as_new(s: &mut App, id: &str) {
-    let Some(goal) = unknown_goal(s, id) else { return };
-    if s.client.is_none() || s.complete.goal_pending.contains(id) {
+pub fn goal_as_new(s: &mut App, id: &str, goal: &str) {
+    if s.client.is_none() || s.complete.goal_pending.contains(id) || !unknown_goals(s, id).iter().any(|g| g == goal) {
         return;
     }
+    let goal = goal.to_string();
     if let Some((key, _)) = s.complete.goal_keys.remove(&(id.to_string(), goal.clone())) {
         s.complete.told_unknown.remove(&key);
     }
@@ -992,11 +994,13 @@ mod goal_tests {
         let key = s.complete.goal_keys[&point].0.clone();
         let interrupted = RespondError::from_status("goal-set", 409, r#"{"error":{"code":"action_outcome_unknown","message":"This request was interrupted before its outcome was recorded, so it may have happened."}}"#);
         done(&mut s, Done::Goal("a".into(), "/goal ship it".into(), "ship it".into(), key.clone(), super::super::window::MAIN, Err(interrupted)));
-        assert_eq!(unknown_goal(&s, "a").as_deref(), Some("ship it"));
+        assert_eq!(unknown_goals(&s, "a"), ["ship it"]);
         assert_eq!(s.complete.goal_keys[&point].0, key, "the interrupted goal keeps its key");
         assert!(s.status_line.get("a").is_some_and(|l| l.ends_with("Set goal again as new sends a new request.")));
-        goal_as_new(&mut s, "a");
+        goal_as_new(&mut s, "a", "other");
+        assert_eq!(s.complete.goal_keys[&point].0, key, "a goal that wasn't interrupted isn't sent from here");
+        goal_as_new(&mut s, "a", "ship it");
         assert_ne!(s.complete.goal_keys[&point].0, key, "only the labeled control takes a fresh key");
-        assert!(unknown_goal(&s, "a").is_none());
+        assert!(unknown_goals(&s, "a").is_empty());
     }
 }

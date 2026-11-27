@@ -37,6 +37,11 @@ pub struct NativeQueue {
 }
 
 impl NativeQueue {
+    #[cfg(test)]
+    pub fn row_menu(&self) -> Option<(&str, &str)> {
+        self.menu.as_ref().map(|(session, item)| (session.as_str(), item.as_str()))
+    }
+
     pub fn new() -> NativeQueue {
         let (tx, rx) = channel();
         NativeQueue { queues: HashMap::new(), keys: Keys::default(), ops: 0, generations: 0, menu: None, editor: None, tx, rx }
@@ -179,6 +184,14 @@ pub fn drain(s: &mut App) -> bool {
         changed = true;
     }
     changed
+}
+
+pub fn open_row_menu(s: &mut App, session: &str, item: &str) {
+    if !super::window::may_open(s, super::window::Kind::Queue) {
+        return;
+    }
+    let open = (session.to_string(), item.to_string());
+    s.native_queue.menu = if s.native_queue.menu.as_ref() == Some(&open) { None } else { Some(open) };
 }
 
 fn open_editor(s: &mut App, id: &str, item: Option<String>, original: String) {

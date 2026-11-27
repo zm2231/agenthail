@@ -412,3 +412,19 @@ fn a_fork_result_lands_in_the_window_that_asked() {
     done(&mut s, Done::Forked("a".into(), "a/".into(), String::new(), "k5".into(), MAIN, Err(refused)));
     assert_eq!(s.ov.notice.as_deref(), Some("Couldn't fork: no fork here"), "a fork from main tells main");
 }
+
+#[test]
+fn a_codex_queue_row_menu_open_in_one_window_is_not_taken_over_by_another() {
+    let mut s = app();
+    s.sessions = vec![codex("a"), codex("b")];
+    crate::select(&mut s, "a");
+    s.screen = Screen::Session;
+    let w = open(&mut s, "b");
+    enter(&mut s, w);
+    s.native_queue.editor = None;
+    crate::ui::native_queue::open_row_menu(&mut s, "b", "q1");
+    claim(&mut s);
+    enter(&mut s, MAIN);
+    crate::ui::native_queue::open_row_menu(&mut s, "a", "q9");
+    assert_eq!((owner(&s, Kind::Queue), s.native_queue.row_menu()), (Some(w), Some(("b", "q1"))), "the menu stays with the window that opened it");
+}
