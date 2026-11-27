@@ -11,10 +11,10 @@ png = "0.18"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 time = "0.3"
-rune = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a", features = ["tooling", "native-file-dialog"] }
-rune-kit = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a", features = ["markdown"] }
-rune-theme-opencode = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a" }
-rune-notify = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a" }
+rune = { git = "https://github.com/zm2231/rune", rev = "39aa30505483a0e56b2d4bdc7c28f17e5d1e47c1", features = ["tooling", "native-file-dialog"] }
+rune-kit = { git = "https://github.com/zm2231/rune", rev = "39aa30505483a0e56b2d4bdc7c28f17e5d1e47c1", features = ["markdown"] }
+rune-theme-opencode = { git = "https://github.com/zm2231/rune", rev = "39aa30505483a0e56b2d4bdc7c28f17e5d1e47c1" }
+rune-notify = { git = "https://github.com/zm2231/rune", rev = "39aa30505483a0e56b2d4bdc7c28f17e5d1e47c1" }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -26,12 +26,12 @@ objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSUserDefaults", "NSData", "NSString", "NSBundle"] }
 
 [patch.crates-io]
-winit = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a" }
-sctk-adwaita = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a" }
-parley_engine = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a" }
-wgpu-hal = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a" }
-accesskit_windows = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a" }
-accesskit_macos = { git = "https://github.com/zm2231/rune", rev = "4197e5c828c3cded9dec3d105105eef5bc37855a" }
+winit = { git = "https://github.com/zm2231/rune", rev = "39aa30505483a0e56b2d4bdc7c28f17e5d1e47c1" }
+sctk-adwaita = { git = "https://github.com/zm2231/rune", rev = "39aa30505483a0e56b2d4bdc7c28f17e5d1e47c1" }
+parley_engine = { git = "https://github.com/zm2231/rune", rev = "39aa30505483a0e56b2d4bdc7c28f17e5d1e47c1" }
+wgpu-hal = { git = "https://github.com/zm2231/rune", rev = "39aa30505483a0e56b2d4bdc7c28f17e5d1e47c1" }
+accesskit_windows = { git = "https://github.com/zm2231/rune", rev = "39aa30505483a0e56b2d4bdc7c28f17e5d1e47c1" }
+accesskit_macos = { git = "https://github.com/zm2231/rune", rev = "39aa30505483a0e56b2d4bdc7c28f17e5d1e47c1" }
 
 [profile.release]
 debug = false
