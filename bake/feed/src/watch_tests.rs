@@ -60,6 +60,19 @@ fn the_native_rereads_refresh_the_snapshot_and_host_changes_the_decisions() {
 }
 
 #[test]
+fn a_change_to_one_known_session_rereads_the_snapshot_but_not_the_overview() {
+    let e = |data: Value| wants(&Event { id: 1, kind: "state.changed".into(), data });
+    let known = |id: &str| id == "s1";
+    let session = e(json!({"entityId": "s1"}));
+    assert!(session.snapshot && !session.overview_unless(known));
+    assert!(e(json!({"entityId": "p-1"})).overview_unless(known), "a project or channel change can move what the overview shows");
+    assert!(e(json!({"entityId": "s9"})).overview_unless(known), "a session not held yet");
+    assert!(e(Value::Null).overview_unless(known), "a change that names nothing");
+    let settings = wants(&Event { id: 2, kind: "settings.updated".into(), data: json!({"entityId": "s1"}) });
+    assert!(settings.overview_unless(known));
+}
+
+#[test]
 fn session_changes_apply_in_place_without_a_reread() {
     let mut c = Catalog::default();
     c.adopt(vec![row("a", "idle"), row("b", "idle")], "e", 10);
@@ -103,11 +116,11 @@ fn a_session_dropped_from_the_list_is_told_apart_from_one_removed_or_rekeyed() {
 }
 
 #[test]
-fn queue_counts_and_rekeys_ask_for_the_snapshot_that_carries_them() {
+fn a_queue_count_patches_the_row_and_a_rekey_asks_for_the_snapshot_that_carries_it() {
     let mut c = Catalog::default();
     c.adopt(vec![row("a", "idle")], "e", 1);
     let out = c.apply(vec![CatalogEvent { seq: 2, kind: "session.queue".into(), data: json!({"sessionId": "a", "queueCount": 2}) }]);
-    assert!(out.changed && out.reread);
+    assert!(out.changed && out.placed && !out.reread, "the queue rows come with the state.changed the daemon sends alongside");
     assert_eq!(c.sessions()[0].queue_count, 2);
     let out = c.apply(vec![CatalogEvent { seq: 3, kind: "session.removed".into(), data: json!({"sessionId": "a", "rekeyedTo": "a2"}) }]);
     assert!(out.reread && c.sessions().is_empty());

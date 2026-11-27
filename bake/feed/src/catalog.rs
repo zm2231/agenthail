@@ -19,6 +19,8 @@ pub struct Named {
     #[serde(default)]
     pub state: String,
     #[serde(default)]
+    pub archived: Option<bool>,
+    #[serde(default)]
     pub root_path: String,
 }
 
@@ -724,6 +726,8 @@ pub(crate) fn enc(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
 
+pub const STREAM_GAP: &str = "the session stream no longer holds that position";
+
 impl Client {
     pub fn from_env() -> Result<Self> {
         let (base, token) = crate::daemon()?;
@@ -812,14 +816,17 @@ impl Client {
         Ok(std::io::BufReader::new(response.into_reader()))
     }
 
-    pub(crate) fn session_stream(&self, session: &str, budget: Duration) -> Result<impl std::io::BufRead + use<>> {
+    pub(crate) fn session_stream(&self, session: &str, after: u64, budget: Duration) -> Result<impl std::io::BufRead + use<>> {
         let agent = ureq::AgentBuilder::new().timeout(budget).build();
         let response = agent
-            .get(&format!("{}/api/v1/session-stream?id={}&after=0", self.base, enc(session)))
+            .get(&format!("{}/api/v1/session-stream?id={}&after={after}", self.base, enc(session)))
             .set("Authorization", &format!("Bearer {}", self.token))
             .set("Accept", "text/event-stream")
             .call()
-            .map_err(|e| anyhow!(e.to_string()))?;
+            .map_err(|e| match e {
+                ureq::Error::Status(409, _) => anyhow!(STREAM_GAP),
+                e => anyhow!(e.to_string()),
+            })?;
         Ok(std::io::BufReader::new(response.into_reader()))
     }
 
@@ -851,7 +858,8 @@ impl Client {
     }
 
     pub fn snapshot(&self) -> Result<Snapshot> {
-        Ok(serde_json::from_value(self.get("/api/v1/snapshot")?)?)
+        let response = self.agent.get(&format!("{}/api/v1/snapshot", self.base)).set("Authorization", &format!("Bearer {}", self.token)).set("Accept", "application/json").call().map_err(|e| anyhow!(e.to_string()))?;
+        Ok(response.into_json()?)
     }
 
     pub fn work_item(&self, project: &str, id: &str) -> Result<WorkItem> {

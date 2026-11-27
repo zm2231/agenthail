@@ -49,7 +49,7 @@ pub enum Bg {
     Item(WorkKey, WorkItem),
     Overview(Box<Fetched>),
     Ledger(String, std::time::Instant, Result<Ledger, String>),
-    Tail(String, String, Result<Tail, String>),
+    Tail(String, String, Result<Tail, String>, Option<tails::Resume>),
     OverviewError(String),
     SendSettings(String, HashMap<String, String>, Vec<feed::catalog::QueueRow>),
     Sent(String, Unsent, bool, Result<(Delivered, serde_json::Value), feed::catalog::RespondError>),
@@ -224,10 +224,8 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
         let mut known = feed::derive::live::Known::default();
         let (mut due, mut reset, mut last) = (true, false, None::<std::time::Instant>);
         loop {
-            if due {
-                if let Some(at) = last.filter(|_| !reset) {
-                    std::thread::sleep(feed::watch::OVERVIEW_GAP.saturating_sub(at.elapsed()));
-                }
+            let early = last.filter(|_| due && !reset).map(|at| feed::watch::OVERVIEW_GAP.saturating_sub(at.elapsed())).filter(|left| !left.is_zero());
+            if due && early.is_none() {
                 reset = false;
                 if let Some(at) = stream.settles_at() {
                     std::thread::sleep(at.saturating_duration_since(std::time::Instant::now()));
@@ -249,7 +247,13 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
                 }
             }
             let retry = known.next_retry().map(|at| at.saturating_duration_since(std::time::Instant::now()));
-            let wait = if due || !known.orphans().is_empty() { Duration::ZERO } else { feed::watch::OVERVIEW_EVERY.saturating_sub(last.map(|at| at.elapsed()).unwrap_or_default()).min(retry.unwrap_or(Duration::MAX)) };
+            let wait = if let Some(left) = early {
+                left
+            } else if due || !known.orphans().is_empty() {
+                Duration::ZERO
+            } else {
+                feed::watch::OVERVIEW_EVERY.saturating_sub(last.map(|at| at.elapsed()).unwrap_or_default()).min(retry.unwrap_or(Duration::MAX))
+            };
             let mut reads = Vec::new();
             let mut take = |ask: Ask| match ask {
                 Ask::Refresh => due = true,
@@ -527,12 +531,12 @@ fn rebuild(s: &mut App) {
 fn fetch_tails(s: &mut App) {
     let Some(client) = s.client.clone() else { return };
     let open: HashSet<String> = s.panes.keys().cloned().collect();
-    for (id, last_active) in s.ov.live.due_tails(&open) {
+    for (id, last_active, at) in s.ov.live.due_tails(&open) {
         let (tx, client) = (s.outbox.clone(), client.clone());
         std::thread::spawn(move || {
-            let read = std::panic::AssertUnwindSafe(|| tails::fetch(&client, &id, tails::READ_BUDGET));
-            let result = std::panic::catch_unwind(read).unwrap_or_else(|_| Err("the read stopped".into()));
-            let _ = tx.send(Bg::Tail(id, last_active, result));
+            let read = std::panic::AssertUnwindSafe(|| tails::fetch(&client, &id, tails::READ_BUDGET, at));
+            let (result, at) = std::panic::catch_unwind(read).unwrap_or_else(|_| (Err("the read stopped".into()), None));
+            let _ = tx.send(Bg::Tail(id, last_active, result, at));
         });
     }
 }
@@ -568,7 +572,7 @@ fn changed_elsewhere(s: &mut App, wants: feed::watch::Wants) {
         ui::connect::changed(s);
         ui::delivery::stale(s);
     }
-    if wants.overview {
+    if wants.overview_unless(|id| s.ov.live.holds_ledger_of(id)) {
         ask_overview(s, Ask::Refresh);
     }
     if wants.hosts {
@@ -1355,12 +1359,15 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         changed = true;
         match message {
             Bg::Snapshot(at, epoch, seq, sessions, touched) => {
-                if s.ov.live.take_sessions(&at, &epoch, seq, sessions) {
+                if s.ov.live.take_sessions(&at, &epoch, seq, sessions) && s.ov.live.stale() {
                     s.sessions = s.ov.live.sessions().to_vec();
                     s.notify.sessions_moved = true;
                     feed::holders::pins().prune(&s.sessions);
                     ui::tabs::reconcile(s);
                     fetch_tails(s);
+                    for project in s.ov.live.missing_ledgers() {
+                        fetch_ledger(s, &project);
+                    }
                 }
                 s.now = OffsetDateTime::now_utc();
                 s.status = "live".into();
@@ -1408,10 +1415,13 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 feed::holders::pins().prune(&s.sessions);
                 ui::tabs::reconcile(s);
                 fetch_tails(s);
+                for project in s.ov.live.missing_ledgers() {
+                    fetch_ledger(s, &project);
+                }
                 arrived = true;
             }
-            Bg::Tail(id, last_active, result) => {
-                s.ov.live.take_tail(&id, last_active, result);
+            Bg::Tail(id, last_active, result, at) => {
+                s.ov.live.take_tail(&id, last_active, result, at);
                 fetch_tails(s);
             }
             Bg::Ledger(project, started, result) => {

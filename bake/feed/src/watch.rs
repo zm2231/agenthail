@@ -57,10 +57,16 @@ pub struct Wants {
     pub reset: bool,
     pub session: Option<String>,
     pub native_queue: Option<String>,
+    pub scoped: bool,
 }
 
 impl Wants {
     pub fn merge(&mut self, other: Wants) {
+        if *self == Wants::default() {
+            *self = other;
+            return;
+        }
+        self.scoped = self.scoped && other.scoped && self.session == other.session;
         self.snapshot |= other.snapshot;
         self.overview |= other.overview;
         self.hosts |= other.hosts;
@@ -73,6 +79,10 @@ impl Wants {
             self.native_queue = other.native_queue;
         }
     }
+
+    pub fn overview_unless(&self, known: impl Fn(&str) -> bool) -> bool {
+        self.overview && !(self.scoped && self.session.as_deref().is_some_and(known))
+    }
 }
 
 pub fn wants(event: &Event) -> Wants {
@@ -83,7 +93,8 @@ pub fn wants(event: &Event) -> Wants {
     let extensions = reset || hosts || matches!(kind, "extension.changed" | "extension.badge");
     let entity = event.data["entityId"].as_str().filter(|e| !e.is_empty()).map(String::from);
     let (session, native_queue) = if kind == "native.queue.changed" { (None, entity) } else { (entity, None) };
-    Wants { snapshot, overview: snapshot, hosts, extensions, reset, session, native_queue }
+    let scoped = kind == "state.changed" && session.is_some();
+    Wants { snapshot, overview: snapshot, hosts, extensions, reset, session, native_queue, scoped }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -217,7 +228,6 @@ impl Catalog {
                     out.touched.push(id);
                 }
                 out.placed = true;
-                out.reread = true;
             }
             "session.removed" => {
                 if id.is_empty() {

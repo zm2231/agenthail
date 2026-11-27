@@ -428,3 +428,29 @@ fn a_codex_queue_row_menu_open_in_one_window_is_not_taken_over_by_another() {
     crate::ui::native_queue::open_row_menu(&mut s, "a", "q9");
     assert_eq!((owner(&s, Kind::Queue), s.native_queue.row_menu()), (Some(w), Some(("b", "q1"))), "the menu stays with the window that opened it");
 }
+
+#[test]
+fn a_session_list_rebuilds_the_overview_once_with_a_session_window_open() {
+    let (mut s, _, mut win, w) = two_windows();
+    let env = rune::Env { system_dark: true, scale: 1.0 };
+    let main = rune::AppSpec::<App> { poll: Some(crate::poll), ..rune::AppSpec::new("Agenthail", (1440.0, 900.0), crate::placeholder, crate::ui::view) };
+    let mut main = rune::App::new(main).init(crate::placeholder).headless_runtime((1440.0, 900.0), env);
+    let rows = |ids: &[&str]| ids.iter().map(|id| serde_json::from_value(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true, "lastActive": "2026-11-27T09:00:00Z"})).unwrap()).collect::<Vec<feed::catalog::Session>>();
+    let both = |s: &mut App, main: &mut rune::Runtime<App>, win: &mut rune::Runtime<App>| {
+        for _ in 0..2 {
+            turn(s, main, "main");
+            turn(s, win, &key(w));
+        }
+    };
+    s.outbox.send(crate::Bg::Snapshot("2026-11-27T10:00:10Z".into(), String::new(), 0, rows(&["a", "b"]), None)).unwrap();
+    both(&mut s, &mut main, &mut win);
+    let before = s.rebuilds;
+
+    s.outbox.send(crate::Bg::Snapshot("2026-11-27T10:00:20Z".into(), String::new(), 0, rows(&["a", "b"]), None)).unwrap();
+    both(&mut s, &mut main, &mut win);
+    assert_eq!(s.rebuilds, before, "the same list rebuilds nothing in either window");
+
+    s.outbox.send(crate::Bg::Snapshot("2026-11-27T10:00:30Z".into(), String::new(), 0, rows(&["a", "b", "c"]), None)).unwrap();
+    both(&mut s, &mut main, &mut win);
+    assert_eq!(s.rebuilds, before + 1, "a change rebuilds once for the app, not once per window");
+}

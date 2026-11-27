@@ -381,13 +381,26 @@ impl Overview {
         if !later(at, epoch, seq, &self.base, true) {
             return false;
         }
+        let minute = |at: &str| parse_time(at).map(|t| t.unix_timestamp().div_euclid(60));
+        let ticked = minute(at) != minute(&self.base.updated_at);
         self.base.updated_at = at.to_string();
         self.base.host_epoch = epoch.to_string();
         self.base.catalog_seq = seq;
-        self.base.sessions = sessions;
+        let before = std::mem::replace(&mut self.base.sessions, sessions);
         self.reconcile();
-        self.stale = true;
+        let filed = self.follow_archive();
+        self.stale |= ticked || filed || self.base.sessions != before;
         true
+    }
+
+    fn follow_archive(&mut self) -> bool {
+        let active: HashSet<&str> = self.base.sessions.iter().filter_map(|x| x.project.as_ref()).filter(|p| p.archived == Some(false)).map(|p| p.id.as_str()).collect();
+        let mut moved = false;
+        for record in self.base.projects.iter_mut().filter(|r| r.archived && active.contains(r.id.as_str())) {
+            record.archived = false;
+            moved = true;
+        }
+        moved
     }
 
     pub fn stale(&self) -> bool {
@@ -469,6 +482,7 @@ impl Overview {
         if fresh {
             self.reconcile();
         }
+        self.follow_archive();
         self.stale = true;
         self.take_actors(started, actors);
         let opened: Vec<String> = self.covered.iter().filter(|k| self.ledgers.contains_key(*k)).cloned().collect();
@@ -478,8 +492,28 @@ impl Overview {
         }
         let listed: HashSet<&str> = self.base.projects.iter().filter(|p| !p.archived).map(|p| p.id.as_str()).collect();
         self.ledgers.retain(|k, _| listed.contains(k.as_str()));
+        self.covered.retain(|k| listed.contains(k.as_str()));
         self.failed.retain(|k| listed.contains(k.as_str()));
         self.ledger_at.retain(|k, _| listed.contains(k.as_str()));
+    }
+
+    pub fn missing_ledgers(&self) -> BTreeSet<String> {
+        let now = parse_time(&self.base.updated_at).unwrap_or_else(OffsetDateTime::now_utc);
+        let listed = |p: &str| self.base.projects.iter().any(|r| r.id == p && !r.archived);
+        self.base
+            .sessions
+            .iter()
+            .filter(|x| hours(now, &x.last_active) < LEDGER_WINDOW_H)
+            .map(|x| x.project_key())
+            .filter(|p| !p.is_empty() && listed(p) && !self.ledgers.contains_key(p) && !self.covered.contains(p) && !self.failed.contains(p) && !self.pending.contains(p))
+            .collect()
+    }
+
+    pub fn holds_ledger_of(&self, session: &str) -> bool {
+        self.base.sessions.iter().find(|x| x.id == session).is_some_and(|x| {
+            let project = x.project_key();
+            project.is_empty() || self.ledgers.contains_key(&project) || self.covered.contains(&project)
+        })
     }
 
     pub fn wants(&mut self, project: &str) -> bool {
@@ -530,9 +564,15 @@ impl Overview {
         }
     }
 
-    pub fn due_tails(&mut self, open: &HashSet<String>) -> Vec<(String, String)> {
+    pub fn due_tails(&mut self, open: &HashSet<String>) -> Vec<(String, String, Option<tails::Resume>)> {
         let now = parse_time(&self.base.updated_at).unwrap_or_else(OffsetDateTime::now_utc);
-        self.tails.due(&self.base.sessions, now, open)
+        let due = self.tails.due(&self.base.sessions, now, open);
+        due.into_iter()
+            .map(|(id, last_active)| {
+                let at = self.tails.resume(&id);
+                (id, last_active, at)
+            })
+            .collect()
     }
 
     pub fn follow_tail(&mut self, session: Option<String>) -> bool {
@@ -543,9 +583,11 @@ impl Overview {
         self.tails.retry_due()
     }
 
-    pub fn take_tail(&mut self, session: &str, last_active: String, result: Result<Tail, String>) {
-        self.tails.take(session, last_active, result);
-        self.stale = true;
+    pub fn take_tail(&mut self, session: &str, last_active: String, result: Result<Tail, String>, at: Option<tails::Resume>) {
+        if let Some(at) = at {
+            self.tails.hold(session, at);
+        }
+        self.stale |= self.tails.take(session, last_active, result);
     }
 
     pub fn world(&mut self, panes: &[(&str, &[Item])]) -> World {

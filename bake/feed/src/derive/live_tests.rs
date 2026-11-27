@@ -161,7 +161,7 @@ fn a_burst_of_arrivals_leaves_one_rebuild_pending() {
     assert!(!ov.take_sessions("2026-11-24T11:00:00Z", "", 0, sessions()));
     assert!(!ov.stale(), "a snapshot that changes nothing asks for no rebuild");
     for id in ["t1", "t2", "t3"] {
-        ov.take_tail(id, "2026-11-24T11:59:00Z".into(), Err("timed out".into()));
+        ov.take_tail(id, "2026-11-24T11:59:00Z".into(), Err("timed out".into()), None);
     }
     ov.take_ledger("p", Instant::now(), Ok(Ledger { rows: vec![work("w1", "open")], actors: HashMap::new(), asked: Vec::new() }));
     ov.refresh(fetched("2026-11-24T12:00:20Z", sessions(), vec![]));
@@ -689,4 +689,84 @@ fn a_parked_step_shows_why_it_waits() {
     assert_eq!(words("parked (later): wait; handoff: ask Sam; handoff: done [\"a\"], remaining [], decisions [], uncertain []"), "Parked: wait; handoff: ask Sam");
     assert_eq!(words("parked (later): wait; handoff: done [ask Sam]"), "Parked: wait; handoff: done [ask Sam]");
     assert!(steps[0].what.starts_with("Moved to "), "{}", steps[0].what);
+}
+
+#[test]
+fn a_session_is_left_to_its_own_reads_only_once_its_project_ledger_is_held() {
+    let mut ov = Overview::default();
+    let sessions = || vec![session("s", "p", "2026-11-24T11:00:00Z", "idle"), session("quiet", "old", "2026-11-01T11:00:00Z", "idle")];
+    ov.refresh(fetched("2026-11-24T12:00:00Z", sessions(), vec![("p", Ok(vec![work("p-W1", "open")]))]));
+    assert!(ov.holds_ledger_of("s"));
+    assert!(!ov.holds_ledger_of("quiet"), "a change can bring a quiet project's work into the overview");
+    assert!(!ov.holds_ledger_of("unknown"));
+}
+
+#[test]
+fn a_quiet_session_turning_active_asks_for_its_project_work() {
+    let mut ov = Overview::default();
+    let held = || session("s", "p", "2026-11-24T11:00:00Z", "idle");
+    ov.refresh(fetched("2026-11-24T12:00:00Z", vec![held(), session("quiet", "old", "2026-11-01T11:00:00Z", "idle")], vec![("p", Ok(vec![work("p-W1", "open")]))]));
+    assert!(ov.missing_ledgers().is_empty(), "every recent project's work is held");
+    assert!(ov.take_sessions("2026-11-24T12:00:05Z", "", 0, vec![held(), session("quiet", "old", "2026-11-24T12:00:04Z", "busy")]));
+    assert_eq!(ov.missing_ledgers().into_iter().collect::<Vec<_>>(), ["old"], "the change list alone brought a quiet project back");
+    assert!(ov.wants("old"));
+    assert!(ov.missing_ledgers().is_empty(), "asked for once");
+}
+
+#[test]
+fn a_project_unarchived_by_its_session_comes_back_with_the_session_list() {
+    let mut ov = Overview::default();
+    let row = |archived: bool, last: &str| {
+        let mut x = session("s", "old", last, "idle");
+        x.project.as_mut().unwrap().archived = Some(archived);
+        x
+    };
+    let mut first = fetched("2026-11-24T12:00:00Z", vec![row(true, "2026-11-01T11:00:00Z")], vec![]);
+    first.recorded.projects.iter_mut().filter(|p| p.id == "old").for_each(|p| p.archived = true);
+    ov.refresh(first);
+    assert!(ov.missing_ledgers().is_empty());
+    let _ = ov.world(&[]);
+    assert!(ov.take_sessions("2026-11-24T12:00:05Z", "", 0, vec![row(false, "2026-11-24T12:00:04Z")]));
+    assert!(ov.stale());
+    assert_eq!(ov.missing_ledgers().into_iter().collect::<Vec<_>>(), ["old"], "the session's word on its project is taken at once");
+    assert!(ov.world(&[]).projects.iter().any(|p| p.key == "old"));
+}
+
+#[test]
+fn a_revived_project_stays_shown_whatever_the_row_order_or_an_older_overview_says() {
+    let mut ov = Overview::default();
+    let row = |id: &str, archived: bool, last: &str| {
+        let mut x = session(id, "old", last, "idle");
+        x.project.as_mut().unwrap().archived = Some(archived);
+        x
+    };
+    let archived = |at: &str, sessions: Vec<Session>| {
+        let mut f = fetched(at, sessions, vec![]);
+        f.recorded.projects.iter_mut().filter(|p| p.id == "old").for_each(|p| p.archived = true);
+        f
+    };
+    ov.refresh(archived("2026-11-24T12:00:00Z", vec![row("a", true, "2026-11-01T11:00:00Z"), row("b", true, "2026-11-01T11:00:00Z")]));
+    assert!(ov.take_sessions("2026-11-24T12:00:05Z", "", 0, vec![row("a", false, "2026-11-24T12:00:04Z"), row("b", true, "2026-11-01T11:00:00Z")]));
+    assert_eq!(ov.missing_ledgers().len(), 1, "one row's word is enough, before or after the others");
+    ov.refresh(archived("2026-11-24T12:00:02Z", vec![row("a", true, "2026-11-01T11:00:00Z"), row("b", true, "2026-11-01T11:00:00Z")]));
+    assert!(ov.world(&[]).projects.iter().any(|p| p.key == "old"), "an overview read before the revival doesn't hide it again");
+    assert_eq!(ov.missing_ledgers().len(), 1);
+}
+
+#[test]
+fn a_project_archived_after_its_work_was_read_reads_it_again_when_revived() {
+    let mut ov = Overview::default();
+    let row = |archived: bool, last: &str| {
+        let mut x = session("s", "old", last, "idle");
+        x.project.as_mut().unwrap().archived = Some(archived);
+        x
+    };
+    ov.refresh(fetched("2026-11-24T12:00:00Z", vec![row(false, "2026-11-24T11:00:00Z")], vec![("old", Ok(vec![work("old-W1", "open")]))]));
+    assert!(ov.holds_ledger_of("s"));
+    let mut archived = fetched("2026-11-24T12:01:00Z", vec![row(true, "2026-11-24T11:00:00Z")], vec![]);
+    archived.recorded.projects.iter_mut().filter(|p| p.id == "old").for_each(|p| p.archived = true);
+    ov.refresh(archived);
+    assert!(!ov.holds_ledger_of("s"), "an archived project's work is let go");
+    assert!(ov.take_sessions("2026-11-24T12:02:00Z", "", 0, vec![row(false, "2026-11-24T12:01:59Z")]));
+    assert_eq!(ov.missing_ledgers().into_iter().collect::<Vec<_>>(), ["old"], "revived, its work is read again");
 }
