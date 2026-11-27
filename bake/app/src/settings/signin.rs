@@ -35,9 +35,7 @@ pub fn opened(s: &mut Prefs) {
 }
 
 pub fn changed(s: &mut Prefs) {
-    if s.tab == TAB && s.signin.page == PAGE && s.signin.data.is_some() {
-        opened(s);
-    }
+    opened(s);
 }
 
 pub fn settled(s: &mut Prefs) {
@@ -232,12 +230,14 @@ mod tests {
     }
 
     #[test]
-    fn events_reread_only_once_the_tab_has_loaded() {
+    fn a_change_during_the_first_read_starts_a_newer_read() {
         let mut s = prefs();
+        opened(&mut s);
+        let first = s.seq[&Read::Signin];
         changed(&mut s);
-        assert_eq!(s.in_flight, 0);
-        s.signin.data = Some(Ok(Signin::default()));
+        assert_eq!(s.seq[&Read::Signin], first + 1);
+        s.signin.page = 0;
         changed(&mut s);
-        assert_eq!(s.in_flight, 1);
+        assert_eq!(s.seq[&Read::Signin], first + 1);
     }
 }

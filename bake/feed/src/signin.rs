@@ -151,9 +151,15 @@ impl Signin {
     }
 
     pub fn choices(&self) -> Vec<(String, String)> {
-        let mut out = vec![("Automatic (system default browser)".to_string(), AUTO.to_string())];
-        out.extend(self.profiles.iter().map(|p| (p.label.clone(), p.id.clone())));
-        out.push(("Off".into(), OFF.into()));
+        const AUTO_LABEL: &str = "Automatic (system default browser)";
+        const OFF_LABEL: &str = "Off";
+        let mut out = vec![(AUTO_LABEL.to_string(), AUTO.to_string())];
+        for p in &self.profiles {
+            let shared = p.label == AUTO_LABEL || p.label == OFF_LABEL || self.profiles.iter().filter(|o| o.label == p.label).count() > 1;
+            let label = if shared { format!("{} ({})", p.label, self.pinned_detail(p)) } else { p.label.clone() };
+            out.push((label, p.id.clone()));
+        }
+        out.push((OFF_LABEL.into(), OFF.into()));
         out
     }
 
@@ -225,6 +231,18 @@ mod tests {
         assert_eq!(s.consumers.iter().map(Consumer::choice).collect::<Vec<_>>(), vec!["auto", "p1", "none", "auto", "auto"]);
         assert_eq!(s.choices(), vec![("Automatic (system default browser)".into(), "auto".into()), ("Work".into(), "p1".into()), ("Off".into(), "none".into())]);
         assert_eq!(s.pinned_detail(&s.profiles[0]), "Chrome · Profile 1");
+        let clash: Signin = serde_json::from_value(json!({"profiles": [
+            {"id": "a", "label": "Off", "browser": "chrome", "profile": "Default"},
+            {"id": "b", "label": "Automatic (system default browser)", "browser": "arc", "profile": "Default"},
+            {"id": "c", "label": "Work", "browser": "chrome", "profile": "Profile 1"},
+            {"id": "d", "label": "Work", "browser": "brave", "profile": "Default"}],
+            "browsers": [{"browser": "chrome", "label": "Chrome"}]})).unwrap();
+        let labels: Vec<String> = clash.choices().into_iter().map(|(l, _)| l).collect();
+        assert_eq!(labels, vec!["Automatic (system default browser)", "Off (Chrome · Default)", "Automatic (system default browser) (arc · Default)", "Work (Chrome · Profile 1)", "Work (brave · Default)", "Off"]);
+        let mut unique = labels.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), labels.len());
     }
 
     #[test]
