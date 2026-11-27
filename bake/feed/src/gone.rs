@@ -196,7 +196,7 @@ pub fn classify(id: &str, detail: &Detail, listing: Listing, known: Option<&Sess
     let mut row = listed.clone().or_else(|| known.cloned()).or_else(|| detail.row(id)).unwrap_or_else(|| Session { id: id.to_string(), ..Session::default() });
     row.name = crate::search::one_line(&row.name);
     let archived = listed.as_ref().map_or(row.archived, |l| l.archived);
-    let incomplete = matches!(detail, Detail::Failed(_)) || matches!(listing, Listing::Unchecked(_));
+    let incomplete = matches!(detail, Detail::Failed(_)) || detail.read_error().is_some() || matches!(listing, Listing::Unchecked(_));
     let why = if archived {
         Why::Archived
     } else if *detail == Detail::Unreachable || !reachable(&row) {
@@ -417,6 +417,7 @@ mod tests {
         assert!(!classify("s1", &detail(), Listing::Found(listed), None).unwrap().incomplete);
         assert!(!classify("s1", &detail(), Listing::Unsearchable("it has no name or folder to search by".into()), None).unwrap().incomplete);
         assert!(!classify("s1", &Detail::Unreachable, Listing::Absent, None).unwrap().incomplete);
+        assert!(classify("s1", &Detail::Found(json!({"session": {"id": "s1"}, "readError": "transcript busy"})), Listing::Absent, None).unwrap().incomplete);
     }
 
     #[test]
