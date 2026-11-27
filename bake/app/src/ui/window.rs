@@ -229,10 +229,6 @@ pub fn selected_anywhere(s: &App) -> Vec<String> {
     out
 }
 
-pub fn shown_elsewhere(s: &App, session: &str) -> bool {
-    s.windows.stash.iter().any(|(id, l)| *id != s.windows.current && l.screen == Screen::Session && l.selected.as_deref() == Some(session))
-}
-
 pub fn shown(s: &App) -> Vec<(Id, String)> {
     let mut out: Vec<(Id, String)> = shown_sessions(s).into_iter().filter_map(|id| showing(s, &id).map(|w| (w, id))).collect();
     if let Some(id) = s.selected.clone().filter(|id| !out.iter().any(|(_, x)| x == id)) {

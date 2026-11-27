@@ -631,3 +631,47 @@ fn main_coming_back_to_its_session_finds_its_inspector_state_kept() {
     crate::ui::inspect::streamed(&mut s, "a", goal("newer"));
     assert!(crate::ui::inspect::is_streamed(&s, "a", "goal"));
 }
+
+#[test]
+fn selecting_the_session_already_shown_keeps_its_stream_ahead_of_reads() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "a", goal("streamed"));
+    crate::select(&mut s, "a");
+    assert!(crate::ui::inspect::is_streamed(&s, "a", "goal"));
+}
+
+#[test]
+fn a_stream_missed_while_hidden_is_read_again_when_the_session_shows() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "a", goal("first"));
+    s.screen = Screen::Now;
+    crate::ui::inspect::streamed(&mut s, "a", goal("while hidden"));
+    assert!(!crate::ui::inspect::is_streamed(&s, "a", "goal") && crate::ui::inspect::missed(&s, "a"), "the next read may replace the stale goal");
+    crate::ui::inspect::drain(&mut s);
+    assert!(crate::ui::inspect::missed(&s, "a"), "nothing is read while it stays hidden");
+    s.screen = Screen::Session;
+    crate::ui::inspect::drain(&mut s);
+    assert!(!crate::ui::inspect::missed(&s, "a"), "coming back reads it again");
+}
+
+#[test]
+fn a_rekey_carries_the_inspector_to_the_new_id() {
+    let (mut s, _) = beside(false);
+    s.screen = Screen::Session;
+    crate::ui::inspect::streamed(&mut s, "a", goal("streamed"));
+    crate::ui::inspect::expand(&mut s, "a");
+    crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "a2".to_string())]));
+    assert_eq!(s.selected.as_deref(), Some("a2"));
+    assert!(crate::ui::inspect::is_streamed(&s, "a2", "goal") && crate::ui::inspect::expanded(&s, "a2") && crate::ui::inspect::has_meta(&s, "a2"));
+}
+
+#[test]
+fn a_read_landing_after_its_window_closed_is_not_kept() {
+    let (mut s, w) = beside(false);
+    s.screen = Screen::Session;
+    close(&mut s, w);
+    crate::ui::inspect::read(&mut s, "b", 1, Ok(feed::inspect::Metadata::default()));
+    assert!(!crate::ui::inspect::has_meta(&s, "b"));
+}

@@ -42,6 +42,7 @@ pub struct Inspect {
     goal_note: HashMap<String, (bool, String)>,
     overlay: inspect::Overlay,
     expanded: std::collections::HashSet<String>,
+    missed: std::collections::HashSet<String>,
     pub editing: Option<Editing>,
     pub logs: Option<(String, String)>,
     seq: u64,
@@ -52,7 +53,7 @@ pub struct Inspect {
 impl Inspect {
     pub fn new() -> Inspect {
         let (tx, rx) = channel();
-        Inspect { meta: HashMap::new(), reads: inspect::Reads::default(), process: HashMap::new(), goal_busy: HashMap::new(), goal_note: HashMap::new(), overlay: inspect::Overlay::default(), expanded: Default::default(), editing: None, logs: None, seq: 0, tx, rx }
+        Inspect { meta: HashMap::new(), reads: inspect::Reads::default(), process: HashMap::new(), goal_busy: HashMap::new(), goal_note: HashMap::new(), overlay: inspect::Overlay::default(), expanded: Default::default(), missed: Default::default(), editing: None, logs: None, seq: 0, tx, rx }
     }
 }
 
@@ -71,8 +72,27 @@ fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'sta
 
 pub fn load(s: &mut App, id: &str) {
     keep_shown(s);
-    if !super::window::shown_elsewhere(s, id) {
-        s.inspect.overlay.open(id);
+    s.inspect.overlay.hold(id);
+}
+
+pub(crate) fn rekey(s: &mut App, old: &str, new: &str) {
+    s.inspect.overlay.rekey(old, new);
+    if let Some(meta) = s.inspect.meta.remove(old) {
+        s.inspect.meta.insert(new.to_string(), meta);
+    }
+    if s.inspect.expanded.remove(old) {
+        s.inspect.expanded.insert(new.to_string());
+    }
+    if s.inspect.missed.remove(old) {
+        s.inspect.missed.insert(new.to_string());
+    }
+}
+
+fn catch_up(s: &mut App) {
+    let due: Vec<String> = s.inspect.missed.iter().filter(|id| showing(s, id)).cloned().collect();
+    for id in due {
+        s.inspect.missed.remove(&id);
+        metadata_moved(s, &id);
     }
 }
 
@@ -82,6 +102,7 @@ pub fn keep_shown(s: &mut App) {
     s.inspect.meta.retain(|k, _| held.contains(k));
     s.inspect.reads.keep_only(&held);
     s.inspect.expanded.retain(|k| held.contains(k));
+    s.inspect.missed.retain(|k| held.contains(k));
 }
 
 pub(crate) fn ticket(s: &mut App) -> u64 {
@@ -89,7 +110,8 @@ pub(crate) fn ticket(s: &mut App) -> u64 {
 }
 
 pub(crate) fn read(s: &mut App, id: &str, ticket: u64, result: Result<Metadata, String>) {
-    if s.inspect.reads.accept(id, ticket) {
+    let held = super::window::selected_anywhere(s).iter().any(|x| x == id);
+    if held && s.inspect.reads.accept(id, ticket) {
         let old = s.inspect.meta.get(id);
         let data = match result {
             Ok(data) => data.after(old),
@@ -110,6 +132,9 @@ pub(crate) fn streamed(s: &mut App, id: &str, x: feed::wire::Streamed) {
         feed::wire::Streamed::Goal(_) => "goal",
     };
     if !s.inspect.overlay.stream(id, kind, shown) {
+        if !shown && super::window::selected_anywhere(s).iter().any(|x| x == id) {
+            s.inspect.missed.insert(id.to_string());
+        }
         return;
     }
     match x {
@@ -129,6 +154,16 @@ pub(crate) fn is_streamed(s: &App, id: &str, kind: &'static str) -> bool {
 #[cfg(test)]
 pub fn holds_any(s: &App, id: &str) -> bool {
     s.inspect.overlay.holds(id, "goal") || s.inspect.overlay.holds(id, "context")
+}
+
+#[cfg(test)]
+pub fn missed(s: &App, id: &str) -> bool {
+    s.inspect.missed.contains(id)
+}
+
+#[cfg(test)]
+pub fn has_meta(s: &App, id: &str) -> bool {
+    s.inspect.meta.contains_key(id)
 }
 
 #[cfg(test)]
@@ -310,6 +345,7 @@ pub fn drain(s: &mut App) -> bool {
         changed = true;
         settled(s, done);
     }
+    catch_up(s);
     if let Some(editing) = &s.inspect.editing
         && (!showing(s, &editing.session) || !session(s, &editing.session).is_some_and(|x| inspect::goal_controls(x).editable))
     {

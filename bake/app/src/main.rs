@@ -1339,6 +1339,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
         move_key(&mut s.busy_pick, &old, &new);
         move_key(&mut s.redeliver, &old, &new);
         ui::turn_options::rekey(s, &old, &new);
+        ui::inspect::rekey(s, &old, &new);
         move_key(&mut s.work_pick, &old, &new);
         move_member(&mut s.stopping, &old, &new);
         move_key(&mut s.queue_note, &old, &new);

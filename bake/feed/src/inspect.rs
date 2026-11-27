@@ -355,12 +355,25 @@ impl Overlay {
         self.sessions.insert(id.to_string(), Default::default());
     }
 
+    pub fn hold(&mut self, id: &str) {
+        self.sessions.entry(id.to_string()).or_default();
+    }
+
+    pub fn rekey(&mut self, old: &str, new: &str) {
+        if let Some(kinds) = self.sessions.remove(old) {
+            self.sessions.insert(new.to_string(), kinds);
+        }
+    }
+
     pub fn keep(&mut self, held: &[String]) {
         self.sessions.retain(|id, _| held.contains(id));
     }
 
     pub fn stream(&mut self, id: &str, kind: &'static str, shown: bool) -> bool {
         if !shown {
+            if let Some(kinds) = self.sessions.get_mut(id) {
+                kinds.remove(kind);
+            }
             return false;
         }
         self.sessions.entry(id.to_string()).or_default().insert(kind);
@@ -650,6 +663,20 @@ mod tests {
         o.keep(&["a".to_string()]);
         assert!(!o.holds("b", "context"), "a closed window's session is let go");
         assert!(!o.stream("b", "goal", false) && !o.holds("b", "goal"), "and its stream is ignored while nothing shows it");
+    }
+
+    #[test]
+    fn a_hidden_session_s_missed_stream_lets_reads_through_again() {
+        let mut o = Overlay::default();
+        o.open("a");
+        assert!(o.stream("a", "goal", true));
+        assert!(!o.stream("a", "goal", false));
+        assert!(!o.holds("a", "goal"), "a value streamed while hidden was missed, so the next read wins");
+        o.stream("a", "context", true);
+        o.hold("a");
+        assert!(o.holds("a", "context"), "holding a session already followed keeps its streams");
+        o.rekey("a", "a2");
+        assert!(o.holds("a2", "context") && !o.holds("a", "context"));
     }
 
     #[test]
