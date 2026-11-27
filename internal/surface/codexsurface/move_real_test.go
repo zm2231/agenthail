@@ -14,6 +14,10 @@ import (
 	"github.com/zm2231/agenthail/internal/surface"
 )
 
+// realRequestWait bounds the test's own requests to a real app-server, which
+// answers seconds late while its state database waits on a busy disk.
+const realRequestWait = time.Minute
+
 type codexMachine struct {
 	cwd   string
 	codex *Codex
@@ -79,7 +83,7 @@ func (m *codexMachine) moveIn(t *testing.T, out *surface.MoveOut, moveID string,
 
 func threadTurns(t *testing.T, client codexClient, threadID string) int {
 	t.Helper()
-	response, err := client.Request(context.Background(), "thread/turns/list", map[string]any{"threadId": threadID, "limit": 50}, 10*time.Second)
+	response, err := client.Request(context.Background(), "thread/turns/list", map[string]any{"threadId": threadID, "limit": 50}, realRequestWait)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +111,7 @@ func TestARealCodexThreadMovesBetweenTwoAdaptersInOneProcessAndBack(t *testing.T
 		"thread/name/set": {"threadId": threadID, "name": "moving thread"},
 		"thread/goal/set": {"threadId": threadID, "objective": "carry the goal", "status": "paused"},
 	} {
-		if _, err := owner.Request(ctx, method, params, 10*time.Second); err != nil {
+		if _, err := owner.Request(ctx, method, params, realRequestWait); err != nil {
 			t.Fatalf("%s: %v", method, err)
 		}
 	}
@@ -182,7 +186,7 @@ func TestARealCodexThreadMovesBetweenTwoAdaptersInOneProcessAndBack(t *testing.T
 
 func mustRequest(t *testing.T, client codexClient, method string, params map[string]any) map[string]any {
 	t.Helper()
-	response, err := client.Request(context.Background(), method, params, 10*time.Second)
+	response, err := client.Request(context.Background(), method, params, realRequestWait)
 	if err != nil {
 		t.Fatalf("%s: %v", method, err)
 	}
