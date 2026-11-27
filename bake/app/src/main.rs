@@ -1324,6 +1324,7 @@ fn follow_rekeys(s: &mut App, rekeyed: HashMap<String, String>) {
 }
 
 fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
+    ui::attach::adopt(s);
     s.clock = t;
     let mut changed = false;
     let mut arrived = false;

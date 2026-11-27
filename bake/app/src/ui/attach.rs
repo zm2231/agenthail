@@ -79,8 +79,18 @@ pub struct Attach {
     rescan: bool,
 }
 
-pub fn setup(s: &mut App, waker: Waker) {
-    s.attach.cache = Some(ImageCache::new(waker));
+thread_local! {
+    static MADE: std::cell::RefCell<Option<ImageCache>> = const { std::cell::RefCell::new(None) };
+}
+
+pub fn setup(_: &mut App, waker: Waker) {
+    MADE.set(Some(ImageCache::new(waker)));
+}
+
+pub fn adopt(s: &mut App) {
+    if s.attach.cache.is_none() {
+        s.attach.cache = MADE.take();
+    }
 }
 
 fn cache_root() -> Option<PathBuf> {

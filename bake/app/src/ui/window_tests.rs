@@ -230,3 +230,13 @@ fn a_result_goes_to_the_window_whose_request_it_answers_when_two_rename_one_sess
     assert_eq!(holder(&s, |l| l.renaming() == Some("b") && l.rename_seq() == mine), Some(w));
     assert!(s.menus.renaming_with("b", theirs) && !s.menus.renaming_with("b", mine));
 }
+
+#[test]
+fn the_image_cache_made_for_the_main_window_reaches_the_shared_app() {
+    let mut s = app();
+    let mut stand_in = crate::placeholder();
+    crate::ui::attach::setup(&mut stand_in, std::sync::Arc::new(|| {}));
+    assert!(stand_in.attach.cache.is_none() && s.attach.cache.is_none());
+    crate::ui::attach::adopt(&mut s);
+    assert!(s.attach.cache.is_some());
+}

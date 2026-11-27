@@ -100,10 +100,15 @@ pub fn sync_keys(s: &mut App) {
     if s.bar.keys == Some(state) {
         return;
     }
-    if let (Some(app), Some((bar, ..))) = (&s.bar.app, &s.bar.shown) {
-        let _ = app.set_menu(dock_items(bar).into_iter().chain([crate::trace::menu_item()]).chain(keys::menu_items(state)));
+    if let (Some(app), Some(items)) = (&s.bar.app, items(s, state)) {
+        let _ = app.set_menu(items);
     }
     s.bar.keys = Some(state);
+}
+
+pub fn items(s: &App, state: MenuState) -> Option<Vec<MenuItem<App>>> {
+    let (bar, ..) = s.bar.shown.as_ref()?;
+    Some(dock_items(bar).into_iter().chain([crate::trace::menu_item()]).chain(keys::menu_items(state)).collect())
 }
 
 fn show_link(tray: &Tray, link: Link) -> bool {

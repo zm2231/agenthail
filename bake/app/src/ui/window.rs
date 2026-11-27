@@ -94,11 +94,21 @@ pub struct Opened {
     pub frame: Option<Frame>,
     title: String,
     handle: Option<rune::WindowHandle>,
+    menu: Option<(rune::AppHandle<App>, Option<super::keys::MenuState>)>,
 }
 
 impl Opened {
     fn frame(&self) -> Option<Frame> {
-        self.handle.as_ref().and_then(rune::WindowHandle::placement).map(placement_frame).or(self.frame)
+        let now = self.handle.as_ref().and_then(rune::WindowHandle::placement)?;
+        let mut f = placement_frame(now);
+        if (now.maximized || now.full_screen) && now.restore.is_none() && let Some(saved) = self.frame {
+            (f.x, f.y, f.width, f.height) = (saved.x, saved.y, saved.width, saved.height);
+        }
+        Some(f)
+    }
+
+    fn frame_or_saved(&self) -> Option<Frame> {
+        self.frame().or(self.frame)
     }
 }
 
@@ -135,7 +145,7 @@ impl Windows {
     }
 
     pub fn saved(&self) -> Vec<Saved> {
-        self.open.iter().map(|w| Saved { session: w.session.clone(), frame: w.frame() }).collect()
+        self.open.iter().map(|w| Saved { session: w.session.clone(), frame: w.frame_or_saved() }).collect()
     }
 }
 
@@ -201,7 +211,7 @@ pub fn open(s: &mut App, session: &str) -> Id {
     }
     s.windows.next += 1;
     let id = s.windows.next;
-    s.windows.open.push(Opened { id, session: session.clone(), frame: None, title: String::new(), handle: None });
+    s.windows.open.push(Opened { id, session: session.clone(), frame: None, title: String::new(), handle: None, menu: None });
     s.windows.stash.insert(id, Local::blank(id, Some(session.clone()), Screen::Session));
     let back = s.windows.current;
     enter(s, id);
@@ -212,6 +222,10 @@ pub fn open(s: &mut App, session: &str) -> Id {
 
 pub fn show(s: &mut App, session: &str) -> Id {
     let id = open(s, session);
+    if let Some(handle) = s.windows.open.iter().find(|o| o.id == id).and_then(|o| o.handle.as_ref()) {
+        handle.show();
+        handle.focus();
+    }
     queue(s, id, false);
     id
 }
@@ -306,10 +320,23 @@ pub fn open_shown(s: &mut App) {
         if restored {
             spec = spec.inactive();
         }
+        let app = spec.app.handle();
         let handle = rune::open_window(spec);
         if let Some(o) = s.windows.open.iter_mut().find(|o| o.id == id) {
             o.handle = Some(handle);
+            o.menu = Some((app, None));
         }
+    }
+}
+
+fn sync_menu(s: &mut App) {
+    let id = s.windows.current;
+    let state = super::keys::menu_state(s);
+    let stale = s.windows.open.iter().find(|o| o.id == id).and_then(|o| o.menu.as_ref()).is_some_and(|(_, shown)| *shown != Some(state));
+    let Some(items) = crate::menubar::items(s, state).filter(|_| stale) else { return };
+    if let Some((app, shown)) = s.windows.open.iter_mut().find(|o| o.id == id).and_then(|o| o.menu.as_mut()) {
+        let _ = app.set_menu(items);
+        *shown = Some(state);
     }
 }
 
@@ -374,6 +401,7 @@ pub fn poll(s: &mut App, _: f64, tx: &mut rune::Tx) -> bool {
     }
     changed |= crate::look::poll_seen(&mut s.windows.look, tx);
     retitle(s, tx);
+    sync_menu(s);
     crate::switch_composer(s);
     changed |= super::complete::pump(s);
     keep_draft(s);
