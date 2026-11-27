@@ -209,11 +209,6 @@ impl Tails {
         self.failed.insert(session.to_string(), Instant::now());
     }
 
-    pub fn retry_due(&self) -> bool {
-        let now = Instant::now();
-        self.failed.values().any(|until| now >= *until)
-    }
-
     pub fn next_retry(&self) -> Option<Instant> {
         self.failed.values().min().copied()
     }

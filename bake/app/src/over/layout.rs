@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
@@ -12,6 +13,8 @@ pub const PANES: [&str; 3] = ["Sidebar", "Needs you", "Sessions"];
 
 static LAST: Mutex<String> = Mutex::new(String::new());
 static FAILED: Mutex<Option<String>> = Mutex::new(None);
+static FAILED_AT: Mutex<Option<Instant>> = Mutex::new(None);
+const WRITE_RETRY: Duration = Duration::from_secs(2);
 
 pub fn failure() -> Option<String> {
     FAILED.lock().expect("layout lock").clone()
@@ -211,13 +214,16 @@ fn writer() -> &'static Sender<Write> {
                     .and_then(|()| std::fs::write(&next, &text))
                     .and_then(|()| std::fs::rename(&next, &p))
                     .map_err(|e| e.to_string());
-                *FAILED.lock().expect("layout lock") = written.clone().err();
-                crate::wake::poke();
+                *FAILED_AT.lock().expect("layout lock") = written.is_err().then(Instant::now);
                 if written.is_err() {
                     let mut last = LAST.lock().expect("layout lock");
                     if *last == text {
                         last.clear();
                     }
+                }
+                let failed = written.clone().err();
+                if std::mem::replace(&mut *FAILED.lock().expect("layout lock"), failed.clone()) != failed {
+                    crate::wake::poke();
                 }
                 if let Some(done) = done {
                     let _ = done.send(written);
@@ -234,6 +240,9 @@ pub fn save(s: &App) {
     }
     if path().is_none() {
         *FAILED.lock().expect("layout lock") = Some("HOME is not set".into());
+        return;
+    }
+    if FAILED_AT.lock().expect("layout lock").is_some_and(|at| !crate::wake::due_after(at, WRITE_RETRY)) {
         return;
     }
     let now = encode(s);

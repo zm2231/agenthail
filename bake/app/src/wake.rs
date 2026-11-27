@@ -65,6 +65,10 @@ pub fn later(wait: time::Duration) {
     record(Instant::now() + Duration::try_from(wait).unwrap_or_default());
 }
 
+pub fn by(at: Instant) {
+    record(at);
+}
+
 pub fn due_after(since: Instant, wait: Duration) -> bool {
     due(since + wait)
 }

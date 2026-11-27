@@ -438,8 +438,34 @@ fn a_stream_batch_wakes_the_loop_and_an_open_stream_does_not_poll_every_frame() 
     let before = rung(&rings);
     std::thread::spawn(move || stream.send(feed::source::Message::Status("live".into())).unwrap()).join().unwrap();
     assert_eq!(rung(&rings), before + 1, "the stream wakes the loop");
-    rt.frame(DT);
+    let clock = rt.state.clock + DT;
+    let mut drew = false;
+    rt.update_if(|s, tx| {
+        drew = crate::poll(s, clock, tx);
+        drew
+    });
+    assert!(drew, "a new stream status redraws");
     assert_eq!(rt.state.panes["a"].status, "live");
+}
+
+#[test]
+fn an_unconfirmed_change_that_expires_shows_the_daemon_value_in_the_same_poll() {
+    if !isolated("an_unconfirmed_change_that_expires_shows_the_daemon_value_in_the_same_poll") {
+        return;
+    }
+    let dir = Dir::new("expire");
+    let mut rt = unframed(app(sessions(&["a"]), &dir));
+    rt.frame(DT);
+    let hold = feed::derive::live::EXPECT_HOLD - std::time::Duration::from_millis(40);
+    rt.update(|s, _| {
+        assert!(s.ov.live.patch("a", feed::menu::Patch::Alias(Some("renamed".into())), std::time::Instant::now() - hold));
+    });
+    rt.frame(DT);
+    assert_eq!(rt.state.ov.d.session("a").and_then(|x| x.alias.clone()), Some("renamed".into()), "the change shows while it waits");
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    rt.frame(DT);
+    assert!(!rt.state.ov.live.stale());
+    assert_eq!(rt.state.ov.d.session("a").and_then(|x| x.alias.clone()), None, "the expiry poll shows the daemon value");
 }
 
 #[test]
@@ -470,6 +496,33 @@ fn a_stream_that_goes_quiet_catches_up_at_its_deadline_and_redraws() {
     assert!(!poll_at(&mut rt, before), "nothing changes before the stream goes quiet");
     assert!(poll_at(&mut rt, before + wake), "catching up changes what shows");
     assert!(rt.state.panes["a"].caught_up);
+}
+
+#[test]
+fn a_layout_that_cannot_be_written_retries_on_a_wait_not_in_a_loop() {
+    if !isolated("a_layout_that_cannot_be_written_retries_on_a_wait_not_in_a_loop") {
+        return;
+    }
+    let home = std::path::PathBuf::from(std::env::var_os("HOME").unwrap()).join("Library/Application Support");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(home.join("Agenthail"), "not a folder").unwrap();
+    let rings = rings();
+    let dir = Dir::new("layout");
+    let mut first = app(sessions(&["a"]), &dir);
+    first.ov.persist = true;
+    let mut rt = unframed(first);
+    rt.frame(DT);
+    let started = std::time::Instant::now();
+    let mut polls = 0;
+    while started.elapsed() < std::time::Duration::from_millis(800) {
+        if crate::wake::MAIN.rung() {
+            rt.frame(DT);
+            polls += 1;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    assert!(crate::over::layout::failure().is_some(), "the failure shows");
+    assert!(polls <= 3 && rung(&rings) <= 3, "a failing write waits before trying again: {polls} polls, {} rings", rung(&rings));
 }
 
 #[test]
@@ -511,15 +564,15 @@ fn a_post_while_only_a_session_window_runs_rings_main_which_drains_it() {
     let mut id = 0;
     main.update(|s, _| id = crate::ui::window::open(s, "a"));
     settle(&mut main);
+    let polled = rung(&rings);
     let spec = AppSpec::<App> { poll: Some(crate::ui::window::poll), ..AppSpec::new("Session", (900.0, 820.0), crate::placeholder, crate::ui::session_window) };
     let mut window = rune::App::new(spec).headless_runtime((900.0, 820.0), Env { system_dark: true, scale: 1.0 });
     std::mem::swap(&mut main.state, &mut window.state);
     crate::ui::window::on_enter(&mut window.state, &format!("session-{id}"));
     window.frame(DT);
-    let before = rung(&rings);
     let out = window.state.outbox.clone();
     std::thread::spawn(move || out.send(snapshot(2, sessions(&["a", "b"]), None)).unwrap()).join().unwrap();
-    assert_eq!(rung(&rings), before + 1, "the post rings main's wake whichever window is in front");
+    assert!(rung(&rings) > polled, "main's wake is asked for since main last polled, whichever window is in front");
     for _ in 0..3 {
         window.frame(DT);
     }

@@ -579,10 +579,6 @@ impl Overview {
         self.tails.follow(session)
     }
 
-    pub fn tail_retry_due(&self) -> bool {
-        self.tails.retry_due()
-    }
-
     pub fn next_tail_retry(&self) -> Option<Instant> {
         self.tails.next_retry()
     }

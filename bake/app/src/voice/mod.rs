@@ -54,6 +54,7 @@ pub fn share(built: f64, world: &World) {
         s.activity = world.voice_activity(&s.operator);
         s.version += 1;
     });
+    crate::wake::VOICE.ring();
 }
 
 pub fn operator() -> Option<String> {
@@ -330,6 +331,7 @@ pub fn open(target: &str, name: &str) {
     let open = WINDOW.with(|w| w.borrow().clone());
     if let Some(handle) = open {
         ROUTE.with(|r| *r.borrow_mut() = Some((target.to_string(), name.to_string())));
+        crate::wake::VOICE.ring();
         handle.focus();
         return;
     }

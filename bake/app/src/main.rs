@@ -1517,6 +1517,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     let mut counter = s.counter;
     let mut panes_moved = false;
     let mut caught: Vec<String> = Vec::new();
+    let mut statuses = false;
     let mut streamed: Vec<(String, feed::wire::Streamed)> = Vec::new();
     for (id, pane) in s.panes.iter_mut() {
         let mut moved = false;
@@ -1544,6 +1545,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                         if status.starts_with("reconnecting") && !pane.caught_up && pane.transcript.items().is_empty() && !caught.contains(id) {
                             caught.push(id.clone());
                         }
+                        statuses |= pane.status != status;
                         pane.status = status;
                     }
                     Message::CaughtUp => caught.push(id.clone()),
@@ -1561,7 +1563,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     }
     s.counter = counter;
     s.panes_moved |= panes_moved;
-    changed |= !caught.is_empty();
+    changed |= !caught.is_empty() || statuses;
     for id in caught {
         history::caught_up(s, &id);
     }
@@ -1615,17 +1617,18 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= over::extensions::drain(s);
     changed |= over::projects::drain(s);
     changed |= ui::delivery::poll(s) | ui::ready::poll(s) | over::earlier::poll(s) | over::listing::poll(s);
-    if s.ov.live.tail_retry_due() {
+    if s.ov.live.next_tail_retry().is_some_and(wake::due) {
         fetch_tails(s);
-    }
-    if let Some(at) = s.ov.live.next_tail_retry() {
-        wake::due(at);
     }
     changed |= ui::complete::pump(s);
     changed |= look::poll(look::Window::Main, tx);
     ui::paste::settle(s);
     changed |= ui::notice::poll(s);
     changed |= ui::tabs::expire(s);
+    if s.ov.live.stale() {
+        rebuild(s);
+        changed = true;
+    }
     ui::window::open_shown(s);
     ui::window::note_frames(s);
     switch_composer(s);

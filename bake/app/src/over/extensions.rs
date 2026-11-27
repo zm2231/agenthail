@@ -306,7 +306,7 @@ pub fn drain(s: &mut App) -> bool {
         .filter_map(|c| {
             let fetched = c.fetched?;
             let secs = fetched.elapsed().as_secs();
-            crate::wake::due_after(fetched, Duration::from_secs(feed::extensions::age_moves_at(secs)));
+            crate::wake::by(fetched + Duration::from_secs(feed::extensions::age_moves_at(secs)));
             Some(feed::extensions::age(secs, s.ov.ext.listing.contains(&c.key())))
         })
         .collect();
