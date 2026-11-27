@@ -117,11 +117,25 @@ fn redecode(s: &mut State) {
     SCREEN.store(side, Ordering::Relaxed);
     let (Some(tx), paths) = (s.tx.clone(), s.look.images()) else { return };
     std::thread::spawn(move || {
-        let Ok(client) = Client::from_env() else { return };
-        for path in paths {
-            let got = client.ui_background(&path).and_then(|data| fl::decode(&data, side, SAMPLE_SIDE));
-            if tx.send(Got::Image(path, side, got)).is_err() {
-                return;
+        let mut left = paths;
+        while !left.is_empty() && SCREEN.load(Ordering::Relaxed) == side {
+            let Ok(client) = Client::from_env() else {
+                std::thread::sleep(RETRY);
+                continue;
+            };
+            let mut failed = Vec::new();
+            for path in left {
+                let got = client.ui_background(&path).and_then(|data| fl::decode(&data, side, SAMPLE_SIDE));
+                if got.is_err() {
+                    failed.push(path.clone());
+                }
+                if tx.send(Got::Image(path, side, got)).is_err() {
+                    return;
+                }
+            }
+            left = failed;
+            if !left.is_empty() {
+                std::thread::sleep(RETRY);
             }
         }
     });
@@ -276,7 +290,7 @@ fn pump(s: &mut State) {
                 s.problem = None;
             }
             Got::View(..) => {}
-            Got::Image(_, side, _) if side != s.screen => {}
+            Got::Image(path, side, _) if side != s.screen || !s.look.images().contains(&path) => {}
             Got::Image(path, _, Ok(d)) => {
                 let p = picture(d);
                 s.pictures.insert(path, Ok(p));
