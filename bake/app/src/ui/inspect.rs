@@ -66,7 +66,6 @@ fn spawn(s: &App, job: impl FnOnce(&feed::catalog::Client) -> Done + Send + 'sta
 pub fn load(s: &mut App, id: &str) {
     s.inspect.meta.retain(|k, _| k == id);
     s.inspect.reads.keep_only(id);
-    s.inspect.process.retain(|k, _| k == id);
     if s.inspect.expanded.as_deref() != Some(id) {
         s.inspect.expanded = None;
     }
@@ -189,9 +188,10 @@ fn settled(s: &mut App, done: Done) {
             goal_moved(s, &id);
         }
         Done::Life(id, generation, act, tell, result) => {
+            let elsewhere = (s.selected.as_deref() != Some(id.as_str())).then(|| session(s, &id).map(|x| x.title()).unwrap_or_default());
             let Some(p) = s.inspect.process.get_mut(&id).filter(|p| p.generation == generation) else { return };
             p.busy = None;
-            if tell {
+            if tell || elsewhere.is_some() {
                 let line = match &result {
                     Ok(r) if act == LifecycleAct::Status => Some(r.line()).filter(|l| !l.is_empty()),
                     Ok(r) if act == LifecycleAct::Resume && r.unchanged == Some(true) => Some(inspect::RESUME_UNCHANGED.to_string()),
@@ -199,7 +199,10 @@ fn settled(s: &mut App, done: Done) {
                     _ => None,
                 };
                 if let Some(line) = line {
-                    s.ov.notice = Some(line);
+                    s.ov.notice = Some(match &elsewhere {
+                        Some(title) if !title.is_empty() => format!("{title}: {line}"),
+                        _ => line,
+                    });
                 }
             }
             match result {

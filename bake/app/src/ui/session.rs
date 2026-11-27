@@ -260,12 +260,12 @@ pub(crate) fn session_screen(s: &App) -> El {
     let Some(id) = s.selected.clone() else { return transcript::loading("Pick a session".into()) };
     let Some(x) = session(s, &id).filter(|x| !x.archived) else { return super::gone::screen(s, &id) };
     let mut center = col().grow(1.0).h_full().min_w(0.0).child(header(s, x));
-    let open = open_request(s, x).is_some() && !x.read_only;
-    let sent = has_settled(s, x) && !x.read_only;
+    let open = open_request(s, x).is_some();
+    let sent = has_settled(s, x);
     let stop = x.limit(s.now);
     if let Some(stop) = stop.as_ref().filter(|_| !open) {
         center = center.child(super::limit::card(s, x, stop));
-    } else if open || (x.state(s.now) == State::NeedsYou && !sent && !x.read_only) {
+    } else if open || (x.state(s.now) == State::NeedsYou && !sent) {
         center = center.child(waiting_card(s, x));
     } else if sent {
         let request = settled_request(s, x).map(|r| r.id.clone()).unwrap_or_default();
