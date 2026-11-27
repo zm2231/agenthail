@@ -165,6 +165,11 @@ fn covered(s: &App) -> bool {
         || s.inspect.logs.is_some()
         || s.limits.picking.is_some()
         || s.limits.confirm.is_some()
+        || s.limits.consent.is_some()
+        || crate::over::search::activity_open(s)
+        || s.ov.list.status_open
+        || s.ov.list.surface_open
+        || s.ov.sessions_project_open
         || s.accounts.open
         || s.accounts.planning.is_some()
         || s.holder_menu.is_some()
