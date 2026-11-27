@@ -76,6 +76,12 @@ pub fn ledger_changed(s: &mut App, key: &str) {
     refresh(s, hit);
 }
 
+pub fn counted(s: &App) -> Vec<String> {
+    let mut keys: Vec<String> = s.readies.counts.keys().cloned().collect();
+    keys.sort();
+    keys
+}
+
 pub fn moved(s: &mut App, projects: &[String]) {
     for project in projects {
         s.readies.counts.remove(project);

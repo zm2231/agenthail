@@ -7,6 +7,7 @@ mod look;
 mod menubar;
 mod notify;
 mod over;
+mod quiet;
 mod settings;
 mod theme;
 mod trace;
@@ -516,10 +517,12 @@ pub fn load_pane(s: &mut App, id: &str) {
     }
 }
 
-fn rebuild(s: &mut App) {
+fn rebuild(s: &mut App) -> bool {
+    let shown = quiet::shown_minute(s);
+    let mut moved = false;
     over::jump::keep_highlight(s, |s| {
         let panes: Vec<(&str, &[feed::Item])> = s.panes.iter().map(|(id, p)| (id.as_str(), p.transcript.items())).collect();
-        s.ov.rebuild(&panes);
+        moved = s.ov.rebuild(&panes, shown);
     });
     settings::sessions_changed(&s.sessions, s.ov.needs.len());
     s.panes_moved = false;
@@ -528,6 +531,7 @@ fn rebuild(s: &mut App) {
     {
         s.rebuilds += 1;
     }
+    moved
 }
 
 fn fetch_tails(s: &mut App) {
@@ -1387,8 +1391,9 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     s.clock = t;
     let mut changed = false;
     let mut arrived = false;
+    let before = quiet::outside(s);
     while let Ok(message) = s.inbox.try_recv() {
-        changed = true;
+        changed |= !matches!(message, Bg::Snapshot(..) | Bg::Overview(..) | Bg::Tail(..) | Bg::Ledger(..));
         match message {
             Bg::Snapshot(at, epoch, seq, sessions, touched) => {
                 if s.ov.live.take_sessions(&at, &epoch, seq, sessions) && s.ov.live.stale() {
@@ -1406,6 +1411,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
                 ui::connect::up(s);
                 link::listed(s);
                 for (w, id) in ui::window::shown(s).into_iter().filter(|(_, id)| touched.as_ref().is_none_or(|t| t.contains(id))) {
+                    changed |= touched.is_some();
                     ui::window::within(s, w, |s| {
                         selected_changed(s, &id);
                         if touched.is_some() {
@@ -1604,8 +1610,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
         ui::inspect::streamed(s, &id, x);
     }
     if s.ov.live.stale() || (s.panes_moved && wake::due_clock(s.built_at + PANE_REBUILD_SECS, s.clock)) {
-        rebuild(s);
-        changed = true;
+        changed |= rebuild(s);
     }
     if arrived {
         over::arrive(s);
@@ -1659,8 +1664,7 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     changed |= ui::notice::poll(s);
     changed |= ui::tabs::expire(s);
     if s.ov.live.stale() {
-        rebuild(s);
-        changed = true;
+        changed |= rebuild(s);
     }
     ui::window::open_shown(s);
     ui::window::note_frames(s);
@@ -1677,6 +1681,10 @@ fn poll(s: &mut App, t: f64, tx: &mut Tx) -> bool {
     menubar::badge(s);
     hotkey::tick();
     changed |= minute(s);
+    if s.ov.d.shown != quiet::shown_minute(s) {
+        changed |= rebuild(s);
+    }
+    changed |= quiet::outside(s) != before;
     if let Some(due) = over::worksearch::wait(s) {
         s.wake.after(tx, due);
     }
