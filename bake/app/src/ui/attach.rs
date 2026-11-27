@@ -31,6 +31,7 @@ pub enum Done {
 pub enum Then {
     Open,
     Reveal,
+    Look,
 }
 
 pub enum Picture {
@@ -358,7 +359,17 @@ fn act(tx: &mut Tx, then: Then, path: &Path) {
     let _ = match then {
         Then::Open => tx.open_path(path),
         Then::Reveal => tx.reveal_path(path),
+        Then::Look => {
+            quick_look(path);
+            Ok(())
+        }
     };
+}
+
+fn quick_look(path: &Path) {
+    if let Ok(mut child) = std::process::Command::new("/usr/bin/qlmanage").arg("-p").arg(path).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn() {
+        std::thread::spawn(move || child.wait());
+    }
 }
 
 pub fn pump(s: &mut App) -> bool {
@@ -472,6 +483,7 @@ fn run(s: &mut App, target: Target, act_: &'static str, tx: &mut Tx) {
     s.attach.menu = None;
     match (target, act_) {
         (Target::Image { session, attachment }, "open") => open_picture(s, &session, &attachment, Then::Open, tx),
+        (Target::Image { session, attachment }, "look") => open_picture(s, &session, &attachment, Then::Look, tx),
         (Target::Image { session, attachment }, "reveal") => open_picture(s, &session, &attachment, Then::Reveal, tx),
         (Target::Image { attachment, .. }, "copy") => {
             if let Some(Picture::Ready(image)) = s.attach.pictures.get(&attachment.id) {
@@ -479,6 +491,7 @@ fn run(s: &mut App, target: Target, act_: &'static str, tx: &mut Tx) {
             }
         }
         (Target::File { session, item }, "open") => fetch_sent(s, &session, &item, Then::Open, tx),
+        (Target::File { session, item }, "look") => fetch_sent(s, &session, &item, Then::Look, tx),
         (Target::File { session, item }, "reveal") => fetch_sent(s, &session, &item, Then::Reveal, tx),
         (Target::File { item, .. }, "copy") => {
             let path = item.files.first().map(|f| f.path.clone()).unwrap_or_default();
@@ -495,13 +508,13 @@ pub fn overlays(s: &App, layer: &mut Vec<El>) {
     let entries: Vec<(&str, &'static str, bool)> = match &open.target {
         Target::Image { attachment, .. } => {
             let ready = matches!(s.attach.pictures.get(&attachment.id), Some(Picture::Ready(_)));
-            vec![("Open in Preview", "open", ready), ("Show in Finder", "reveal", ready), ("Copy Image", "copy", ready)]
+            vec![("Quick Look", "look", ready), ("Open in Preview", "open", ready), ("Show in Finder", "reveal", ready), ("Copy Image", "copy", ready)]
         }
         Target::File { session, item } => {
             let host = crate::session(s, session).map(|x| x.host.name.clone());
             let opens = attach::sent_reason(item, host.as_deref()).is_none();
             let path = item.files.first().is_some_and(|f| !f.path.is_empty());
-            vec![("Open", "open", opens), ("Show in Finder", "reveal", opens), ("Copy Path", "copy", path)]
+            vec![("Quick Look", "look", opens), ("Open", "open", opens), ("Show in Finder", "reveal", opens), ("Copy Path", "copy", path)]
         }
         Target::Path { .. } => vec![("Copy Path", "copy", true)],
     };
