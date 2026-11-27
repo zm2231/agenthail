@@ -330,7 +330,7 @@ fn sheet_job(s: &App) -> Option<Job> {
         }
         Sheet::Lead { project, checkout, surface, name } => {
             let p = record(s, project)?;
-            let c = p.lead_places().into_iter().find(|c| c.project_id == *checkout)?;
+            let c = p.lead_place(checkout)?;
             Some(Job::StartLead { surface: surface.to_string(), folder: c.root_path.clone(), host: c.host.target().to_string(), name: name.text.trim().trim_start_matches('@').to_string(), project: p.name().to_string(), replace: false })
         }
     }
@@ -667,6 +667,9 @@ fn sheet_view(s: &App, sheet: &Sheet, layer: &mut Vec<El>) {
             let Some(p) = record(s, project) else { return };
             let places = p.lead_places();
             let mut body = col().w_full().gap(12.0);
+            if let [only] = places.as_slice() {
+                body = body.child(field("Starts on", text(format!("{}: {}", only.host.name, only.root_path)).font(META).color(base()).wrap().w_full()));
+            }
             if places.len() > 1 {
                 let labels = projects::host_labels(p.checkouts.iter().map(|c| (c.host.id.as_str(), c.host.name.as_str())));
                 let choices = places.iter().map(|c| (format!("{}: {}", labels.get(&c.host.id).cloned().unwrap_or_else(|| c.host.name.clone()), c.root_path), c.project_id.clone())).collect();

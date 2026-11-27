@@ -107,6 +107,11 @@ impl ProjectRecord {
         }
     }
 
+    pub fn lead_place(&self, chosen: &str) -> Option<&Checkout> {
+        let places = self.lead_places();
+        places.iter().find(|c| c.project_id == chosen).or_else(|| if places.len() == 1 { places.first() } else { None }).copied()
+    }
+
     pub fn start_place(&self) -> Option<&Checkout> {
         let open: Vec<&Checkout> = self.checkouts.iter().filter(|c| !c.archived && c.host.reachable()).collect();
         open.iter().find(|c| c.host.local() && c.added).or_else(|| open.iter().find(|c| c.host.local())).or_else(|| open.first()).copied()

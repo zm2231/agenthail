@@ -454,3 +454,17 @@ fn a_change_that_failed_on_some_computers_says_where() {
     assert_eq!(e.message, "It changed on mac but failed on forge (host is no longer paired)");
     assert_eq!(client.project_rename("p1", "New").unwrap_err().message, "It failed on forge (no reason given)");
 }
+
+#[test]
+fn a_lead_starts_where_chosen_or_on_the_one_computer_left() {
+    let two = |state: &str| record(json!({"id": "p1", "checkouts": [
+        {"host": {"id": "h1", "name": "mac", "state": "local"}, "projectId": "p1", "rootPath": "/w/app"},
+        {"host": {"id": "h2", "name": "forge", "state": state}, "projectId": "h2::p1", "rootPath": "/home/a/app"},
+        {"host": {"id": "h3", "name": "spare", "state": "connected"}, "projectId": "h3::p1", "rootPath": "/s/app", "archived": true},
+    ]}));
+    let both = two("connected");
+    assert_eq!(both.lead_place("h2::p1").map(|c| c.host.id.as_str()), Some("h2"));
+    assert_eq!(both.lead_place("gone"), None, "with a choice left, nothing is picked for you");
+    let one = two("unreachable");
+    assert_eq!(one.lead_place("h2::p1").map(|c| c.host.id.as_str()), Some("h1"), "the one computer left is used and shown");
+}
