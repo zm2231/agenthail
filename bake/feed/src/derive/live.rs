@@ -122,8 +122,16 @@ impl Known {
         self.opened.iter().filter(|id| !self.wanted.contains(*id)).cloned().collect()
     }
 
+    fn actor_retries(&self) -> impl Iterator<Item = Instant> + '_ {
+        self.actors.values().filter_map(|until| *until)
+    }
+
     pub fn next_retry(&self) -> Option<Instant> {
-        self.opened_retries().map(|(_, at)| at).min()
+        self.opened_retries().map(|(_, at)| at).chain(self.actor_retries()).min()
+    }
+
+    pub fn actors_due(&self, now: Instant) -> bool {
+        self.actor_retries().any(|at| at <= now)
     }
 
     pub fn retries_due(&self, now: Instant) -> Vec<String> {

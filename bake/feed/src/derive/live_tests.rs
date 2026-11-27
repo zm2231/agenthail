@@ -457,3 +457,12 @@ fn a_reset_keeps_every_opened_project_but_forgets_what_was_read() {
     assert!(!fresh.skips_ledger("p", Some(Instant::now() - std::time::Duration::from_secs(5))) && !fresh.skips_actor("gone"));
     assert!(fresh.open("p"), "nothing is held any more");
 }
+
+#[test]
+fn a_failed_lookup_sets_the_overview_retry_timer() {
+    let mut known = super::live::Known::default();
+    let at = Instant::now();
+    known.read("old", at, &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: vec!["gone".into()] }));
+    assert_eq!(known.next_retry(), Some(at + super::live::RETRY));
+    assert!(!known.actors_due(at) && known.actors_due(at + super::live::RETRY));
+}

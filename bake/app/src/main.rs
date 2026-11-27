@@ -249,7 +249,7 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
             while let Ok(ask) = poke.try_recv() {
                 take(ask);
             }
-            due |= last.is_none_or(|at| at.elapsed() >= feed::watch::OVERVIEW_EVERY);
+            due |= last.is_none_or(|at| at.elapsed() >= feed::watch::OVERVIEW_EVERY) || known.actors_due(std::time::Instant::now());
             reads.extend(known.retries_due(std::time::Instant::now()));
             reads.sort();
             reads.dedup();
