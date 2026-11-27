@@ -38,6 +38,8 @@ pub enum Read {
 }
 
 pub use overview::sessions_changed;
+#[cfg(test)]
+pub use agents::show as show_agent_roles;
 
 const ALL: [Read; 6] = [Read::Base, Read::Settings, Read::Remote, Read::Compaction, Read::Preferences, Read::Devices];
 

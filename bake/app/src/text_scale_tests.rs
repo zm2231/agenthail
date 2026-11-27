@@ -153,6 +153,19 @@ fn shot() {
         let mut rt = settings_on(tab, page);
         render(&mut rt, SETTINGS, &out.join(format!("{name}-{scale}.png")));
     }
+    let mut rt = settings_on(agents, 0);
+    rt.update(|s, _| {
+        let roles = serde_json::from_value(json!({"roles": [
+            {"name": "lead", "builtIn": true},
+            {"name": "release-captain-for-the-weekly-train-42", "edited": true},
+            {"name": "reviewer", "builtIn": true},
+        ]}))
+        .unwrap();
+        crate::settings::show_agent_roles(s, roles, "lead");
+    });
+    rt.frame(DT);
+    rt.settle_all();
+    render(&mut rt, SETTINGS, &out.join(format!("roles-{scale}.png")));
 }
 
 const SETTINGS: (f32, f32) = (720.0, 620.0);

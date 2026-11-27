@@ -65,6 +65,13 @@ pub fn escape(s: &mut Prefs) -> bool {
     s.agents.open.take().is_some() || s.agents.creating.take().is_some() || std::mem::take(&mut s.agents.removing)
 }
 
+#[cfg(test)]
+pub fn show(s: &mut Prefs, roles: Roles, selected: &str) {
+    s.agents.page = 1;
+    s.agents.selected = Some(selected.to_string());
+    s.agents.read = Some(Ok(Loaded { roles, read_only: None }));
+}
+
 pub fn opened(s: &mut Prefs) {
     if s.tab == TAB {
         reload(s);
