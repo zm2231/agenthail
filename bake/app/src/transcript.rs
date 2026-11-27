@@ -399,7 +399,11 @@ fn block_el(cx: &Cx, block: &Block, open: bool, gap: f32, last: bool) -> El {
         Kind::Image(attachment) => crate::ui::attach::image_el(cx.app, cx.session, attachment),
         Kind::File(item) => crate::ui::attach::file_el(cx.app, cx.session, item),
         Kind::Files(files) => crate::ui::attach::files_el(cx.app, &block.id, files),
-        Kind::Unknown { title, .. } => col().child(text(title.clone()).font(META).color(faint())),
+        Kind::Unknown { title, kind, text: body } => {
+            let head = row().w_full().gap(8.0).items_center().child(text(title.clone()).font(META_BOLD).color(theme::text()).truncate().min_w(0.0)).child(row().px(5.0).py(1.0).radius(8.0).fill(wash()).child(text(kind.clone()).font(META.mono()).color(muted())));
+            let content = if body.trim().is_empty() { text("No recorded content.").font(META).color(faint()) } else { markdown(body) };
+            col().key(format!("unknown-{}", block.id)).w_full().gap(4.0).px(12.0).py(9.0).radius(12.0).fill(crate::theme::ink(0.04)).border(1.0, line()).child(head).child(content)
+        }
     };
     let mut row_el = col().w_full().max_w(780.0).px(36.0).pt(gap).child(body);
     if let Some(footer) = footer(cx, block) {
