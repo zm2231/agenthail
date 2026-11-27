@@ -261,3 +261,22 @@ func TestActionIdempotencyLostCompletionIsUnknownNotRedispatched(t *testing.T) {
 		t.Fatalf("retry after lost completion re-dispatched: sends=%d", len(retriedFake.sent))
 	}
 }
+
+func TestActionIdempotencyUnservedRequestRunsAgainUnderItsKey(t *testing.T) {
+	r := openActionTestRegistry(t)
+	d := newTestDaemon(t, r, nil)
+	var calls atomic.Int32
+	handler := d.idempotentActionHandler(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			writeAPIError(w, http.StatusServiceUnavailable, "ledger_owner_unreachable", "The ledger's host cannot be reached; nothing was recorded.")
+			return
+		}
+		writeDashboardJSON(w, http.StatusOK, map[string]any{"ok": true})
+	})
+	first := serveAction(handler, actionRequestWithKey(`{"text":"add"}`, "owner-down"), "device-a")
+	second := serveAction(handler, actionRequestWithKey(`{"text":"add"}`, "owner-down"), "device-a")
+	third := serveAction(handler, actionRequestWithKey(`{"text":"add"}`, "owner-down"), "device-a")
+	if first.Code != http.StatusServiceUnavailable || second.Code != http.StatusOK || third.Code != http.StatusOK || calls.Load() != 2 {
+		t.Fatalf("first=%d second=%d third=%d calls=%d", first.Code, second.Code, third.Code, calls.Load())
+	}
+}
