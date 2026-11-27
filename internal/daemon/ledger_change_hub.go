@@ -69,13 +69,15 @@ func (h *ledgerChangeHub) publish(key string) {
 		return
 	}
 	version, err := h.version(key)
+	if err != nil {
+		h.logf("ledger events: version of %s: %s; retrying", key, err)
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.latest[key] != publish {
 		return
 	}
 	if err != nil {
-		h.logf("ledger events: version of %s: %s; retrying", key, err)
 		h.schedule(key)
 		return
 	}
