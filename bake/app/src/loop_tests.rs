@@ -459,9 +459,10 @@ fn ledger_api(paths: std::sync::mpsc::Sender<String>) -> String {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let w8 = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let w5 = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     std::thread::spawn(move || {
         for stream in listener.incoming() {
-            let (paths, w8) = (paths.clone(), w8.clone());
+            let (paths, w8, w5) = (paths.clone(), w8.clone(), w5.clone());
             std::thread::spawn(move || {
                 let mut stream = stream.unwrap();
                 let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -494,7 +495,11 @@ fn ledger_api(paths: std::sync::mpsc::Sender<String>) -> String {
                     (500, json!({"error": {"code": "internal", "message": "the ledger store is busy"}}))
                 } else if path.starts_with("/api/v1/ledger?projectKey=shared%3Az&view=item&id=") {
                     let id = path.rsplit('=').next().unwrap_or_default();
-                    let state = if id == "z-W5" { "done" } else { "parked" };
+                    let state = match id {
+                        "z-W5" if w5.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 => "open",
+                        "z-W5" => "done",
+                        _ => "parked",
+                    };
                     if id == "z-W7" {
                         std::thread::sleep(std::time::Duration::from_millis(300));
                     }
@@ -692,10 +697,17 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     until(&mut rt, |s| s.ov.d.work.contains_key("z-W5"));
     assert_eq!(asked(&paths).len(), 1);
     crate::over::work::start(&mut rt.state, "z-W5", feed::ledger::Move::Reopen);
-    quiet(&mut rt);
-    quiet(&mut rt);
-    let moved = asked(&paths);
+    let mut moved = Vec::new();
+    for _ in 0..400 {
+        moved.extend(asked(&paths));
+        if moved.len() >= 2 && rt.state.ov.d.work["z-W5"].state == "open" {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        rt.frame(DT);
+    }
     assert_eq!(moved.len(), 2, "{moved:?}");
+    assert_eq!(rt.state.ov.d.work["z-W5"].state, "open", "the screen shows the reopened item");
     let posted: serde_json::Value = serde_json::from_str(moved[0].strip_prefix("/api/v1/ledger/work ").expect("the move is posted first")).unwrap();
     assert_eq!((posted["projectKey"].as_str(), posted["itemId"].as_str(), posted["action"].as_str()), (Some("shared:z"), Some("z-W5"), Some("reopen")), "a move on found work goes to its own ledger");
     assert_eq!(moved[1], "/api/v1/ledger?projectKey=shared%3Az&view=item&id=z-W5", "and the item is read again after it");
