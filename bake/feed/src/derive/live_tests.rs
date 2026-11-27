@@ -494,3 +494,12 @@ fn an_opened_project_that_drops_out_of_the_overview_after_a_reset_is_read_on_its
     known.read("p", Instant::now(), &Ok(Ledger { rows: Vec::new(), actors: HashMap::new(), asked: Vec::new() }));
     assert!(known.orphans().is_empty());
 }
+
+#[test]
+fn an_opened_project_reads_its_ledger_under_the_snapshots_key() {
+    let mut known = super::live::Known::default();
+    assert_eq!(known.ledger_key_of("p"), "p", "before any overview the id is all there is");
+    known.learn(&keyed(Instant::now()));
+    assert_eq!(known.ledger_key_of("p"), "shared:x");
+    assert_eq!(known.ledger_key_of("q"), "q");
+}

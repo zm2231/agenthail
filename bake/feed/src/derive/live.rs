@@ -105,6 +105,10 @@ impl Known {
         }
     }
 
+    pub fn ledger_key_of(&self, id: &str) -> String {
+        self.keys.iter().find(|(_, v)| v.as_str() == id).map_or(id, |(k, _)| k.as_str()).to_string()
+    }
+
     pub fn changed(&mut self, key: &str, at: Instant) -> Change {
         self.changed.insert(key.to_string(), at);
         let id = self.keys.get(key).map_or(key, String::as_str).to_string();
@@ -190,8 +194,9 @@ pub fn fetch(client: &Client, known: &Known, settled: Option<Instant>) -> Result
     let sessions: Vec<Session> = serde_json::from_value(snap["sessions"].clone()).unwrap_or_default();
     let recent: BTreeSet<String> = sessions.iter().filter(|s| hours(now, &s.last_active) < LEDGER_WINDOW_H).map(|s| s.project_key()).collect();
     let (held, keys): (Vec<String>, Vec<String>) = snap["projects"].as_array().into_iter().flatten().filter(|p| p["archived"] != json!(true)).filter_map(|p| p["id"].as_str()).filter(|k| recent.contains(*k)).map(String::from).partition(|k| known.skips_ledger(k, settled));
+    let key_of: HashMap<String, String> = snap["projects"].as_array().into_iter().flatten().filter_map(|p| Some((p["id"].as_str()?.to_string(), p["ledgerKey"].as_str().filter(|k| !k.is_empty())?.to_string()))).collect();
     let ledgers: HashMap<String, Result<Vec<Work>, String>> = std::thread::scope(|scope| {
-        let jobs: Vec<_> = keys.iter().map(|k| (k.clone(), scope.spawn(|| rows(client, k, now)))).collect();
+        let jobs: Vec<_> = keys.iter().map(|k| (k.clone(), scope.spawn(|| rows(client, key_of.get(k).unwrap_or(k), now)))).collect();
         jobs.into_iter().map(|(k, h)| (k, h.join().unwrap_or_else(|_| Err("the fetch stopped".into())))).collect()
     });
     let usage: Vec<Value> = client
@@ -219,7 +224,7 @@ pub fn fetch(client: &Client, known: &Known, settled: Option<Instant>) -> Result
 }
 
 pub fn ledger(client: &Client, project: &str, known: &Known) -> Result<Ledger, String> {
-    let rows = rows(client, project, OffsetDateTime::now_utc())?;
+    let rows = rows(client, &known.ledger_key_of(project), OffsetDateTime::now_utc())?;
     let (actors, asked) = actors(client, known.sessions(), |a| known.skips_actor(a), rows.iter().flat_map(|w| &w.timeline).map(|t| t.actor.clone()).collect());
     Ok(Ledger { rows, actors, asked })
 }
