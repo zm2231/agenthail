@@ -502,4 +502,10 @@ fn an_opened_project_reads_its_ledger_under_the_snapshots_key() {
     known.learn(&keyed(Instant::now()));
     assert_eq!(known.ledger_key_of("p"), "shared:x");
     assert_eq!(known.ledger_key_of("q"), "q");
+    for key in ["repo:github.com/o/new", "repo:github.com/o/newer"] {
+        let mut moved = keyed(Instant::now());
+        moved.recorded.projects[0].ledger_key = key.into();
+        known.learn(&moved);
+        assert_eq!(known.ledger_key_of("p"), key, "a moved ledger is read under its latest key, never an older one");
+    }
 }

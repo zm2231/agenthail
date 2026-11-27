@@ -42,6 +42,7 @@ pub enum Change {
 pub struct Known {
     ledgers: HashMap<String, Held>,
     keys: HashMap<String, String>,
+    current: HashMap<String, String>,
     wanted: HashSet<String>,
     opened: HashSet<String>,
     changed: HashMap<String, Instant>,
@@ -64,6 +65,7 @@ impl Known {
             }
             self.hold(id, fetched.started, result.as_ref().ok());
         }
+        self.current = fetched.recorded.projects.iter().filter(|p| !p.ledger_key.is_empty()).map(|p| (p.id.clone(), p.ledger_key.clone())).collect();
         for p in &fetched.recorded.projects {
             self.keys.insert(if p.ledger_key.is_empty() { p.id.clone() } else { p.ledger_key.clone() }, p.id.clone());
         }
@@ -106,7 +108,7 @@ impl Known {
     }
 
     pub fn ledger_key_of(&self, id: &str) -> String {
-        self.keys.iter().find(|(_, v)| v.as_str() == id).map_or(id, |(k, _)| k.as_str()).to_string()
+        self.current.get(id).map_or(id, String::as_str).to_string()
     }
 
     pub fn changed(&mut self, key: &str, at: Instant) -> Change {
