@@ -14,6 +14,10 @@ mod ui;
 mod voice;
 mod web;
 
+#[cfg(test)]
+#[path = "loop_tests.rs"]
+mod loop_tests;
+
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
@@ -169,6 +173,8 @@ pub struct App {
     clock: f64,
     panes_moved: bool,
     built_at: f64,
+    #[cfg(test)]
+    rebuilds: u64,
 }
 
 fn args() -> Vec<String> {
@@ -283,17 +289,9 @@ fn watch_overview(client: Client, tx: Sender<Bg>, poke: Receiver<Ask>, stream: f
     });
 }
 
-fn init() -> App {
+fn empty(live: Overview, persist: bool) -> App {
     let (outbox, inbox) = channel();
-    let fixture = arg("--fixture");
-    let fixtures = arg("--fixtures").or_else(|| std::env::var("AGENTHAIL_FIXTURES").ok());
-    let recording = fixtures.as_ref().map(|dir| format!("{dir}/snapshot.json")).or_else(|| fixture.clone());
-    let (live, world_error) = match recording.as_deref().map(load_recorded) {
-        Some(Ok(raw)) => (Overview::recorded(raw), None),
-        Some(Err(error)) => (Overview::default(), Some(error)),
-        None => (Overview::default(), None),
-    };
-    let mut app = App {
+    App {
         sessions: Vec::new(),
         now: OffsetDateTime::now_utc(),
         selected: None,
@@ -340,7 +338,7 @@ fn init() -> App {
         work_pick: HashMap::new(),
         diff: rune_kit::diff::DiffState::new(Vec::new()),
         diff_key: (String::new(), usize::MAX),
-        ov: Over::new(live, recording.is_none()),
+        ov: Over::new(live, persist),
         menus: ui::session_menu::Menus::new(),
         limits: ui::limit::Limits::new(),
         accounts: ui::accounts::Accounts::new(),
@@ -366,7 +364,21 @@ fn init() -> App {
         clock: 0.0,
         panes_moved: false,
         built_at: 0.0,
+        #[cfg(test)]
+        rebuilds: 0,
+    }
+}
+
+fn init() -> App {
+    let fixture = arg("--fixture");
+    let fixtures = arg("--fixtures").or_else(|| std::env::var("AGENTHAIL_FIXTURES").ok());
+    let recording = fixtures.as_ref().map(|dir| format!("{dir}/snapshot.json")).or_else(|| fixture.clone());
+    let (live, world_error) = match recording.as_deref().map(load_recorded) {
+        Some(Ok(raw)) => (Overview::recorded(raw), None),
+        Some(Err(error)) => (Overview::default(), Some(error)),
+        None => (Overview::default(), None),
     };
+    let mut app = empty(live, recording.is_none());
     if recording.is_some() {
         app.sessions = app.ov.d.sessions.clone();
         app.now = app.ov.d.now;
@@ -471,6 +483,10 @@ fn rebuild(s: &mut App) {
     s.ov.rebuild(&panes);
     s.panes_moved = false;
     s.built_at = s.clock;
+    #[cfg(test)]
+    {
+        s.rebuilds += 1;
+    }
 }
 
 fn fetch_tails(s: &mut App) {
