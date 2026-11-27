@@ -38,6 +38,8 @@ scripts/simslim-profile.json	tests	internal/simhost
 scripts/go-test-shard/**	tests	internal/daemon
 scripts/ci-concurrently.sh	tests	internal/daemon
 scripts/fetch-node.sh	tests	internal/daemon
+native/PendingSend.swift	tests	internal/daemon
+internal/daemon/dashboard/js/pending-send.js	tests	internal/daemon
 claude-host/**	package	internal/claudehost/claudehosttest
 claude-host/**	package	internal/testnode
 browser-host/**	package	internal/testnode
