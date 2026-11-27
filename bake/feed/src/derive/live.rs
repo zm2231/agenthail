@@ -174,6 +174,10 @@ impl Known {
         }
     }
 
+    pub fn holds(&self, id: &str, key: &str, settled: Option<Instant>) -> bool {
+        self.skips_ledger(id, settled) && self.ledger_key_of(id) == key
+    }
+
     pub fn skips_actor(&self, id: &str) -> bool {
         match self.actors.get(id) {
             Some(None) => true,
@@ -195,8 +199,8 @@ pub fn fetch(client: &Client, known: &Known, settled: Option<Instant>) -> Result
     let now = snap["updatedAt"].as_str().and_then(parse_time).unwrap_or_else(OffsetDateTime::now_utc);
     let sessions: Vec<Session> = serde_json::from_value(snap["sessions"].clone()).unwrap_or_default();
     let recent: BTreeSet<String> = sessions.iter().filter(|s| hours(now, &s.last_active) < LEDGER_WINDOW_H).map(|s| s.project_key()).collect();
-    let (held, keys): (Vec<String>, Vec<String>) = snap["projects"].as_array().into_iter().flatten().filter(|p| p["archived"] != json!(true)).filter_map(|p| p["id"].as_str()).filter(|k| recent.contains(*k)).map(String::from).partition(|k| known.skips_ledger(k, settled));
     let key_of: HashMap<String, String> = snap["projects"].as_array().into_iter().flatten().filter_map(|p| Some((p["id"].as_str()?.to_string(), p["ledgerKey"].as_str().filter(|k| !k.is_empty())?.to_string()))).collect();
+    let (held, keys): (Vec<String>, Vec<String>) = snap["projects"].as_array().into_iter().flatten().filter(|p| p["archived"] != json!(true)).filter_map(|p| p["id"].as_str()).filter(|k| recent.contains(*k)).map(String::from).partition(|k| known.holds(k, key_of.get(k).unwrap_or(k), settled));
     let ledgers: HashMap<String, Result<Vec<Work>, String>> = std::thread::scope(|scope| {
         let jobs: Vec<_> = keys.iter().map(|k| (k.clone(), scope.spawn(|| rows(client, key_of.get(k).unwrap_or(k), now)))).collect();
         jobs.into_iter().map(|(k, h)| (k, h.join().unwrap_or_else(|_| Err("the fetch stopped".into())))).collect()

@@ -509,3 +509,13 @@ fn an_opened_project_reads_its_ledger_under_the_snapshots_key() {
         assert_eq!(known.ledger_key_of("p"), key, "a moved ledger is read under its latest key, never an older one");
     }
 }
+
+#[test]
+fn a_project_whose_ledger_key_moved_is_read_again_even_when_its_stream_is_quiet() {
+    let mut known = super::live::Known::default();
+    let settled = Some(Instant::now() + std::time::Duration::from_secs(60));
+    let read = keyed(Instant::now() + std::time::Duration::from_secs(120));
+    known.learn(&read);
+    assert!(known.holds("p", "shared:x", settled), "the same key with a quiet stream keeps the rows it has");
+    assert!(!known.holds("p", "repo:github.com/o/moved", settled), "a new key means the rows on screen belong to the old ledger");
+}

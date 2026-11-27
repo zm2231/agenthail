@@ -144,10 +144,6 @@ pub fn proxies(sets: &[Set]) -> Vec<ProxyGroup> {
     out
 }
 
-pub fn still_reading(sets: &[Set]) -> bool {
-    proxies(sets).iter().any(|g| g.reading)
-}
-
 pub fn accounts(sets: &[Set]) -> Vec<&Set> {
     sets.iter().filter(|s| s.provider != "proxy").collect()
 }
@@ -379,7 +375,7 @@ mod tests {
     }
 
     #[test]
-    fn a_proxy_says_what_the_daemon_explains_and_whether_it_is_still_reading() {
+    fn a_proxy_says_what_the_daemon_explains_and_whether_it_is_still_reading_its_accounts() {
         let sets: Vec<Set> = serde_json::from_value(json!([
             {"host": "mac", "local": true, "provider": "proxy", "proxy": {"name": "shared", "id": "px"}, "accounts": [], "proxyProblem": "reading", "problem": "Reading the shared proxy's accounts."},
             {"host": "mac", "local": true, "provider": "proxy", "proxy": {"name": "team", "id": "pt"}, "accounts": [{"id": "a.json", "provider": "claude"}], "problem": "Every team Claude account is over its ceiling."},
@@ -392,8 +388,6 @@ mod tests {
             ("Every team Claude account is over its ceiling.", false),
             ("unauthorized", false),
         ]);
-        assert!(still_reading(&sets));
-        assert!(!still_reading(&sets[1..]));
     }
 
     #[test]

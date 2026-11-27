@@ -183,6 +183,8 @@ fn settled(s: &mut App, done: Done) {
     }
 }
 
+const USAGE_EVERY: Duration = Duration::from_secs(120);
+
 pub fn drain(s: &mut App) -> bool {
     let mut changed = false;
     while let Ok(done) = s.accounts.rx.try_recv() {
@@ -190,9 +192,7 @@ pub fn drain(s: &mut App) -> bool {
         settled(s, done);
     }
     if s.accounts.open && s.client.is_some() && !s.accounts.in_flight {
-        let reading = matches!(&s.accounts.sets, Some(Ok(sets)) if prefer::still_reading(sets));
-        let every = if reading { Duration::from_secs(2) } else { Duration::from_secs(30) };
-        if s.accounts.asked_at.is_none_or(|at| at.elapsed() >= every) {
+        if s.accounts.asked_at.is_none_or(|at| at.elapsed() >= USAGE_EVERY) {
             fetch(s);
         }
     }
