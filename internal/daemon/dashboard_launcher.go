@@ -108,7 +108,7 @@ func (d *Daemon) doSessionCreate(ctx context.Context, _ principal, request dashb
 	var readyErr error
 	var recorded *surface.Session
 	ctx = surface.WithSessionReady(ctx, func(started surface.Session) error {
-		readyErr = d.Registry.RecordStartingSession(started, reservation, registry.OriginOf(started.ID, creator))
+		readyErr = d.recordStartingSession(started, reservation, creator, messageUUID)
 		if readyErr == nil {
 			recorded = &started
 		}
@@ -237,7 +237,7 @@ func (d *Daemon) launchSession(ctx context.Context, request dashboardActionReque
 	var readyErr error
 	var recorded *surface.Session
 	ctx = surface.WithSessionReady(ctx, func(started surface.Session) error {
-		readyErr = d.Registry.RecordStartingSession(started, reservation, registry.OriginOf(started.ID, creator))
+		readyErr = d.recordStartingSession(started, reservation, creator, messageUUID)
 		if readyErr == nil {
 			recorded = &started
 		}
@@ -296,4 +296,16 @@ func (d *Daemon) launchSession(ctx context.Context, request dashboardActionReque
 	}
 	launchFields["ok"] = true
 	return actionResult{Status: http.StatusCreated, Body: launchFields}, nil
+}
+
+// recordStartingSession records a session before its first turn, with the
+// sender of the message that turn carries.
+func (d *Daemon) recordStartingSession(started surface.Session, reservation registry.AliasReservation, creator, messageUUID string) error {
+	if err := d.Registry.RecordStartingSession(started, reservation, registry.OriginOf(started.ID, creator)); err != nil {
+		return err
+	}
+	if err := d.Registry.RecordMessageSender(messageUUID, surface.SendOptions{SourceSessionID: creator, Author: surface.AuthorPerson}.Sender()); err != nil {
+		return fmt.Errorf("record who sent its first message: %w", err)
+	}
+	return nil
 }

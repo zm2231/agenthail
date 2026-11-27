@@ -28,7 +28,7 @@ func promptBodies(t *testing.T, prompts []JournalPrompt) []string {
 	return bodies
 }
 
-func TestJournalPromptsListsPersonMessagesFromSessionsAPersonStarted(t *testing.T) {
+func TestJournalPromptsListsThePersonsMessagesFromAnySessionAndUnmarkedOnesFromTheirs(t *testing.T) {
 	r := openTestRegistry(t)
 	for _, session := range []surface.Session{
 		{ID: "typed", Surface: surface.KindCodex, RuntimeKind: surface.RuntimeCodexDesktop},
@@ -51,19 +51,22 @@ func TestJournalPromptsListsPersonMessagesFromSessionsAPersonStarted(t *testing.
 	appendPrompt(t, r, "typed", "a", "user", "", "first prompt", "2026-10-20T10:00:00Z")
 	appendPrompt(t, r, "typed", "b", "assistant", "", "a reply", "2026-10-20T10:00:01Z")
 	appendPrompt(t, r, "typed", "c", "peer", "peer", "from an agent", "2026-10-20T10:00:02Z")
-	appendPrompt(t, r, "other", "d", "user", "human", "second prompt", "2026-10-20T11:00:00Z")
+	appendPrompt(t, r, "other", "d", "user", "person", "second prompt", "2026-10-20T11:00:00Z")
 	appendPrompt(t, r, "typed", "e", "user", "", "third prompt", "2026-10-20T12:00:00.5Z")
 	appendPrompt(t, r, "child", "f", "user", "", "parent agent's prompt", "2026-10-20T13:00:00Z")
 	appendPrompt(t, r, "scripted", "g", "user", "", "codex exec prompt", "2026-10-20T13:00:00Z")
 	appendPrompt(t, r, "started-by-agent", "h", "user", "", "agent's prompt", "2026-10-20T13:00:00Z")
 	appendPrompt(t, r, "mirrored", "i", "user", "", "a peer host's prompt", "2026-10-20T13:00:00Z")
 	appendPrompt(t, r, "other", "j", "user", "task-notification", "<task-notification>", "2026-10-20T13:00:00Z")
+	appendPrompt(t, r, "started-by-agent", "k", "user", "person", "typed into an agent's session", "2026-10-20T14:00:00Z")
+	appendPrompt(t, r, "started-by-agent", "l", "user", "peer", "[from lead] an agent's message", "2026-10-20T14:00:01Z")
+	appendPrompt(t, r, "typed", "m", "user", "sdk", "an agent's brief", "2026-10-20T14:00:02Z")
 
 	all, err := r.JournalPrompts(JournalPromptQuery{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(promptBodies(t, all), "|"); got != "third prompt|second prompt|first prompt" {
+	if got := strings.Join(promptBodies(t, all), "|"); got != "typed into an agent's session|third prompt|second prompt|first prompt" {
 		t.Fatalf("prompts = %q", got)
 	}
 	one, err := r.JournalPrompts(JournalPromptQuery{SessionID: "typed", Limit: 10})

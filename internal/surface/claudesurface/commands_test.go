@@ -143,8 +143,8 @@ func TestClaudeCommandMarkupClassifies(t *testing.T) {
 		{"meta skill body", user([]any{map[string]any{"type": "text", "text": "Base directory for this skill: /x"}}, true), []surface.TimelineItem{{Kind: "event", Title: "Claude Code instructions"}}},
 		{"meta peer message without origin", user("Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/x.sock\" from-name=\"operator\">\nReply with exactly: second\n</cross-session-message>", true), []surface.TimelineItem{{Kind: "message", Role: "peer", Origin: claudeOriginPeer, Sender: "operator", Title: "operator", Text: "Reply with exactly: second"}}},
 		{"typed prompt", user("fix the build", false), []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: "fix the build"}}},
-		{"slash command the person typed", typed("<command-message>goal</command-message>\n<command-name>/goal</command-name>\n<command-args>tests pass</command-args>"), []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: "/goal tests pass"}}},
-		{"typed text that quotes command output", typed("<local-command-stdout>Goal set</local-command-stdout>"), []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: "<local-command-stdout>Goal set</local-command-stdout>"}}},
+		{"slash command the person typed", typed("<command-message>goal</command-message>\n<command-name>/goal</command-name>\n<command-args>tests pass</command-args>"), []surface.TimelineItem{{Kind: "message", Role: "user", Origin: surface.OriginPerson, Title: "user", Text: "/goal tests pass"}}},
+		{"typed text that quotes command output", typed("<local-command-stdout>Goal set</local-command-stdout>"), []surface.TimelineItem{{Kind: "message", Role: "user", Origin: surface.OriginPerson, Title: "user", Text: "<local-command-stdout>Goal set</local-command-stdout>"}}},
 		{"markup followed by prose", user("<command-name>example</command-name> what does this tag mean?", false), []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: "<command-name>example</command-name> what does this tag mean?"}}},
 	}
 	for _, tc := range cases {
@@ -212,7 +212,7 @@ func TestClaudeTypedTextShapedLikeCommandOutputIsThePersonsPrompt(t *testing.T) 
 		t.Fatalf("read reply=%+v err=%v", read.Reply, err)
 	}
 	page, err := surfacetest.ReadTimeline(context.Background(), timelineClaude(), path, 0, 0)
-	if err != nil || len(page.Items) == 0 || page.Items[0].Role != "user" || page.Items[0].Origin != "" || page.Items[0].TurnID != "typed" {
+	if err != nil || len(page.Items) == 0 || page.Items[0].Role != "user" || page.Items[0].Origin != surface.OriginPerson || page.Items[0].TurnID != "typed" {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
 }

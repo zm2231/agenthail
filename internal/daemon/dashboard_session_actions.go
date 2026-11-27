@@ -67,7 +67,7 @@ func (d *Daemon) doSessionAction(ctx context.Context, p principal, request dashb
 		return d.doSessionAdopt(ctx, adapter, session, surface.AdoptRequest{StopTerminal: request.StopTerminal, Wait: time.Duration(request.WaitMS) * time.Millisecond})
 	}
 	if request.Action == "session-fork" || request.Action == "native-queue" || strings.HasPrefix(request.Action, "session-lifecycle-") {
-		return d.doSessionOperation(ctx, adapter, session, request.Action, request.Fork, strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"), strings.TrimSpace(request.SourceSessionID), request.NativeQueue)
+		return d.doSessionOperation(ctx, adapter, session, request.Action, request.Fork, strings.TrimPrefix(strings.TrimSpace(request.Alias), "@"), strings.TrimSpace(request.SourceSessionID), request.Author, request.NativeQueue)
 	}
 	if err := d.ensureDashboardWritable(ctx, adapter, session); err != nil {
 		if moved := sessionMovedError(err); moved != nil {

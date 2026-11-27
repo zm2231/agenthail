@@ -61,12 +61,12 @@ func TestClaudeTimelineClassifiesInjectedPrompts(t *testing.T) {
 		kind, role, origin, sender, text, status, callID string
 	}
 	wants := []want{
-		{"message", "user", "", "", "Run the build", "", ""},
-		{"message", "user", "", "", "also check lint", "", ""},
+		{"message", "user", "person", "", "Run the build", "", ""},
+		{"message", "user", "person", "", "also check lint", "", ""},
 		{"event", "system", "task-notification", "", "Background build finished", "completed", "toolu_synthetic"},
 		{"message", "peer", "peer", "reviewer", "Please rebase", "", ""},
 		{"event", "system", "auto-continuation", "", "Continue the task you were working on.", "", ""},
-		{"message", "user", "", "", "I pasted this: " + "<task-notification>\n<task-id>task-7</task-id>\n<tool-use-id>toolu_synthetic</tool-use-id>\n<output-file>/tmp/synthetic.output</output-file>\n<status>completed</status>\n<summary>Background build finished</summary>\n</task-notification>", "", ""},
+		{"message", "user", "person", "", "I pasted this: " + "<task-notification>\n<task-id>task-7</task-id>\n<tool-use-id>toolu_synthetic</tool-use-id>\n<output-file>/tmp/synthetic.output</output-file>\n<status>completed</status>\n<summary>Background build finished</summary>\n</task-notification>", "", ""},
 		{"message", "user", "", "", "legacy prompt", "", ""},
 		{"toolResult", "", "", "", "ok", "", "call-1"},
 	}
@@ -98,7 +98,7 @@ func TestClaudeTimelineClassifiesInjectedPrompts(t *testing.T) {
 
 func TestClaudeQueuedHumanPromptIsThePersonsMessage(t *testing.T) {
 	items := claudeTimelineItems(map[string]any{"type": "attachment", "attachment": map[string]any{"type": "queued_command", "prompt": "follow up", "commandMode": "prompt", "origin": map[string]any{"kind": "human"}}})
-	if len(items) != 1 || items[0].Kind != "message" || items[0].Role != "user" || items[0].Text != "follow up" || items[0].Origin != "" {
+	if len(items) != 1 || items[0].Kind != "message" || items[0].Role != "user" || items[0].Text != "follow up" || items[0].Origin != surface.OriginPerson {
 		t.Fatalf("items=%+v", items)
 	}
 	unknown := claudeTimelineItems(map[string]any{"type": "user", "origin": map[string]any{"kind": "scheduled"}, "message": map[string]any{"content": "nightly check"}})
@@ -159,7 +159,7 @@ func TestClaudeStreamCarriesAMidTurnMessage(t *testing.T) {
 	if !errors.Is(err, surface.ErrStreamWindow) {
 		t.Fatalf("stream err=%v", err)
 	}
-	if len(got) != 1 || got[0].Kind != "message" || got[0].Role != "user" || got[0].Origin != "" || got[0].TurnID != "u1" || !got[0].Timestamp.Equal(time.Date(2026, 10, 23, 8, 29, 27, 0, time.UTC)) {
+	if len(got) != 1 || got[0].Kind != "message" || got[0].Role != "user" || got[0].Origin != surface.OriginPerson || got[0].TurnID != "u1" || !got[0].Timestamp.Equal(time.Date(2026, 10, 23, 8, 29, 27, 0, time.UTC)) {
 		t.Fatalf("events=%+v", got)
 	}
 }

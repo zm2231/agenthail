@@ -66,6 +66,7 @@ func (codexTranscript) ReadSpan(ctx context.Context, file *os.File, span transcr
 		s.turnIDs[index] = currentTurnID
 		s.placed[index] = codexPlaceItems(s.placed, callRecords, index, record, codexRecordItems(&window, record, currentTurnID))
 		if projection.consume(record, s.placed[index], currentTurnID) {
+			codexForgetInput(&window, record, s.placed[index])
 			s.skipResponseUsers[index] = true
 		}
 	}

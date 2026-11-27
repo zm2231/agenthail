@@ -124,6 +124,15 @@ func claudeInjectedItem(kind string, origin map[string]any, text string) surface
 	}
 }
 
+// claudeUserOrigin names who wrote a user message: the person, when Claude
+// Code recorded it as typed, or what claudeRecordedOrigin finds in its text.
+func claudeUserOrigin(typed bool, text string) string {
+	if typed {
+		return surface.OriginPerson
+	}
+	return claudeRecordedOrigin(text)
+}
+
 // claudeRecordedOrigin names who wrote a user-role record that Claude Code
 // records verbatim but no person typed as a prompt: a slash command or its
 // output, an interrupt marker, or a system message.
@@ -157,7 +166,7 @@ func claudeQueuedCommandItems(record map[string]any) []surface.TimelineItem {
 	origin, _ := attachment["origin"].(map[string]any)
 	kind := claudePromptOrigin(origin, prompt)
 	if kind == claudeOriginHuman {
-		return []surface.TimelineItem{{Kind: "message", Role: "user", Title: "user", Text: prompt}}
+		return []surface.TimelineItem{{Kind: "message", Role: "user", Origin: claudeUserOrigin(transcript.String(origin, "kind") == claudeOriginHuman, prompt), Title: "user", Text: prompt}}
 	}
 	return []surface.TimelineItem{claudeInjectedItem(kind, origin, prompt)}
 }

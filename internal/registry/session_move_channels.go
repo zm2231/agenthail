@@ -18,10 +18,18 @@ type MoveCarry struct {
 	Relays      []MovedRelay      `json:"relays,omitempty"`
 	Channels    []MovedChannel    `json:"channels,omitempty"`
 	Coordinator *MovedCoordinator `json:"coordinator,omitempty"`
+	// SendersUnknownBefore, in Unix milliseconds of the source host's clock,
+	// bounds the messages whose senders the destination cannot look up.
+	SendersUnknownBefore int64 `json:"sendersUnknownBefore,omitempty"`
 }
 
 func (r *Registry) MoveCarry(conversation, self string) (MoveCarry, error) {
-	return moveCarry(r.read, conversation, self)
+	carry, err := moveCarry(r.read, conversation, self)
+	if err != nil {
+		return MoveCarry{}, err
+	}
+	carry.SendersUnknownBefore, err = sendersUnknownBefore(r.read, conversation, r.now())
+	return carry, err
 }
 
 func moveCarry(q catalogQuerier, conversation, self string) (MoveCarry, error) {

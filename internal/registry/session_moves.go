@@ -394,6 +394,9 @@ func (r *Registry) TakeMovedSession(moveID string, session surface.Session, alia
 		if err := insertMovedCoordinatorTx(tx, session.ID, alias, move.PeerHost, carry.Coordinator, place, r.now()); err != nil {
 			return nil, err
 		}
+		if err := recordSendersUnknownTx(tx, session.ID, max(carry.SendersUnknownBefore, r.now().UnixMilli())); err != nil {
+			return nil, err
+		}
 	}
 	if err := setMoveStateTx(tx, r.now(), moveID, MoveResumed, "", MoveReceived); err != nil {
 		return nil, err
