@@ -30,7 +30,11 @@ pub fn opened(s: &mut Prefs) {
     sync_rows(s);
 }
 
-pub fn poll(s: &mut Prefs) -> bool {
+pub fn poll(s: &mut Prefs, now: f64) -> bool {
+    let mut lapsed = s.keyboard.any_app.poll(now);
+    for state in s.keyboard.rows.values_mut() {
+        lapsed |= state.poll(now);
+    }
     let recording = s.keyboard.any_app.is_recording() || s.keyboard.rows.values().any(ShortcutRecorderState::is_recording);
     let changed = s.keyboard.seen != bindings::generation() && !recording;
     if changed {
@@ -39,7 +43,12 @@ pub fn poll(s: &mut Prefs) -> bool {
     if crate::hotkey::asks_again() {
         s.keyboard.any_app.mark_unregistered();
     }
-    changed
+    changed || lapsed
+}
+
+#[cfg(test)]
+pub fn recorder<'a>(s: &'a Prefs, id: &str) -> Option<&'a ShortcutRecorderState> {
+    if id == ANY_APP_ID { Some(&s.keyboard.any_app) } else { s.keyboard.rows.get(id) }
 }
 
 fn follow(state: &mut ShortcutRecorderState, stored: Option<Shortcut>) -> bool {
