@@ -227,6 +227,9 @@ pub fn extreme(rgba: &[u8], w: u32, h: u32, side: u32, bright: bool) -> (u32, u3
     for y in 0..h {
         for x in 0..w {
             let i = (y * w + x) * 4;
+            if rgba[i + 3] == 0 {
+                continue;
+            }
             let c = [rgba[i], rgba[i + 1], rgba[i + 2]];
             let l = luminance(c.map(|v| v as f32 / 255.0));
             let slot = &mut best[(y / cell) * cw + x / cell];
@@ -240,7 +243,7 @@ pub fn extreme(rgba: &[u8], w: u32, h: u32, side: u32, bright: bool) -> (u32, u3
         }
     }
     let out = best.into_iter().flat_map(|b| {
-        let [r, g, bl] = b.map(|(_, c)| c).unwrap_or([0; 3]);
+        let [r, g, bl] = b.map(|(_, c)| c).unwrap_or(if bright { [0; 3] } else { [255; 3] });
         [r, g, bl, 255]
     });
     (cw as u32, ch as u32, out.collect())

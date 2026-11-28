@@ -314,6 +314,24 @@ fn a_picture_with_clear_pixels_says_the_ground_shows_through() {
 }
 
 #[test]
+fn clear_pixels_are_left_out_of_a_pictures_brightest_and_darkest_parts() {
+    use image::{ImageEncoder, RgbaImage};
+    let mut img = RgbaImage::new(8, 8);
+    for (x, _, px) in img.enumerate_pixels_mut() {
+        *px = if x < 4 { image::Rgba([255, 255, 255, 0]) } else { image::Rgba([60, 60, 60, 255]) };
+    }
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png).write_image(img.as_raw(), 8, 8, image::ExtendedColorType::Rgba8).unwrap();
+    let d = decode(&png, 2560, 16).unwrap();
+    assert!(d.see_through);
+    let brightest = worst(&d.brightest.2, d.brightest.0, true, 1);
+    let darkest = worst(&d.darkest.2, d.darkest.0, false, 1);
+    let grey = 60.0 / 255.0;
+    assert!((brightest[0] - grey).abs() < 1e-3, "the invisible white is not the picture's brightest part: {brightest:?}");
+    assert!((darkest[0] - grey).abs() < 1e-3, "nor does a clear cell count as its darkest: {darkest:?}");
+}
+
+#[test]
 fn text_size_steps_by_a_tenth_within_its_range_and_writes_for_this_computer() {
     assert_eq!(text_scale_step(1.0, Some(1)), 1.1);
     assert_eq!(text_scale_step(1.0, Some(-1)), 0.9);
