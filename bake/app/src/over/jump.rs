@@ -300,10 +300,11 @@ pub fn view(s: &App, layer: &mut Vec<El>, k: &Kit) {
         .child(row().gap(6.0).items_center().child(ui::ghost_keys(&["↑", "↓"], k)).child(text("move".to_string()).font(k.text(META)).color(weak(k))))
         .child(row().gap(6.0).items_center().child(ui::ghost_keys(&["⏎"], k)).child(text("open".to_string()).font(k.text(META)).color(weak(k))))
         .child(ui::spacer())
-        .child(text("Projects, work, sessions and commands, then older Codex threads".to_string()).font(k.text(META)).color(weak(k)));
+        .child(text("Projects, work, sessions and commands, then older Codex threads".to_string()).font(k.text(META)).color(weak(k)).wrap().shrink().min_w(0.0).key("jump-hint"));
     let panel = col()
         .key("jump")
-        .w(680.0)
+        .w_full()
+        .max_w(k.text_size(680.0))
         .radius(16.0)
         .fill(k.c.surface_raised)
         .border(1.0, k.c.border_base)
@@ -318,6 +319,7 @@ pub fn view(s: &App, layer: &mut Vec<El>, k: &Kit) {
             .h_full()
             .items_center()
             .pt(84.0)
+            .px(24.0)
             .fill(Color::BLACK.alpha(0.45))
             .on_press(|s: &mut App| s.ov.jump = None)
             .child(panel.on_press(|_: &mut App| {})),

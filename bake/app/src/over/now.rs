@@ -24,13 +24,22 @@ pub fn since_note(s: &App, looked: Option<&str>) -> String {
     }
 }
 
-fn variant(brief: bool, k: &Kit) -> El {
+fn variant(brief: bool, tight: bool, k: &Kit) -> El {
     let seg = SegmentedControl::new(&["Three panes", "Brief"], Some(if brief { 1 } else { 0 }))
         .label("Layout")
         .fit()
         .on_pick(|s: &mut App, i, _| s.ov.now_brief = i == 1)
         .build(k);
-    row().gap(6.0).items_center().child(seg).child(ui::ghost_keys(&["⌥⌘B"], k))
+    let r = row().gap(6.0).items_center().child(seg);
+    if tight { r } else { r.child(ui::ghost_keys(&["⌥⌘B"], k)) }
+}
+
+const BAR: &str = "now-bar";
+const BAR_EDGES: f32 = 48.0;
+
+fn tight(s: &App, full: &str, k: &Kit) -> bool {
+    let (Some(bar), Some(full)) = (ui::fit_width(s, BAR), ui::fit_width(s, full)) else { return false };
+    bar - BAR_EDGES < rune::text::advance("Now", k.text(BODY_MED)) + full
 }
 
 fn line_part<'a>(s: &App, key: String, l: &'a Line, k: &'a Kit) -> Part<'a> {
@@ -230,7 +239,14 @@ fn toolbar<'a>(s: &'a App, strip: bool, k: &'a Kit) -> ui::Bar<'a> {
     let center = crate::ui::tabs::strip_part(s, k, false).map(|tabs| Part::group("now-tabs", crate::over::rows::version((), [&tabs]), move || row().max_w(560.0).child(tabs.el())));
     let needs = s.ov.needs.len();
     let brief = s.ov.now_brief;
-    let trailing = Part::row("now-trailing", (needs, brief), move || row().gap(10.0).items_center().child(talk_button(k)).child(ui::new_session_button(None, k)).child(variant(brief, k)).child(ui::needs_button(s, k)));
+    let full = format!("now-trailing-{}-{needs}-{brief}", k.text_size(1.0).to_bits());
+    let tight = tight(s, &full, k);
+    let trailing = Part::row("now-trailing", (needs, brief, tight), move || {
+        let r = row().gap(10.0).items_center();
+        let r = if tight { r.child(talk_icon(k)).child(ui::new_session_icon(None, k)) } else { r.child(talk_button(k)).child(ui::new_session_button(None, k)) };
+        let r = r.child(variant(brief, tight, k)).child(ui::needs_button(s, k));
+        if tight { r } else { ui::measured(r, full) }
+    });
     ui::Bar { leading, center, trailing }
 }
 
@@ -240,6 +256,10 @@ fn toolbar_of(bar: ui::Bar) -> Toolbar {
         t = t.center(c.el());
     }
     t
+}
+
+fn talk_icon(k: &Kit) -> El {
+    rune_kit::IconButton::new(&icons::WAVEFORM).variant(rune_kit::IconButtonVariant::Ghost).control_size(ControlSize::Small).label("Talk").help("Talk to the orchestrator").on_press(|_: &mut App| crate::voice::open("", "")).build(k).key("talk")
 }
 
 fn talk_button(k: &Kit) -> El {
@@ -331,7 +351,7 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
     let counts = (s.ov.needs.len(), s.ov.hands_on.len());
     let v = crate::over::rows::version((side_c, centre_c, rail_c, counts), centre.iter().chain(&rail_in_main).chain(side_in_main.iter().flat_map(|(h, b)| [h, b])));
     let main = Part::group("now-main", v, move || {
-        let mut main = row().w_full().h_full().gap(8.0);
+        let mut main = ui::measured(row().w_full().h_full().gap(8.0), BAR.into());
         let strip_wrap = |e: El| col().h_full().py(8.0).child(e);
         if side_c {
             main = main.child(strip_wrap(ui::pane_strip(0, &icons::SIDEBAR, Some((counts.0, ui::needs_color(k))), k)).pl(8.0));
@@ -386,7 +406,7 @@ pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
         mv = mv.child(moving_row(s, &x.id, &k).el());
     }
     c = c.child(ui::section_head("What's moving", Some(moving.len()), None, &k).mt(10.0)).child(ui::card(mv, &k));
-    let main = col().key("now-b").w_full().h_full().items_center().scroll(ScrollSpec { stick_bottom: false }).child(c);
+    let main = ui::measured(col().key("now-b").w_full().h_full(), BAR.into()).items_center().scroll(ScrollSpec { stick_bottom: false }).child(c);
     let bar = toolbar_of(toolbar(s, true, &k));
     ui::frame(cx, s, None, main, None, bar, main_kit)
 }

@@ -6,8 +6,22 @@ fn laid_out(scale: f32, screen: &str, dir: &Dir) -> Runtime<App> {
     crate::look::hold_text_scale(Some(scale));
     let mut all = sessions(&["a", "b"]);
     all.push(session("q", 3, json!({"surface": "codex", "name": "queue"})));
-    let mut rt = runtime(app(all, dir), SIZE);
-    rt.update(|s, _| match screen {
+    let mut raw = recorded(1, all);
+    if matches!(screen, "project" | "work") {
+        raw.projects[0].ledger_key = "shared:p1".into();
+        raw.ledgers.insert("p1".into(), serde_json::from_value(json!([
+            {"id": "p1-W1", "text": "Make the sidebar rows hold larger text without clipping their second line", "type": "bug", "priority": "P1", "state": "in_progress", "phase": "build", "assignee": "a", "description": "Rows clip at the largest text size."},
+            {"id": "p1-W2", "text": "Keep the toolbar title when the window is narrow", "type": "task", "priority": "P2", "state": "open"},
+            {"id": "p1-W3", "text": "Ship the text size keys", "type": "task", "priority": "P2", "state": "done"},
+        ])).unwrap());
+    }
+    let mut app = crate::empty(Overview::recorded(raw), false);
+    app.sessions = app.ov.d.sessions.clone();
+    app.now = app.ov.d.now;
+    app.fixtures = Some(Fixtures { dir: dir.path(), streams: HashMap::new(), speed: 1.0 });
+    app.status = "fixtures".into();
+    let mut rt = runtime(app, SIZE);
+    rt.update(|s, tx| match screen {
         "session" => {
             crate::over::open_session(s, "a");
             crate::load_pane(s, "a");
@@ -35,6 +49,13 @@ fn laid_out(scale: f32, screen: &str, dir: &Dir) -> Runtime<App> {
             crate::over::listing::show(s, feed::listing::Listing::first(page));
         }
         "queue" => crate::over::open_session(s, "q"),
+        "project" => crate::over::go(s, Screen::Project("p1".into())),
+        "work" => {
+            let key = s.ov.d.work.keys().find(|k| k.id == "p1-W1").cloned().expect("p1-W1 is recorded");
+            crate::over::go(s, Screen::Work(key));
+        }
+        "apps" => crate::over::go(s, Screen::Extensions),
+        "jump" => crate::over::open_jump(s, tx),
         _ => {}
     });
     rt.settle_all();
@@ -160,9 +181,17 @@ fn shot() {
     let out = std::path::PathBuf::from(dir_out);
     let scale: f32 = std::env::var("AGENTHAIL_SHOT_SCALE").ok().and_then(|s| s.parse().ok()).unwrap_or(1.0);
     let dir = Dir::new("shot");
-    for screen in ["now", "session", "sessions", "queue"] {
+    for screen in ["now", "session", "sessions", "queue", "project", "work", "apps", "jump"] {
         let mut rt = laid_out(scale, screen, &dir);
         render(&mut rt, SIZE, &out.join(format!("{screen}-{scale}.png")));
+    }
+    for screen in ["now", "session", "project", "work"] {
+        let mut rt = laid_out(1.6, screen, &dir);
+        crate::look::hold_text_scale(Some(scale));
+        rt.frame(DT);
+        rt.settle_all();
+        rt.frame(DT);
+        render(&mut rt, SIZE, &out.join(format!("{screen}-from-1.6-to-{scale}.png")));
     }
     let agents = crate::settings::TABS.iter().position(|t| *t == "Agents").expect("an Agents tab");
     for (name, tab, page) in [("settings", 0, 0), ("keyboard", 1, 2), ("agents", agents, 0)] {
@@ -259,4 +288,76 @@ fn command_zero_resets_the_text_size_and_shift_command_n_opens_now() {
     rt.key(press(rune::Key::Command('n'), true));
     rt.frame(DT);
     assert!(rt.state.screen == Screen::Now, "⇧⌘N opens Now");
+}
+
+#[test]
+fn every_settings_tab_can_be_reached_when_larger_text_makes_the_tabs_scroll() {
+    if !isolated("text_scale::every_settings_tab_can_be_reached_when_larger_text_makes_the_tabs_scroll") {
+        return;
+    }
+    crate::look::hold_text_scale(Some(1.6));
+    let rt = settings_on(0, 0);
+    let [x, _, w, _] = rt.presented("settings-tabs").expect("the tab strip is on screen").0;
+    let [sx, _, sw, _] = rt.presented("settings-tabs/segment0").expect("the Overview tab is laid out").0;
+    assert!(sx >= x - 0.5 && sx + sw <= x + w + 0.5, "Overview {:?} shows inside the strip {:?} at the start", (sx, sw), (x, w));
+    crate::look::hold_text_scale(Some(1.0));
+    let rt = settings_on(0, 0);
+    let [x, _, w, _] = rt.presented("settings-tabs").unwrap().0;
+    let first = rt.presented("settings-tabs/segment0").unwrap().0;
+    let last = rt.presented(&format!("settings-tabs/segment{}", crate::settings::TABS.len() - 1)).unwrap().0;
+    let (left, right) = (first[0] - x, x + w - (last[0] + last[2]));
+    assert!(left > 8.0 && (left - right).abs() < 1.0, "the tabs sit centred when they fit: {left} vs {right}");
+}
+
+#[test]
+fn the_now_toolbar_keeps_its_title_at_larger_text_and_its_labels_after_going_back() {
+    if !isolated("text_scale::the_now_toolbar_keeps_its_title_at_larger_text_and_its_labels_after_going_back") {
+        return;
+    }
+    let dir = Dir::new("text-scale-now-bar");
+    let normal = laid_out(1.0, "now", &dir);
+    let (plain, plain_title) = (rect(&normal, "talk"), rect(&normal, "now-leading"));
+    let mut rt = laid_out(1.6, "now", &dir);
+    rt.frame(DT);
+    rt.frame(DT);
+    let title = rect(&rt, "now-leading");
+    let needs = rect(&rt, "now-trailing");
+    assert!(title[2] >= plain_title[2] * 1.5, "Now keeps its whole title at 1.6: {title:?} vs {plain_title:?}");
+    assert!(title[0] + title[2] <= needs[0], "the title {title:?} sits clear of the buttons {needs:?}");
+    crate::look::hold_text_scale(Some(1.0));
+    for _ in 0..4 {
+        rt.frame(DT);
+    }
+    rt.settle_all();
+    rt.frame(DT);
+    let back = rect(&rt, "talk");
+    assert!((back[2] - plain[2]).abs() < 0.5, "Talk gets its label back at 1.0: {back:?} vs {plain:?}");
+}
+
+#[test]
+fn the_rail_shows_how_many_sessions_are_working_at_larger_text() {
+    if !isolated("text_scale::the_rail_shows_how_many_sessions_are_working_at_larger_text") {
+        return;
+    }
+    let dir = Dir::new("text-scale-rail");
+    let plain = rect(&laid_out(1.0, "now", &dir), "sessions-count");
+    let rt = laid_out(1.6, "now", &dir);
+    let count = rect(&rt, "sessions-count");
+    let rail = rect(&rt, "now-rail");
+    assert!(count[2] >= plain[2] * 1.5, "the count shows whole: {count:?} vs {plain:?}");
+    assert!(count[0] + count[2] <= rail[0] + rail[2] + 0.5, "inside the rail {rail:?}");
+}
+
+#[test]
+fn the_jump_palette_holds_its_text_at_larger_sizes() {
+    if !isolated("text_scale::the_jump_palette_holds_its_text_at_larger_sizes") {
+        return;
+    }
+    let dir = Dir::new("text-scale-jump");
+    let rt = laid_out(1.6, "jump", &dir);
+    let panel = rect(&rt, "jump-list");
+    let hint = rect(&rt, "jump-hint");
+    assert!(hint[0] >= panel[0] && hint[0] + hint[2] <= panel[0] + panel[2] + 0.5, "the hint {hint:?} stays inside the palette {panel:?}");
+    assert!(panel[2] > 680.0 * 1.5, "the palette grows with the text: {panel:?}");
+    assert!(panel[0] >= 0.0 && panel[0] + panel[2] <= SIZE.0, "and stays in the window: {panel:?}");
 }

@@ -148,16 +148,19 @@ pub fn fit_width(s: &App, key: &str) -> Option<f32> {
 }
 
 pub fn fitted(key: &str, t: &str, width: Option<f32>, style: TextStyle, color: Color, lines: usize, k: &Kit) -> El {
-    let id = key.to_string();
     let body = match width {
         Some(w) if w > 8.0 => text(fit_lines(t, k.text(style), w - 1.0, lines)).font(k.text(style)).color(color),
         _ => text(t.to_string()).font(k.text(style)).color(color).wrap_anywhere().max_lines(lines),
     };
-    col().key(format!("fit-{key}")).w_full().min_w(0.0).shrink().on_layout(move |s: &mut App, r: [f32; 4]| {
-        if s.ov.widths.get(&id).is_none_or(|w| (w - r[2]).abs() > 0.5) {
-            s.ov.widths.insert(id.clone(), r[2]);
+    measured(col().key(format!("fit-{key}")).w_full().min_w(0.0).shrink(), key.to_string()).child(body)
+}
+
+pub fn measured(e: El, key: String) -> El {
+    e.on_layout(move |s: &mut App, r: [f32; 4]| {
+        if s.ov.widths.get(&key).is_none_or(|w| (w - r[2]).abs() > 0.5) {
+            s.ov.widths.insert(key.clone(), r[2]);
         }
-    }).child(body)
+    })
 }
 
 pub fn spacer() -> El {
@@ -332,21 +335,23 @@ pub fn card(content: El, k: &Kit) -> El {
     col().w_full().radius(12.0).fill(k.c.surface_base).border(1.0, edge()).child(content)
 }
 
-pub fn new_session_button(project: Option<&str>, k: &Kit) -> El {
+fn start_session(project: Option<&str>) -> impl Fn(&mut App, &mut rune::Tx) + 'static {
     let project = project.map(str::to_string);
-    Button::new("New session")
-        .variant(ButtonVariant::Ghost)
-        .control_size(ControlSize::Small)
-        .icon(&icons::PLUS)
-        .shortcut("⌘N")
-        .on_press_tx(move |s: &mut App, tx: &mut rune::Tx| {
-            let prefill = match &project {
-                Some(key) => crate::ui::new_session::project_prefill(s, key),
-                None => crate::ui::new_session::Prefill::default(),
-            };
-            crate::ui::new_session::open(s, prefill, tx);
-        })
-        .build(k)
+    move |s: &mut App, tx: &mut rune::Tx| {
+        let prefill = match &project {
+            Some(key) => crate::ui::new_session::project_prefill(s, key),
+            None => crate::ui::new_session::Prefill::default(),
+        };
+        crate::ui::new_session::open(s, prefill, tx);
+    }
+}
+
+pub fn new_session_button(project: Option<&str>, k: &Kit) -> El {
+    Button::new("New session").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).icon(&icons::PLUS).shortcut("⌘N").on_press_tx(start_session(project)).build(k)
+}
+
+pub fn new_session_icon(project: Option<&str>, k: &Kit) -> El {
+    rune_kit::IconButton::new(&icons::PLUS).variant(rune_kit::IconButtonVariant::Ghost).control_size(ControlSize::Small).label("New session").shortcut("⌘N").on_press_tx(start_session(project)).build(k).key("new-session")
 }
 
 pub fn notice(message: &str, k: &Kit) -> El {
@@ -1027,9 +1032,10 @@ pub fn sessions_part<'a>(s: &App, compact: bool, k: &'a Kit) -> Part<'a> {
         let head = row()
             .w_full()
             .gap(8.0)
+            .flex_wrap()
             .items_center()
             .child(text("Sessions".to_string()).font(k.text(HEAD)).color(strong(k)))
-            .child(text(format!("{total} working of {listed}")).font(k.text(META)).color(weak(k)).truncate().shrink().min_w(0.0))
+            .child(text(format!("{total} working of {listed}")).font(k.text(META)).color(weak(k)).key("sessions-count"))
             .child(spacer())
             .child(open);
         let c = col().w_full().gap(8.0).child(head).child(row_);
