@@ -27,7 +27,14 @@ pub fn since_note(s: &App, looked: Option<&str>) -> String {
 fn variant(brief: bool, tight: bool, k: &Kit) -> El {
     if tight {
         let (glyph, to) = if brief { (&icons::CHECKLIST, "Show three panes") } else { (&icons::FILE_DOCUMENT, "Show the brief") };
-        return rune_kit::IconButton::new(glyph).variant(rune_kit::IconButtonVariant::Ghost).control_size(ControlSize::Small).label(to).shortcut("⌥⌘B").on_press(move |s: &mut App| s.ov.now_brief = !brief).build(k).key("now-layout");
+        return rune_kit::IconButton::new(glyph)
+            .variant(rune_kit::IconButtonVariant::Ghost)
+            .control_size(ControlSize::Small)
+            .label(to)
+            .shortcut("⌥⌘B")
+            .on_press(move |s: &mut App| s.ov.now_brief = !brief)
+            .build(k)
+            .key("now-layout");
     }
     let seg = SegmentedControl::new(&["Three panes", "Brief"], Some(if brief { 1 } else { 0 }))
         .label("Layout")
@@ -262,7 +269,14 @@ fn toolbar_of(bar: ui::Bar) -> Toolbar {
 }
 
 fn talk_icon(k: &Kit) -> El {
-    rune_kit::IconButton::new(&icons::WAVEFORM).variant(rune_kit::IconButtonVariant::Ghost).control_size(ControlSize::Small).label("Talk").help("Talk to the orchestrator").on_press(|_: &mut App| crate::voice::open("", "")).build(k).key("talk")
+    rune_kit::IconButton::new(&icons::WAVEFORM)
+        .variant(rune_kit::IconButtonVariant::Ghost)
+        .control_size(ControlSize::Small)
+        .label("Talk")
+        .help("Talk to the orchestrator")
+        .on_press(|_: &mut App| crate::voice::open("", ""))
+        .build(k)
+        .key("talk")
 }
 
 fn talk_button(k: &Kit) -> El {
@@ -297,7 +311,7 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
             .w_full()
             .gap(3.0)
             .pt(14.0)
-            .child(ui::section_head("Since you left", None, Some(text(since).font(k.text(META)).color(weak(k))), k))
+            .child(ui::section_head("Since you left", None, Some(ui::section_note(since, k)), k))
             .child(text("Each line opens what it is about.".to_string()).font(k.text(META)).color(weak(k)).wrap())
     }));
     for (p, lines) in digests.iter().take(6) {
@@ -400,7 +414,7 @@ pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
         .child(ui::section_head("Needs you", Some(s.ov.needs.len()), Some(row().gap(6.0).items_center().child(text("Next".to_string()).font(k.text(META)).color(weak(&k))).child(ui::ghost_keys(&["⌘J"], &k))), &k).mt(10.0))
         .child(ui::needs_list(s, &k))
         .child(col().w_full().mt(10.0).child(crate::over::decisions::section(s, &k, main_kit)))
-        .child(ui::section_head("By project", None, Some(text("From the ledger and each session's last word".to_string()).font(k.text(META)).color(weak(&k))), &k).mt(10.0));
+        .child(ui::section_head("By project", None, Some(ui::section_note("From the ledger and each session's last word", &k)), &k).mt(10.0));
     for (p, lines) in digests.iter().take(6) {
         c = c.child(digest_block(s, p, lines, 4, looked, true, &k).el());
     }

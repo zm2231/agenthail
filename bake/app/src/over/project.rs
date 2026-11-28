@@ -121,7 +121,7 @@ fn group(s: &App, key: &str, title: &str, items: &[&Work], empty: &str, k: &Kit)
 
 fn crew_panel(s: &App, lead: Option<&str>, k: &Kit) -> El {
     let crew = lead.map(|l| s.ov.d.crew(l)).unwrap_or_default();
-    let mut c = col().w_full().gap(6.0).child(ui::section_head("Crew", Some(crew.len()), Some(text("started by the lead".to_string()).font(k.text(META)).color(weak(k))), k));
+    let mut c = col().w_full().gap(6.0).child(ui::section_head("Crew", Some(crew.len()), Some(ui::section_note("started by the lead", k)), k));
     if crew.is_empty() {
         c = c.child(text("The lead has no workers running today.".to_string()).font(k.text(META)).color(weak(k)));
     }

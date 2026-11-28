@@ -146,7 +146,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, key: &WorkKey, _layer: &mut Vec<El>, main
                 .child(col().grow(1.0).w(1.0).gap(3.0).child(text(t.to_uppercase()).font(k.text(rune::TextStyle::new(11.0, 600.0))).color(k.c.text_accent)).child(text(b.clone()).font(k.text(BODY)).color(strong(&k)).wrap())),
         );
     }
-    let brief = col().w_full().gap(10.0).child(ui::section_head("Review brief", None, Some(text("read this before the evidence".to_string()).font(k.text(META)).color(weak(&k))), &k)).child(ui::card(brief, &k));
+    let brief = col().w_full().gap(10.0).child(ui::section_head("Review brief", None, Some(ui::section_note("read this before the evidence", &k)), &k)).child(ui::card(brief, &k));
     let mut tiles = row().w_full().gap(12.0).flex_wrap().items_stretch();
     for (i, p) in steps.iter().enumerate() {
         tiles = tiles.child(tile(i, &p.expected, &p.observed, p.passed, &k));
@@ -154,7 +154,7 @@ pub fn view(s: &App, cx: &mut Cx<App>, key: &WorkKey, _layer: &mut Vec<El>, main
     let proof = col()
         .w_full()
         .gap(10.0)
-        .child(ui::section_head("Evidence", Some(steps.len()), Some(text(format!("{passed} passed · {not_run} not run · from the workers' logged results")).font(k.text(META)).color(weak(&k))), &k))
+        .child(ui::section_head("Evidence", Some(steps.len()), Some(ui::section_note(format!("{passed} passed · {not_run} not run · from the workers' logged results"), &k)), &k))
         .child(tiles);
 
     let mut gaps = col().w_full().gap(8.0).child(ui::section_head("What wasn't checked", Some(unchecked.len() + not_run), None, &k));

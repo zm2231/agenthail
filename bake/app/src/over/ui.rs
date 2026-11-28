@@ -331,6 +331,10 @@ pub fn section_head(title: &str, count: Option<usize>, trailing: Option<El>, k: 
     r
 }
 
+pub fn section_note(note: impl Into<String>, k: &Kit) -> El {
+    text(note.into()).font(k.text(META)).color(weak(k)).wrap().shrink().min_w(0.0)
+}
+
 pub fn card(content: El, k: &Kit) -> El {
     col().w_full().radius(12.0).fill(k.c.surface_base).border(1.0, edge()).child(content)
 }
@@ -347,11 +351,24 @@ fn start_session(project: Option<&str>) -> impl Fn(&mut App, &mut rune::Tx) + 's
 }
 
 pub fn new_session_button(project: Option<&str>, k: &Kit) -> El {
-    Button::new("New session").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).icon(&icons::PLUS).shortcut("⌘N").on_press_tx(start_session(project)).build(k)
+    Button::new("New session")
+        .variant(ButtonVariant::Ghost)
+        .control_size(ControlSize::Small)
+        .icon(&icons::PLUS)
+        .shortcut("⌘N")
+        .on_press_tx(start_session(project))
+        .build(k)
 }
 
 pub fn new_session_icon(project: Option<&str>, k: &Kit) -> El {
-    rune_kit::IconButton::new(&icons::PLUS).variant(rune_kit::IconButtonVariant::Ghost).control_size(ControlSize::Small).label("New session").shortcut("⌘N").on_press_tx(start_session(project)).build(k).key("new-session")
+    rune_kit::IconButton::new(&icons::PLUS)
+        .variant(rune_kit::IconButtonVariant::Ghost)
+        .control_size(ControlSize::Small)
+        .label("New session")
+        .shortcut("⌘N")
+        .on_press_tx(start_session(project))
+        .build(k)
+        .key("new-session")
 }
 
 pub fn notice(message: &str, k: &Kit) -> El {
@@ -465,7 +482,13 @@ pub fn needs_count_button(s: &App, k: &Kit) -> El {
 }
 
 fn needs_labelled(label: String, k: &Kit) -> El {
-    Button::new(label).variant(ButtonVariant::Ghost).icon(&icons::NOTIFICATIONS).shortcut("⌘J").help("Next thing that needs you (⌘J)").on_press(|s: &mut App| next_need(s)).build(k)
+    Button::new(label)
+        .variant(ButtonVariant::Ghost)
+        .icon(&icons::NOTIFICATIONS)
+        .shortcut("⌘J")
+        .help("Next thing that needs you (⌘J)")
+        .on_press(|s: &mut App| next_need(s))
+        .build(k)
 }
 
 pub fn strip(s: &App, current: Option<&str>, k: &Kit) -> El {
@@ -879,7 +902,7 @@ pub fn pane_head_part<'a>(s: &App, i: usize, title: &'a str, k: &'a Kit) -> Part
 }
 
 pub fn head_part<'a>(id: &str, title: &'a str, count: Option<usize>, note: Option<String>, k: &'a Kit) -> Part<'a> {
-    Part::row(id.to_string(), crate::over::rows::hash(&(title, count, &note)), move || section_head(title, count, note.map(|n| text(n).font(k.text(META)).color(weak(k))), k))
+    Part::row(id.to_string(), crate::over::rows::hash(&(title, count, &note)), move || section_head(title, count, note.map(|n| section_note(n, k)), k))
 }
 
 fn until(s: &App, at: &str) -> String {

@@ -62,6 +62,10 @@ fn laid_out_in(scale: f32, screen: &str, dir: &Dir, size: (f32, f32), name: Opti
             crate::over::go(s, Screen::Work(key));
         }
         "apps" => crate::over::go(s, Screen::Extensions),
+        "brief" => {
+            crate::over::go(s, Screen::Now);
+            s.ov.now_brief = true;
+        }
         "jump" => crate::over::open_jump(s, tx),
         _ => {}
     });
@@ -306,6 +310,12 @@ fn command_zero_resets_the_text_size_and_shift_command_n_opens_now() {
     assert_eq!(crate::look::text_scale(), Some(1.0), "⌘0 puts the text back to its actual size");
     assert!(rt.state.screen != Screen::Now, "⌘0 leaves the session open");
 
+    for mods in [rune::Mods { alt: true, ..rune::Mods::default() }, rune::Mods { ctrl: true, ..rune::Mods::default() }] {
+        rt.key(rune::KeyEvent { key: rune::Key::Command('n'), mods: rune::Mods { cmd: true, shift: true, ..mods } });
+        rt.frame(DT);
+        assert!(rt.state.screen != Screen::Now, "another modifier with ⇧⌘N leaves Now alone");
+    }
+
     rt.key(press(rune::Key::Command('n'), true));
     rt.frame(DT);
     assert!(rt.state.screen == Screen::Now, "⇧⌘N opens Now");
@@ -424,4 +434,36 @@ fn now_at_larger_text_in_the_smallest_window_keeps_its_title_buttons_and_notes_i
         let r = said(&rt, note);
         assert!(r[0] + r[2] <= head[0] + head[2] + 0.5, "{note} {r:?} stays inside the pane {head:?}");
     }
+}
+
+#[test]
+fn now_keeps_its_title_and_notes_when_more_things_need_you_or_the_brief_shows() {
+    if !isolated("text_scale::now_keeps_its_title_and_notes_when_more_things_need_you_or_the_brief_shows") {
+        return;
+    }
+    use crate::over::{Group, Need, NeedKind, Target};
+    let dir = Dir::new("text-scale-small-brief");
+    let mut rt = laid_out_in(1.6, "now", &dir, SMALLEST, Some(LONG_TITLE));
+    rt.frame(DT);
+    rt.update(|s, _| {
+        s.ov.needs = (0..12).map(|i| Need { kind: NeedKind::Question, group: Group::Waiting, project: "Alpha".into(), project_key: "p1".into(), title: format!("Question {i}"), who: "a".into(), at: "2026-11-27T08:50:00Z".into(), target: Target::Session("a".into()), label: None }).collect();
+    });
+    for _ in 0..3 {
+        rt.frame(DT);
+    }
+    assert!(rect(&rt, "now-leading")[2] > 40.0, "Now keeps its title with 12 needs");
+
+    let mut rt = laid_out_in(1.6, "brief", &dir, SMALLEST, Some(LONG_TITLE));
+    rt.frame(DT);
+    rt.frame(DT);
+    let pane = rect(&rt, "now-b");
+    let note = said(&rt, "From the ledger");
+    assert!(note[0] + note[2] <= pane[0] + pane[2] + 0.5, "the brief's note {note:?} stays inside {pane:?}");
+
+    let mut rt = laid_out_in(1.6, "work", &dir, SMALLEST, Some(LONG_TITLE));
+    rt.frame(DT);
+    rt.frame(DT);
+    let rail = said(&rt, "WHO'S WORKING");
+    let note = said(&rt, "0 passed");
+    assert!(note[0] + note[2] <= rail[0], "the evidence note {note:?} wraps before the rail {rail:?}");
 }

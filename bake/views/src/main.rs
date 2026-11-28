@@ -237,7 +237,7 @@ fn on_key(s: &mut App, ev: &KeyEvent, tx: &mut Tx) -> bool {
         next_need(s);
         return true;
     }
-    if ev.is_command('n') && ev.mods.shift {
+    if ev.is_command('n') && ev.mods.shift && !ev.mods.alt && !ev.mods.ctrl {
         go(s, Screen::Now);
         return true;
     }

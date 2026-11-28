@@ -289,7 +289,7 @@ pub fn section(s: &App, k: &Kit, main_kit: &Kit) -> El {
 pub fn section_part<'a>(s: &'a App, k: &'a Kit, main_kit: &'a Kit) -> Part<'a> {
     let st = &s.ov.inbox;
     let count = st.inbox.as_ref().map(|i| i.decisions.len());
-    let head = Part::row("decisions-head", count, move || ui::section_head("Decisions", count, Some(text("from every connected computer".to_string()).font(k.text(META)).color(weak(k))), k));
+    let head = Part::row("decisions-head", count, move || ui::section_head("Decisions", count, Some(ui::section_note("from every connected computer", k)), k));
     let Some(found) = &st.inbox else {
         st.drawn.borrow_mut().keep(|_| false);
         let note = if s.client.is_some() { "Looking for decisions…" } else { "Decisions show when the app is connected to the daemon." };
