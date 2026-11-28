@@ -10,7 +10,7 @@ use crate::catalog::{Client, Session, parse_time};
 use crate::menu::Patch;
 use crate::derive::phase::Steps;
 use crate::derive::tails::{self, Tail, Tails};
-use crate::derive::world::{Actor, Parts, Recorded, Rows, Work, World, prepared};
+use crate::derive::world::{Actor, Host, Meter, Parts, ProjectRecord, Recorded, Rows, Work, World, prepared};
 use crate::shared::own;
 use crate::item::Item;
 
@@ -403,11 +403,33 @@ pub struct Overview {
     expected: Vec<Expected>,
 }
 
+struct Shown {
+    minute: Option<i64>,
+    projects: Vec<ProjectRecord>,
+    usage: Vec<Meter>,
+    hosts: Vec<Host>,
+    actors: HashMap<String, Actor>,
+    tile_order: Option<crate::projects::TileOrder>,
+    sessions: Arc<Vec<Session>>,
+    ledgers: HashMap<String, Vec<Arc<Work>>>,
+    steps: HashMap<String, Steps>,
+    failed: HashSet<String>,
+    pending: HashSet<String>,
+}
+
+fn same_rows(a: &HashMap<String, Vec<Arc<Work>>>, b: &HashMap<String, Vec<Arc<Work>>>) -> bool {
+    a.len() == b.len() && a.iter().all(|(key, x)| b.get(key).is_some_and(|y| x.len() == y.len() && x.iter().zip(y).all(|(p, q)| Arc::ptr_eq(p, q) || p == q)))
+}
+
 struct Expected {
     id: String,
     patch: Patch,
     at: Instant,
     daemon: Session,
+}
+
+fn minute(at: &str) -> Option<i64> {
+    parse_time(at).map(|t| t.unix_timestamp().div_euclid(60))
 }
 
 fn newer(at: &str, than: &str) -> bool {
@@ -479,7 +501,6 @@ impl Overview {
         if !later(at, epoch, seq, &self.base, true) {
             return false;
         }
-        let minute = |at: &str| parse_time(at).map(|t| t.unix_timestamp().div_euclid(60));
         let ticked = minute(at) != minute(&self.base.updated_at);
         self.base.updated_at = at.to_string();
         self.base.host_epoch = epoch.to_string();
@@ -499,6 +520,37 @@ impl Overview {
             moved = true;
         }
         moved
+    }
+
+    fn shown(&self) -> Shown {
+        Shown {
+            minute: minute(&self.base.updated_at),
+            projects: self.base.projects.clone(),
+            usage: self.base.usage.clone(),
+            hosts: self.base.hosts.clone(),
+            actors: self.base.actors.clone(),
+            tile_order: self.base.tile_order.clone(),
+            sessions: self.sessions.clone(),
+            ledgers: self.ledgers.clone(),
+            steps: self.steps.clone(),
+            failed: self.failed.clone(),
+            pending: self.pending.clone(),
+        }
+    }
+
+    fn moved_since(&self, b: &Shown) -> bool {
+        let base = &self.base;
+        minute(&base.updated_at) != b.minute
+            || base.projects != b.projects
+            || base.usage != b.usage
+            || base.hosts != b.hosts
+            || base.actors != b.actors
+            || base.tile_order != b.tile_order
+            || !(Arc::ptr_eq(&self.sessions, &b.sessions) || self.sessions == b.sessions)
+            || !same_rows(&self.ledgers, &b.ledgers)
+            || self.steps != b.steps
+            || self.failed != b.failed
+            || self.pending != b.pending
     }
 
     pub fn stale(&self) -> bool {
@@ -566,6 +618,12 @@ impl Overview {
     }
 
     pub fn refresh(&mut self, fetched: Fetched) {
+        let before = self.shown();
+        self.take(fetched);
+        self.stale |= self.moved_since(&before);
+    }
+
+    fn take(&mut self, fetched: Fetched) {
         let Fetched { mut recorded, sessions, ledgers, held, actors_at, moved, .. } = fetched;
         for id in &moved {
             self.ledgers.remove(id);
@@ -591,7 +649,6 @@ impl Overview {
             self.reconcile();
         }
         self.follow_archive();
-        self.stale = true;
         self.take_actors(actors_at, actors);
         let opened: Vec<String> = self.covered.iter().filter(|k| self.ledgers.contains_key(*k)).cloned().collect();
         self.covered = ledgers.keys().cloned().chain(held).chain(opened).collect();
@@ -635,16 +692,17 @@ impl Overview {
     }
 
     pub fn take_ledger(&mut self, project: &str, started: Instant, result: Result<Ledger, String>) {
+        let before = self.shown();
         self.pending.remove(project);
         if result.is_ok() {
             self.covered.insert(project.to_string());
         }
-        self.stale = true;
         let rows = result.map(|l| {
             self.take_actors(l.actors_at, l.actors);
             (l.rows, l.steps)
         });
         self.apply(project.to_string(), started, rows);
+        self.stale |= self.moved_since(&before);
     }
 
     fn take_actors(&mut self, started: Instant, actors: HashMap<String, Actor>) {
