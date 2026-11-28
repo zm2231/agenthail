@@ -556,6 +556,26 @@ fn the_settings_tabs_show_which_side_has_more_when_larger_text_makes_them_scroll
 }
 
 #[test]
+fn now_keeps_every_toolbar_button_clear_of_the_title_and_fade_at_every_width() {
+    if !isolated("text_scale::now_keeps_every_toolbar_button_clear_of_the_title_and_fade_at_every_width") {
+        return;
+    }
+    let dir = Dir::new("text-scale-now-widths");
+    for scale in [1.0, 1.5, 1.6] {
+        let k = rune_kit::Kit::neutral(true).with_text_scale(scale);
+        let (floor, fade) = (k.text_size(96.0), k.text_size(16.0).max(16.0));
+        for w in (1100..=1440).step_by(20) {
+            let mut rt = laid_out_in(scale, "now", &dir, (w as f32, 900.0), None);
+            for _ in 0..4 {
+                rt.frame(DT);
+            }
+            let (title, buttons) = (rect(&rt, "now-leading"), rect(&rt, "now-trailing"));
+            assert!(buttons[0] >= title[0] + title[2].max(floor) + fade - 0.5, "{scale} at {w}: the buttons {buttons:?} start clear of the title's room {title:?} and the fade");
+        }
+    }
+}
+
+#[test]
 fn now_drops_its_button_labels_in_steps_as_room_runs_out() {
     if !isolated("text_scale::now_drops_its_button_labels_in_steps_as_room_runs_out") {
         return;

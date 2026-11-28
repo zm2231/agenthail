@@ -45,8 +45,10 @@ fn variant(brief: bool, room: Room, k: &Kit) -> El {
     if room == Room::Labels { r.child(ui::ghost_keys(&["⌥⌘B"], k)) } else { r }
 }
 
-const BAR: &str = "now-bar";
-const BAR_EDGES: f32 = 48.0;
+const LEADING_START: &str = "now-leading-start";
+const TRAILING_END: &str = "now-trailing-end";
+const TOOLBAR_TITLE_MIN: f32 = 96.0;
+const TOOLBAR_FADE: f32 = 16.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Room {
@@ -60,8 +62,9 @@ fn trailing_key(room: Room, needs: usize, brief: bool, k: &Kit) -> String {
 }
 
 fn room(s: &App, needs: usize, brief: bool, k: &Kit) -> Room {
-    let Some(bar) = ui::fit_width(s, BAR) else { return Room::Labels };
-    let free = bar - BAR_EDGES - rune::text::advance("Now", k.text(BODY_MED));
+    let (Some(start), Some(end)) = (ui::fit_width(s, LEADING_START), ui::fit_width(s, TRAILING_END)) else { return Room::Labels };
+    let title = k.text_size(TOOLBAR_TITLE_MIN).max(rune::text::advance("Now", k.text(BODY_MED)));
+    let free = end - start - title - k.text_size(TOOLBAR_FADE).max(TOOLBAR_FADE);
     for room in [Room::Labels, Room::Fewer] {
         match ui::fit_width(s, &trailing_key(room, needs, brief, k)) {
             Some(w) if w > free => continue,
@@ -69,6 +72,12 @@ fn room(s: &App, needs: usize, brief: bool, k: &Kit) -> Room {
         }
     }
     Room::Icons
+}
+
+fn keep(s: &mut App, key: &str, v: f32) {
+    if s.ov.widths.get(key).is_none_or(|w| (w - v).abs() > 0.5) {
+        s.ov.widths.insert(key.to_string(), v);
+    }
 }
 
 fn line_part<'a>(s: &App, key: String, l: &'a Line, k: &'a Kit) -> Part<'a> {
@@ -260,10 +269,11 @@ fn focus_card<'a>(s: &'a App, k: &'a Kit) -> Part<'a> {
 }
 
 fn toolbar<'a>(s: &'a App, strip: bool, k: &'a Kit) -> ui::Bar<'a> {
+    let start = |e: El| e.on_layout(|s: &mut App, r: [f32; 4]| keep(s, LEADING_START, r[0]));
     let leading = if strip {
-        Part::always("now-leading", move || row().gap(12.0).items_center().shrink().min_w(0.0).child(text("Now".to_string()).font(k.text(BODY_MED)).color(strong(k)).truncate().shrink().min_w(0.0)).child(ui::strip(s, None, k)))
+        Part::always("now-leading", move || start(row().gap(12.0).items_center().shrink().min_w(0.0).child(text("Now".to_string()).font(k.text(BODY_MED)).color(strong(k)).truncate().shrink().min_w(0.0)).child(ui::strip(s, None, k))))
     } else {
-        Part::row("now-leading", (), move || ui::crumb(&[("Now", true)], k))
+        Part::row("now-leading", (), move || start(ui::crumb(&[("Now", true)], k)))
     };
     let center = crate::ui::tabs::strip_part(s, k, false).map(|tabs| Part::group("now-tabs", crate::over::rows::version((), [&tabs]), move || row().max_w(560.0).child(tabs.el())));
     let needs = s.ov.needs.len();
@@ -274,7 +284,10 @@ fn toolbar<'a>(s: &'a App, strip: bool, k: &'a Kit) -> ui::Bar<'a> {
         let r = row().gap(10.0).items_center();
         let r = if room == Room::Labels { r.child(talk_button(k)).child(ui::new_session_button(None, k)) } else { r.child(talk_icon(k)).child(ui::new_session_icon(None, k)) };
         let r = r.child(variant(brief, room, k)).child(if room == Room::Icons { ui::needs_count_button(s, k) } else { ui::needs_button(s, k) });
-        ui::measured(r, measure)
+        r.on_layout(move |s: &mut App, b: [f32; 4]| {
+            keep(s, &measure, b[2]);
+            keep(s, TRAILING_END, b[0] + b[2]);
+        })
     });
     ui::Bar { leading, center, trailing }
 }
@@ -387,7 +400,7 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
     let counts = (s.ov.needs.len(), s.ov.hands_on.len());
     let v = crate::over::rows::version((side_c, centre_c, rail_c, counts), centre.iter().chain(&rail_in_main).chain(side_in_main.iter().flat_map(|(h, b)| [h, b])));
     let main = Part::group("now-main", v, move || {
-        let mut main = ui::measured(row().w_full().h_full().gap(8.0), BAR.into());
+        let mut main = row().w_full().h_full().gap(8.0);
         let strip_wrap = |e: El| col().h_full().py(8.0).child(e);
         if side_c {
             main = main.child(strip_wrap(ui::pane_strip(0, &icons::SIDEBAR, Some((counts.0, ui::needs_color(k))), k)).pl(8.0));
@@ -442,7 +455,7 @@ pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
         mv = mv.child(moving_row(s, &x.id, &k).el());
     }
     c = c.child(ui::section_head("What's moving", Some(moving.len()), None, &k).mt(10.0)).child(ui::card(mv, &k));
-    let main = ui::measured(col().key("now-b").w_full().h_full(), BAR.into()).items_center().scroll(ScrollSpec { stick_bottom: false }).child(c);
+    let main = col().key("now-b").w_full().h_full().items_center().scroll(ScrollSpec { stick_bottom: false }).child(c);
     let bar = toolbar_of(toolbar(s, true, &k));
     ui::frame(cx, s, None, main, None, bar, main_kit)
 }
