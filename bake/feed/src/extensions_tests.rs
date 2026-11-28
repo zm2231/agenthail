@@ -238,3 +238,19 @@ fn a_read_age_wakes_the_page_when_its_label_next_changes() {
         assert_ne!(age(next, false), age(secs, false), "{secs}s changes at {next}s");
     }
 }
+
+#[test]
+fn a_page_cookie_is_marked_secure_only_for_an_https_page() {
+    let session = WebSession { name: "agenthail_web".into(), value: "ahw_v".into(), path: String::new(), expires_at: "2026-11-27T22:00:00Z".into(), scopes: vec![] };
+    let plain = page_cookie(&session, "http://mac.local:48200/report").unwrap();
+    assert_eq!((plain.name(), plain.value(), plain.domain(), plain.path()), ("agenthail_web", "ahw_v", Some("mac.local"), Some("/")));
+    assert_eq!(plain.secure(), None, "a Secure attribute of any value keeps the cookie off http pages");
+    assert_eq!(plain.http_only(), Some(true));
+    assert_eq!(plain.same_site(), Some(cookie::SameSite::Strict));
+    assert_eq!(plain.expires_datetime().map(|at| at.unix_timestamp()), Some(1_795_816_800));
+    let tls = page_cookie(&session, "https://mac.tailnet.ts.net:48100/").unwrap();
+    assert_eq!((tls.domain(), tls.secure()), (Some("mac.tailnet.ts.net"), Some(true)));
+    let undated = page_cookie(&WebSession { expires_at: "soon".into(), ..session.clone() }, "http://[::1]:48100/").unwrap();
+    assert_eq!((undated.domain(), undated.expires()), (Some("::1"), None));
+    assert!(page_cookie(&session, "nope").is_none());
+}
