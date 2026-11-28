@@ -764,3 +764,43 @@ fn now_keeps_its_session_tabs_clear_of_the_toolbar_buttons_while_the_window_resi
         }
     }
 }
+
+#[test]
+fn legible_shot() {
+    let Some(dir_out) = std::env::var_os("AGENTHAIL_LEGIBLE_SHOT_DIR") else { return };
+    if !isolated("text_scale::legible_shot") {
+        return;
+    }
+    let out = std::path::PathBuf::from(dir_out);
+    let dir = Dir::new("legible-shot");
+    let dim = json!({"colors": {
+        "muted": {"dark": "#55565c", "light": "#a8a9ae"},
+        "faint": {"dark": "#45464b", "light": "#c2c3c7"},
+        "meta": {"dark": "#45464b", "light": "#c2c3c7"},
+        "error": {"dark": "#7a2a2a", "light": "#f0a0a0"},
+    }});
+    for (look, view) in [("live", json!({})), ("dim", dim)] {
+        let view: feed::look::View = serde_json::from_value(view).unwrap();
+        crate::look::take_view(crate::look::ticket(), view);
+        for dark in [true, false] {
+            for increased in [false, true] {
+                let tag = format!("{look}-{}-{}", if dark { "dark" } else { "light" }, if increased { "increased" } else { "normal" });
+                for screen in ["now", "session"] {
+                    let mut rt = laid_out(1.0, screen, &dir);
+                    rt.set_system_dark(dark);
+                    rt.set_system_increased_contrast(increased);
+                    settled(&mut rt);
+                    render(&mut rt, SIZE, &out.join(format!("{screen}-{tag}.png")));
+                }
+                let mut rt = settings_on(0, 0);
+                rt.set_system_dark(dark);
+                rt.set_system_increased_contrast(increased);
+                for _ in 0..6 {
+                    rt.frame(DT);
+                    rt.settle_all();
+                }
+                render(&mut rt, SETTINGS, &out.join(format!("settings-{tag}.png")));
+            }
+        }
+    }
+}
