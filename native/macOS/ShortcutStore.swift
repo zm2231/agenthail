@@ -161,42 +161,34 @@ final class ShortcutStore: ObservableObject {
     init(defaults: UserDefaults, anyApp: AnyAppShortcut = AnyAppShortcut(current: { nil }, clear: {})) {
         self.defaults = defaults
         self.anyApp = anyApp
-        overrides = defaults.data(forKey: Self.defaultsKey).flatMap { try? JSONDecoder().decode([String: StoredShortcut?].self, from: $0) } ?? [:]
+        overrides = [:]
+        overrides = stored()
     }
 
     func shortcut(for command: AppCommand) -> StoredShortcut? {
-        if let chosen = overrides[command.rawValue] { return chosen }
-        return command.defaultShortcut
+        Self.shortcut(for: command, in: overrides)
     }
 
     func isCustomized(_ command: AppCommand) -> Bool {
         overrides[command.rawValue] != nil
     }
 
-    func owner(of shortcut: StoredShortcut, except excluded: ShortcutOwner? = nil) -> ShortcutOwner? {
-        if let command = AppCommand.allCases.first(where: { .command($0) != excluded && self.shortcut(for: $0) == shortcut }) {
-            return .command(command)
-        }
-        if excluded != .anyApp && anyApp.current() == shortcut { return .anyApp }
-        if let other = SharedAppShortcuts.commands.first(where: { sharedShortcut(for: $0) == shortcut }) {
-            return .sharedApp(other.title)
-        }
-        if case .command(let command) = excluded, SharedAppShortcuts.thisAppOnly.contains(command) { return nil }
-        return SharedAppShortcuts.fixed.first { $0.0 == shortcut }.map { .sharedApp($0.1) }
-    }
-
     var anyCustomized: Bool {
         AppCommand.allCases.contains(where: isCustomized)
     }
 
-    private func sharedShortcut(for command: SharedAppShortcuts.Command) -> StoredShortcut? {
-        if let chosen = overrides[command.id] { return chosen }
-        return command.defaultShortcut
+    func owner(of shortcut: StoredShortcut, except excluded: ShortcutOwner? = nil) -> ShortcutOwner? {
+        owner(of: shortcut, except: excluded, in: stored())
+    }
+
+    func defaultBlocker(_ command: AppCommand) -> ShortcutOwner? {
+        defaultBlocker(command, in: stored())
     }
 
     @discardableResult
     func set(_ shortcut: StoredShortcut?, for command: AppCommand) -> Change {
-        if let shortcut, let other = owner(of: shortcut, except: .command(command)) { return .taken(other) }
+        reload()
+        if let shortcut, let other = owner(of: shortcut, except: .command(command), in: overrides) { return .taken(other) }
         if shortcut == command.defaultShortcut {
             overrides.removeValue(forKey: command.rawValue)
         } else {
@@ -206,13 +198,10 @@ final class ShortcutStore: ObservableObject {
         return .saved
     }
 
-    func defaultBlocker(_ command: AppCommand) -> ShortcutOwner? {
-        command.defaultShortcut.flatMap { owner(of: $0, except: .command(command)) }
-    }
-
     @discardableResult
     func reset(_ command: AppCommand) -> Change {
-        if let other = defaultBlocker(command) { return .taken(other) }
+        reload()
+        if let other = defaultBlocker(command, in: overrides) { return .taken(other) }
         overrides.removeValue(forKey: command.rawValue)
         save()
         return .saved
@@ -220,14 +209,54 @@ final class ShortcutStore: ObservableObject {
 
     func resetAll() {
         anyApp.clear()
+        reload()
         let before = overrides
-        for command in AppCommand.allCases { overrides.removeValue(forKey: command.rawValue) }
+        var after = before
+        for command in AppCommand.allCases { after.removeValue(forKey: command.rawValue) }
         while true {
-            let blocked = AppCommand.allCases.filter { !isCustomized($0) && before[$0.rawValue] != nil && defaultBlocker($0) != nil }
+            let blocked = AppCommand.allCases.filter { after[$0.rawValue] == nil && before[$0.rawValue] != nil && defaultBlocker($0, in: after) != nil }
             if blocked.isEmpty { break }
-            for command in blocked { overrides[command.rawValue] = before[command.rawValue] }
+            for command in blocked { after[command.rawValue] = before[command.rawValue] }
         }
+        overrides = after
         save()
+    }
+
+    private static func shortcut(for command: AppCommand, in list: [String: StoredShortcut?]) -> StoredShortcut? {
+        if let chosen = list[command.rawValue] { return chosen }
+        return command.defaultShortcut
+    }
+
+    private func sharedShortcut(for command: SharedAppShortcuts.Command, in list: [String: StoredShortcut?]) -> StoredShortcut? {
+        if let chosen = list[command.id] { return chosen }
+        guard let shortcut = command.defaultShortcut else { return nil }
+        let chosenElsewhere = list.contains { $0.key != command.id && $0.value == shortcut }
+        return chosenElsewhere || anyApp.current() == shortcut ? nil : shortcut
+    }
+
+    private func owner(of shortcut: StoredShortcut, except excluded: ShortcutOwner?, in list: [String: StoredShortcut?]) -> ShortcutOwner? {
+        if let command = AppCommand.allCases.first(where: { .command($0) != excluded && Self.shortcut(for: $0, in: list) == shortcut }) {
+            return .command(command)
+        }
+        if excluded != .anyApp && anyApp.current() == shortcut { return .anyApp }
+        if let other = SharedAppShortcuts.commands.first(where: { sharedShortcut(for: $0, in: list) == shortcut }) {
+            return .sharedApp(other.title)
+        }
+        if case .command(let command) = excluded, SharedAppShortcuts.thisAppOnly.contains(command) { return nil }
+        return SharedAppShortcuts.fixed.first { $0.0 == shortcut }.map { .sharedApp($0.1) }
+    }
+
+    private func defaultBlocker(_ command: AppCommand, in list: [String: StoredShortcut?]) -> ShortcutOwner? {
+        command.defaultShortcut.flatMap { owner(of: $0, except: .command(command), in: list) }
+    }
+
+    private func stored() -> [String: StoredShortcut?] {
+        defaults.data(forKey: Self.defaultsKey).flatMap { try? JSONDecoder().decode([String: StoredShortcut?].self, from: $0) } ?? [:]
+    }
+
+    private func reload() {
+        let current = stored()
+        if current != overrides { overrides = current }
     }
 
     func anyAppChanged() {

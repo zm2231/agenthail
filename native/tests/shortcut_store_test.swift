@@ -15,25 +15,25 @@ struct ShortcutStoreTest {
 
         let store = ShortcutStore(defaults: defaults)
         let commandK = StoredShortcut(carbonKeyCode: kVK_ANSI_K, carbonModifiers: cmdKey)
-        let commandJ = StoredShortcut(carbonKeyCode: kVK_ANSI_J, carbonModifiers: cmdKey)
+        let commandG = StoredShortcut(carbonKeyCode: kVK_ANSI_G, carbonModifiers: cmdKey)
         check(store.shortcut(for: .goToSession) == commandK, "a command starts with its default")
         check(store.shortcut(for: .rename) == nil, "a command without a default starts unassigned")
 
         check(store.set(commandK, for: .newSession) == .taken(.command(.goToSession)), "a shortcut in use is refused and names its owner")
         check(store.shortcut(for: .newSession) == AppCommand.newSession.defaultShortcut, "a refused change leaves the shortcut alone")
 
-        check(store.set(commandJ, for: .goToSession) == .saved, "a free shortcut is saved")
+        check(store.set(commandG, for: .goToSession) == .saved, "a free shortcut is saved")
         check(store.isCustomized(.goToSession), "a changed command is customized")
         check(store.set(commandK, for: .newSession) == .saved, "a released default can be taken by another command")
         check(store.reset(.goToSession) == .taken(.command(.newSession)), "reset is refused while another command holds the default")
-        check(store.shortcut(for: .goToSession) == commandJ, "a refused reset keeps the current shortcut")
+        check(store.shortcut(for: .goToSession) == commandG, "a refused reset keeps the current shortcut")
 
         check(store.set(nil, for: .stop) == .saved, "a shortcut can be cleared")
         check(store.shortcut(for: .stop) == nil, "a cleared command has no shortcut")
         check(store.isCustomized(.stop), "a cleared default counts as customized")
 
         let reloaded = ShortcutStore(defaults: defaults)
-        check(reloaded.shortcut(for: .goToSession) == commandJ && reloaded.shortcut(for: .newSession) == commandK, "changes persist")
+        check(reloaded.shortcut(for: .goToSession) == commandG && reloaded.shortcut(for: .newSession) == commandK, "changes persist")
         check(reloaded.shortcut(for: .stop) == nil, "a cleared shortcut stays cleared")
 
         check(store.set(AppCommand.newSession.defaultShortcut, for: .goToSession) == .saved, "a command can take another command's released default")
@@ -46,12 +46,12 @@ struct ShortcutStoreTest {
         var anyAppShortcut: StoredShortcut?
         let commandN = AppCommand.newSession.defaultShortcut!
         let withAnyApp = ShortcutStore(defaults: defaults, anyApp: AnyAppShortcut(current: { anyAppShortcut }, clear: { anyAppShortcut = nil }))
-        check(withAnyApp.set(commandJ, for: .newSession) == .saved, "a command moves off its default")
+        check(withAnyApp.set(commandG, for: .newSession) == .saved, "a command moves off its default")
         anyAppShortcut = commandN
         check(withAnyApp.owner(of: commandN) == .anyApp, "the any-app shortcut owns its key")
         check(withAnyApp.reset(.newSession) == .taken(.anyApp), "reset is refused while the any-app shortcut holds the default")
         check(withAnyApp.set(commandN, for: .stop) == .taken(.anyApp), "a command cannot take the any-app shortcut")
-        check(withAnyApp.owner(of: commandJ, except: .anyApp) == .command(.newSession), "the any-app recorder sees command shortcuts")
+        check(withAnyApp.owner(of: commandG, except: .anyApp) == .command(.newSession), "the any-app recorder sees command shortcuts")
         withAnyApp.resetAll()
         check(anyAppShortcut == nil && withAnyApp.shortcut(for: .newSession) == commandN, "restore defaults also clears the any-app shortcut so no key has two owners")
 
@@ -97,6 +97,24 @@ struct ShortcutStoreTest {
         let free = ShortcutStore(defaults: defaults)
         free.resetAll()
         check(free.overrides.keys.sorted() == ["textBigger"] && !free.anyCustomized, "restore defaults resets this app's commands when nothing blocks them")
+
+        defaults.set(Data(#"{"refresh":{"carbonKeyCode":24,"carbonModifiers":256}}"#.utf8), forKey: ShortcutStore.defaultsKey)
+        let earlier = ShortcutStore(defaults: defaults)
+        check(earlier.owner(of: commandEqual) == .command(.refresh), "a saved ⌘= displaces the other app's default, as the other app reads it")
+        check(earlier.set(commandEqual, for: .refresh) == .saved, "re-recording a saved ⌘= is not a clash")
+        check(earlier.set(commandEqual, for: .stop) == .taken(.command(.refresh)), "the saved ⌘= still has one owner")
+
+        defaults.removeObject(forKey: ShortcutStore.defaultsKey)
+        let open = ShortcutStore(defaults: defaults)
+        defaults.set(Data(#"{"textSmaller":{"carbonKeyCode":5,"carbonModifiers":256}}"#.utf8), forKey: ShortcutStore.defaultsKey)
+        check(open.set(commandG, for: .refresh) == .taken(.sharedApp("Make text smaller")), "a change the other app saved while this one runs is seen before saving")
+        check(open.set(commandJ, for: .showAll) == .saved, "an unrelated change saves")
+        let afterSave = defaults.data(forKey: ShortcutStore.defaultsKey).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        check(Set(afterSave.keys) == ["textSmaller", "showAll"], "saving keeps the other app's change made while this one runs")
+        defaults.set(Data(#"{"textSmaller":{"carbonKeyCode":5,"carbonModifiers":256},"showAll":{"carbonKeyCode":38,"carbonModifiers":256},"talk":null}"#.utf8), forKey: ShortcutStore.defaultsKey)
+        open.resetAll()
+        let afterReset = defaults.data(forKey: ShortcutStore.defaultsKey).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        check(Set(afterReset.keys) == ["textSmaller", "talk"], "restore defaults keeps the other app's latest keys")
     }
 
     static func check(_ condition: Bool, _ message: String) {
