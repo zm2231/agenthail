@@ -17,19 +17,34 @@ pub fn over(surface: Color, under: Color) -> Color {
     Color { r, g, b, a: 1.0 }
 }
 
+pub fn contrast(a: Color, b: Color) -> f32 {
+    let (a, b) = (a.luminance(), b.luminance());
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+fn least(color: Color, surfaces: &[Color]) -> f32 {
+    surfaces.iter().map(|&s| contrast(color, s)).fold(f32::INFINITY, f32::min)
+}
+
 pub fn held(color: Color, surfaces: &[Color], min: f32) -> Color {
     if surfaces.iter().all(|&s| legible(color, s, min) == color) {
         return color;
     }
-    surfaces.iter().fold(color, |c, &s| legible(c, s, min))
+    let forward = surfaces.iter().fold(color, |c, &s| legible(c, s, min));
+    let back = surfaces.iter().rev().fold(color, |c, &s| legible(c, s, min));
+    if let Some(c) = [forward, back].into_iter().find(|&c| least(c, surfaces) >= min) {
+        return c;
+    }
+    [color, forward, back, Color::BLACK, Color::WHITE].into_iter().max_by(|&a, &b| least(a, surfaces).total_cmp(&least(b, surfaces))).unwrap_or(color)
 }
 
-pub fn surfaces(paint: &Paint, floor: Color) -> [Color; 5] {
-    [floor, paint.card, paint.card_deep, paint.raised, paint.glass_tint].map(|s| over(s, floor))
+pub fn surfaces(paint: &Paint, floors: &[Color]) -> Vec<Color> {
+    let base = floors.first().copied().unwrap_or(paint.card_deep);
+    floors.iter().copied().chain([paint.card, paint.card_deep, paint.raised, paint.glass_tint].map(|s| over(s, base))).collect()
 }
 
-pub fn hold_paint(paint: &mut Paint, roles: &mut TextRoles, floor: Color, body: f32, increased: bool) {
-    let on = surfaces(paint, floor);
+pub fn hold_paint(paint: &mut Paint, roles: &mut TextRoles, floors: &[Color], body: f32, increased: bool) {
+    let on = surfaces(paint, floors);
     for c in [&mut paint.text, &mut paint.muted, &mut paint.accent, &mut paint.attention, &mut paint.done, &mut paint.failed] {
         *c = held(*c, &on, body);
     }

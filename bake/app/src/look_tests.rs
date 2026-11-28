@@ -16,10 +16,7 @@ fn the_same_appearance_problem_posted_again_does_not_redraw() {
     assert_eq!(s.generation, shown + 1, "the problem clearing redraws");
 }
 
-fn contrast(a: Color, b: Color) -> f32 {
-    let (a, b) = (a.luminance(), b.luminance());
-    (a.max(b) + 0.05) / (a.min(b) + 0.05)
-}
+use legible::contrast;
 
 fn kit_surfaces(k: &Kit, behind: Color) -> [Color; 3] {
     let deep = over(k.c.bg_deep, behind);
@@ -96,8 +93,8 @@ fn text_on_the_apps_own_cards_and_glass_is_held_to_body_contrast() {
             let mut roles = Kit::neutral(dark).roles;
             roles.meta = dim_text(dark);
             let floor = paint.card_deep;
-            hold_paint(&mut paint, &mut roles, floor, min, increased);
-            let on = legible::surfaces(&paint, floor);
+            hold_paint(&mut paint, &mut roles, &[floor], min, increased);
+            let on = legible::surfaces(&paint, &[floor]);
             assert!(reads(paint.muted, &on, min) && reads(paint.failed, &on, min) && reads(paint.accent, &on, min) && reads(roles.meta, &on, min), "served text reads at {min}:1 on cards, raised rows and glass");
             assert!(reads(paint.faint, &on, legible::faint_floor(increased)));
             assert_eq!(paint.text, text, "body text that reads is unchanged");
@@ -111,7 +108,7 @@ fn light_text_on_dark_glass_is_measured_on_what_shows_through() {
     let roles = Kit::neutral(true).roles;
     let behind = rune::oklch(0.2, 0.02, 250.0);
     let main = main_kit(&KitEnv::new(true), &paint, roles, true, behind);
-    assert_eq!(main.c.bg_base, Color::WHITE.alpha(0.025), "the kit keeps its translucent surfaces");
+    assert_eq!(main.c.bg_base, WASH, "the kit keeps its translucent surfaces");
     assert_eq!((main.c.text_base, main.c.text_muted), (paint.text, paint.muted), "a faint white wash is not read as a white surface");
 }
 
@@ -143,4 +140,17 @@ fn kits_are_rebuilt_when_any_colour_they_draw_with_moves() {
     assert_ne!(kit_key(&paint, &roles, true, true, nudged(behind)), key, "what shows through the glass reaches the kit");
     let link = TextRoles { link: nudged(roles.link), ..roles };
     assert_ne!(kit_key(&paint, &link, true, true, behind), key);
+}
+
+#[test]
+fn text_over_a_light_floor_and_dark_glass_reads_on_both() {
+    let light = Color { r: 0.9, g: 0.9, b: 0.9, a: 1.0 };
+    let dark = Color { r: 0.01, g: 0.01, b: 0.012, a: 1.0 };
+    let grey = Color { r: 0.2, g: 0.2, b: 0.2, a: 1.0 };
+    for surfaces in [[light, dark], [dark, light]] {
+        let held = legible::held(grey, &surfaces, 4.5);
+        let reads = surfaces.iter().map(|&s| contrast(held, s)).fold(f32::INFINITY, f32::min);
+        let best = [Color::BLACK, Color::WHITE, grey].map(|c| surfaces.iter().map(|&s| contrast(c, s)).fold(f32::INFINITY, f32::min)).into_iter().fold(0.0, f32::max);
+        assert!(reads >= 4.5 || reads >= best * 0.999, "text on {surfaces:?} reads at {reads}:1, as well as any colour can ({best}:1)");
+    }
 }

@@ -17,6 +17,7 @@ use crate::theme::{self, Paint};
 use crate::wake::channel;
 
 const SAMPLE_SIDE: u32 = 512;
+const WASH: Color = Color { r: 1.0, g: 1.0, b: 1.0, a: 0.025 };
 const SIGN_IN_WAIT: Duration = Duration::from_secs(10);
 const FIRST_READ_RETRY: Duration = Duration::from_secs(10);
 
@@ -472,7 +473,7 @@ fn main_kit(env: &KitEnv, paint: &Paint, roles: TextRoles, translucent: bool, be
     let mut k = if env.increased_contrast { neutral.increased_contrast() } else { neutral };
     if translucent {
         k.c.bg_deep = paint.pane;
-        k.c.bg_base = Color::WHITE.alpha(0.025);
+        k.c.bg_base = WASH;
         k.c.border_muted = paint.border;
     }
     k.c.text_base = paint.text;
@@ -487,7 +488,7 @@ fn chrome_kit(env: &KitEnv, paint: &Paint, roles: TextRoles, translucent: bool, 
     let mut k = rune_theme_opencode::kit(&env.dark(paint.dark));
     if translucent {
         k.c.bg_deep = paint.pane;
-        k.c.bg_base = Color::WHITE.alpha(0.025);
+        k.c.bg_base = WASH;
         k.c.border_muted = paint.border;
     } else if paint.dark {
         k.c.bg_deep = if drawn { paint.card_deep } else { Color::TRANSPARENT };
@@ -574,8 +575,13 @@ pub fn frame<S, R>(cx: &mut Cx<S>, session: bool, glass: bool, build: impl FnOnc
             paint.glass_tint = paint.card.alpha(if dark { 0.78 } else { 1.0 });
             paint.card_deep
         };
-        let floor = if translucent { over(paint.pane, behind) } else { behind };
-        hold_paint(&mut paint, &mut roles, floor, s.look.target.max(if increased { 7.0 } else { 4.5 }), increased);
+        let floors = if translucent {
+            let pane = over(paint.pane, behind);
+            vec![pane, over(WASH, pane)]
+        } else {
+            vec![behind]
+        };
+        hold_paint(&mut paint, &mut roles, &floors, s.look.target.max(if increased { 7.0 } else { 4.5 }), increased);
         let key = kit_key(&paint, &roles, translucent, drawn, behind);
         let kit = cached(s, format!("kit:{key}"), move |env| main_kit(env, &paint, roles, translucent, behind));
         let chrome = cached(s, format!("chrome:{key}"), move |env| chrome_kit(env, &paint, roles, translucent, drawn, behind));
