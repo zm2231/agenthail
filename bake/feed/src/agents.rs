@@ -538,6 +538,13 @@ mod tests {
     }
 
     #[test]
+    fn a_role_put_sends_back_the_nulls_inside_fields_this_app_does_not_edit() {
+        let r = role(json!({"name": "reviewer", "definition": {"reach": "project", "limits": {"turns": null, "hosts": [null]}}}));
+        let body = Draft::of(&r).request().body();
+        assert_eq!(body["role"]["limits"], json!({"turns": null, "hosts": [null]}));
+    }
+
+    #[test]
     fn assignment_requests_name_the_role_kind_and_target() {
         let a = Assignment { kind: "alias".into(), target: "rev".into(), role: "reviewer".into(), stale: None };
         assert_eq!(Request::Unassign(a).body(), json!({"op": "unassign", "name": "reviewer", "kind": "alias", "target": "rev"}));

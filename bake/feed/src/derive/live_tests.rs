@@ -946,6 +946,13 @@ fn a_fresh_daemon_with_no_projects_reads_as_an_empty_overview() {
 }
 
 #[test]
+fn a_snapshot_without_its_stamps_reads_with_empty_ones() {
+    let hosts = json!({"host": {"id": "h", "name": "forge", "state": "local"}, "hosts": []});
+    let fetched = read_overview(json!({"sessions": []}), json!({"sets": []}), hosts, json!({"projects": []})).unwrap();
+    assert_eq!((fetched.recorded.updated_at.as_str(), fetched.recorded.host_epoch.as_str(), fetched.recorded.catalog_seq, fetched.recorded.tile_order.is_none()), ("", "", 0, true));
+}
+
+#[test]
 fn every_list_the_overview_reads_may_arrive_as_null() {
     let snapshot = json!({"updatedAt": "2026-11-28T03:04:30Z", "projects": [{"id": "p", "displayName": "P", "coordinators": null, "checkouts": null, "mcp": null}], "sessions": null, "tileOrder": {"order": null, "pinned": null, "revision": 0}});
     let usage = json!({"sets": [{"name": "default", "meters": null}]});
