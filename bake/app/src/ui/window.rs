@@ -372,7 +372,7 @@ pub fn open_shown(s: &mut App) {
             .on_close(closed)
             .on_focus(focused)
             .on_quit(crate::on_quit)
-            .map_app(crate::menubar::with_menus);
+            .map_app(|app| crate::menubar::with_menus(app).ambient_fps(crate::AMBIENT_FPS));
         if restored {
             spec = spec.inactive();
         }

@@ -1736,6 +1736,8 @@ fn on_quit(s: &mut App, _: &mut Tx) {
     }
 }
 
+pub const AMBIENT_FPS: f32 = 30.0;
+
 fn main() {
     if args().iter().any(|a| a == "--voice") {
         voice::run_alone();
@@ -1765,6 +1767,7 @@ fn main() {
         .chrome(Chrome { full_size_content: true, traffic_lights: Some((20.0, 20.0)), drag_regions: true })
         .window_options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
         .srgb_blend(true)
+        .ambient_fps(AMBIENT_FPS)
         .on_quit(on_quit)
         .on_focus(on_focus)
         .on_open_url(link::on_open_url);
