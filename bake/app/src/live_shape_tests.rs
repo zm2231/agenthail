@@ -220,6 +220,19 @@ fn probe() {
         quiet.push(wall - p[0] - p[1]);
     }
     lines.push(format!("60 unchanged polls 1 s apart: {} within a minute, {rebuilt} rebuilt the overview, poll and frame outside view and commit median {:.2} ms (max {:.2}); {turned} turned the minute", quiet.len(), median(quiet.clone()), quiet.iter().copied().fold(0.0, f64::max)));
+    let (mut view, mut commit, mut rows) = (Vec::new(), Vec::new(), Vec::new());
+    for round in 0..20 {
+        let next = poll(&path, 1000 + round * 60, None, &mut sent);
+        built::take();
+        phases();
+        send(&rt, next);
+        rt.frame(DT);
+        let p = phase_ms();
+        view.push(p[0]);
+        commit.push(p[1]);
+        rows.push(built::take().len() as f64);
+    }
+    lines.push(format!("20 minute turns: rows built median {:.0}, view median {:.2} ms, commit median {:.2} ms", median(rows), median(view), median(commit)));
     let mut extra = rt.state.ov.needs[rt.state.ov.needs.len() - 1].clone();
     extra.target = crate::over::Target::Session("probe-inserted".into());
     extra.title = "A need inserted by the probe".into();
