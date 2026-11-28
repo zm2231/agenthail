@@ -200,6 +200,26 @@ fn probe() {
         let paths: Vec<String> = rt.elements().into_iter().filter(|e| !e.exiting).map(|e| e.path).collect();
         std::fs::write(dump, paths.join("\n")).unwrap();
     }
+    let (mut quiet, mut rebuilt, mut turned) = (Vec::new(), 0, 0);
+    for round in 0..60 {
+        let shown = rt.state.ov.d.shown;
+        let rebuilds = rt.state.rebuilds;
+        let next = poll(&path, 700 + round, None, &mut sent);
+        phases();
+        let at = std::time::Instant::now();
+        send(&rt, next);
+        rt.frame(DT);
+        let wall = at.elapsed().as_secs_f64() * 1000.0;
+        let p = phase_ms();
+        built::take();
+        if rt.state.ov.d.shown != shown {
+            turned += 1;
+            continue;
+        }
+        rebuilt += rt.state.rebuilds - rebuilds;
+        quiet.push(wall - p[0] - p[1]);
+    }
+    lines.push(format!("60 unchanged polls 1 s apart: {} within a minute, {rebuilt} rebuilt the overview, poll and frame outside view and commit median {:.2} ms (max {:.2}); {turned} turned the minute", quiet.len(), median(quiet.clone()), quiet.iter().copied().fold(0.0, f64::max)));
     let mut extra = rt.state.ov.needs[rt.state.ov.needs.len() - 1].clone();
     extra.target = crate::over::Target::Session("probe-inserted".into());
     extra.title = "A need inserted by the probe".into();
@@ -237,6 +257,6 @@ fn median(mut v: Vec<f64>) -> f64 {
     v[v.len() / 2]
 }
 
-fn phase_ms() -> [f64; 12] {
+fn phase_ms() -> [f64; 18] {
     rune::take_frame_phases()
 }
