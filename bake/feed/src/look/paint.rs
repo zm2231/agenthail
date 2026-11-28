@@ -158,6 +158,7 @@ pub struct Decoded {
     pub shown: (u32, u32, Vec<u8>),
     pub brightest: (u32, u32, Vec<u8>),
     pub darkest: (u32, u32, Vec<u8>),
+    pub see_through: bool,
 }
 
 fn is_heic(data: &[u8]) -> bool {
@@ -201,6 +202,7 @@ pub fn decode(data: &[u8], max_side: u32, sample_side: u32) -> Result<Decoded, S
     let full = picture.to_rgba8();
     let (fw, fh) = (full.width(), full.height());
     let full = full.into_raw();
+    let see_through = full.chunks_exact(4).any(|p| p[3] < 255);
     let brightest = extreme(&full, fw, fh, sample_side, true);
     let darkest = extreme(&full, fw, fh, sample_side, false);
     let shown = if fw.max(fh) > max_side {
@@ -209,7 +211,7 @@ pub fn decode(data: &[u8], max_side: u32, sample_side: u32) -> Result<Decoded, S
     } else {
         (fw, fh, full)
     };
-    Ok(Decoded { original, shown, brightest, darkest })
+    Ok(Decoded { original, shown, brightest, darkest, see_through })
 }
 
 pub fn thumbnail(data: &[u8], side: u32) -> Result<(u32, u32, Vec<u8>), String> {

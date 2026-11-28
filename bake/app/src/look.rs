@@ -29,6 +29,7 @@ struct Picture {
     brightest: Raw,
     darkest: Raw,
     worst: HashMap<(bool, usize), Rgb>,
+    see_through: bool,
 }
 
 enum Got {
@@ -265,7 +266,7 @@ fn picture(d: fl::Decoded) -> Picture {
     let pixels = Pixels::new();
     let (w, h, rgba) = d.shown;
     pixels.set(w, h, rgba);
-    Picture { pixels, original: d.original, brightest: d.brightest, darkest: d.darkest, worst: HashMap::new() }
+    Picture { pixels, original: d.original, brightest: d.brightest, darkest: d.darkest, worst: HashMap::new(), see_through: d.see_through }
 }
 
 impl Picture {
@@ -432,9 +433,18 @@ fn worst_of(s: &mut State, dark: bool, bright: bool) -> Option<Rgb> {
     }
 }
 
+fn samples(s: &mut State, dark: bool, ground: Rgb) -> [Rgb; 3] {
+    let worst = worst_of(s, dark, dark).unwrap_or(ground);
+    let other = worst_of(s, dark, !dark).unwrap_or(worst);
+    [worst, other, if exposed(s, dark) { ground } else { worst }]
+}
+
 fn exposed(s: &State, dark: bool) -> bool {
     let Wallpaper::Image(path) = s.look.wallpaper(dark) else { return false };
     let Some(Ok(p)) = s.pictures.get(path) else { return true };
+    if p.see_through {
+        return true;
+    }
     let placed = fl::place(s.look.fit, s.look.position, p.size(s.scale, s.screen), s.area);
     let [x, y, w, h] = placed.rect;
     !placed.tile && s.look.fit != Fit::Cover && (x > 0.5 || y > 0.5 || x + w < s.area.0 - 0.5 || y + h < s.area.1 - 0.5)
@@ -445,7 +455,7 @@ fn mesh_picture<'a>(s: &'a mut State, w: &Wallpaper) -> Option<&'a mut Picture> 
     let key = wallpaper_key(w);
     if !s.meshes.contains_key(&key) {
         let (mw, mh, rgba) = fl::mesh(*columns, *rows, colors, 1.0);
-        let d = fl::Decoded { original: (mw, mh), shown: (mw, mh, rgba.clone()), brightest: (mw, mh, rgba.clone()), darkest: (mw, mh, rgba) };
+        let d = fl::Decoded { original: (mw, mh), shown: (mw, mh, rgba.clone()), brightest: (mw, mh, rgba.clone()), darkest: (mw, mh, rgba), see_through: false };
         s.meshes.insert(key.clone(), picture(d));
     }
     s.meshes.get_mut(&key)
@@ -567,9 +577,7 @@ pub fn frame<S, R>(cx: &mut Cx<S>, session: bool, glass: bool, build: impl FnOnc
             let ground = ground_rgb(dark);
             let tint = tint_rgb(&s.look, dark, accent_rgb);
             let strength = if session { s.look.session_opacity } else { s.look.opacity };
-            let worst = worst_of(s, dark, dark).unwrap_or(ground);
-            let other = worst_of(s, dark, !dark).unwrap_or(worst);
-            let bare = if exposed(s, dark) { ground } else { worst };
+            let [worst, other, bare] = samples(s, dark, ground);
             let (pane, pane_rgb) = s.look.pane_tint(dark, accent_rgb, worst, ground, tint, strength, s.look.pane_opacity);
             let (float, float_rgb) = s.look.pane_tint(dark, accent_rgb, worst, ground, tint, strength, s.look.float_opacity);
             paint.card = paint.card.alpha(0.6);

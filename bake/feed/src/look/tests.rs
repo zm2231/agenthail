@@ -297,6 +297,23 @@ fn a_photo_turned_by_its_orientation_tag_is_drawn_upright() {
 }
 
 #[test]
+fn a_picture_with_clear_pixels_says_the_ground_shows_through() {
+    use image::{ImageEncoder, RgbaImage};
+    let png = |alpha: u8| {
+        let mut img = RgbaImage::new(8, 8);
+        for (i, px) in img.pixels_mut().enumerate() {
+            *px = image::Rgba([255, 255, 255, if i % 2 == 0 { alpha } else { 255 }]);
+        }
+        let mut out = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut out).write_image(img.as_raw(), 8, 8, image::ExtendedColorType::Rgba8).unwrap();
+        out
+    };
+    assert!(decode(&png(0), 2560, 16).unwrap().see_through);
+    assert!(decode(&png(128), 2560, 16).unwrap().see_through);
+    assert!(!decode(&png(255), 2560, 16).unwrap().see_through);
+}
+
+#[test]
 fn text_size_steps_by_a_tenth_within_its_range_and_writes_for_this_computer() {
     assert_eq!(text_scale_step(1.0, Some(1)), 1.1);
     assert_eq!(text_scale_step(1.0, Some(-1)), 0.9);

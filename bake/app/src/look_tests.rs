@@ -202,14 +202,22 @@ fn glass_is_measured_over_the_wallpapers_brightest_and_darkest_parts() {
 }
 
 #[test]
-fn bare_ground_beside_a_contained_picture_counts_as_backdrop() {
+fn bare_ground_beside_a_contained_or_see_through_picture_counts_as_backdrop() {
+    let white = |see_through: bool| fl::Decoded { original: (400, 900), shown: (1, 1, vec![255; 4]), brightest: (1, 1, vec![255; 4]), darkest: (1, 1, vec![255; 4]), see_through };
+    let ground = ground_rgb(true);
     let mut s = State { area: (1440.0, 900.0), scale: 1.0, screen: 2880, ..State::default() };
     s.look.background = Wallpaper::Image("art/tall.png".into());
-    assert!(exposed(&s, true), "ground shows until the picture arrives");
-    let p = picture(fl::Decoded { original: (400, 900), shown: (1, 1, vec![255; 4]), brightest: (1, 1, vec![255; 4]), darkest: (1, 1, vec![255; 4]) });
-    s.pictures.insert("art/tall.png".into(), Ok(p));
+    assert_eq!(samples(&mut s, true, ground)[2], ground, "ground shows until the picture arrives");
+    s.pictures.insert("art/tall.png".into(), Ok(picture(white(false))));
     for (fit, bare) in [(Fit::Contain, true), (Fit::Center, true), (Fit::Cover, false), (Fit::Tile, false)] {
         s.look.fit = fit;
-        assert_eq!(exposed(&s, true), bare, "{fit:?}");
+        let [bright, dim, under] = samples(&mut s, true, ground);
+        assert_eq!((bright, dim), ([1.0; 3], [1.0; 3]), "{fit:?}");
+        assert_eq!(under, if bare { ground } else { [1.0; 3] }, "{fit:?}: the ground beside the picture is a backdrop only where it shows");
+    }
+    s.pictures.insert("art/tall.png".into(), Ok(picture(white(true))));
+    for fit in [Fit::Cover, Fit::Tile] {
+        s.look.fit = fit;
+        assert_eq!(samples(&mut s, true, ground)[2], ground, "{fit:?}: ground shows through clear pixels");
     }
 }
