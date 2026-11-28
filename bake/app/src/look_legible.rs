@@ -1,6 +1,6 @@
 use feed::look as fl;
 use rune::Color;
-use rune_kit::{Kit, TextRole, TextRoles, legible};
+use rune_kit::{Kit, TextRole, TextRoles, legible_on_all};
 
 use crate::theme::Paint;
 
@@ -19,19 +19,18 @@ pub fn over(surface: Color, under: Color) -> Color {
     Color { r, g, b, a: 1.0 }
 }
 
+#[cfg(test)]
 pub fn contrast(a: Color, b: Color) -> f32 {
     let (a, b) = (a.luminance(), b.luminance());
     (a.max(b) + 0.05) / (a.min(b) + 0.05)
 }
 
-fn least(color: Color, surfaces: &[Color]) -> f32 {
-    surfaces.iter().map(|&s| contrast(color, s)).fold(f32::INFINITY, f32::min)
-}
-
+#[cfg(test)]
 pub fn reads(color: Color, surfaces: &[Color], min: f32) -> bool {
     surfaces.iter().all(|&s| contrast(over(color, s), s) >= min)
 }
 
+#[cfg(test)]
 pub fn fits(color: Color, surfaces: &[Color], min: f32) -> bool {
     let l = color.luminance();
     let side = surfaces.iter().all(|s| l <= s.luminance()) || surfaces.iter().all(|s| l >= s.luminance());
@@ -39,34 +38,16 @@ pub fn fits(color: Color, surfaces: &[Color], min: f32) -> bool {
 }
 
 pub fn held(color: Color, surfaces: &[Color], min: f32) -> Color {
-    if fits(color, surfaces, min) {
+    if surfaces.is_empty() {
         return color;
     }
-    let from = color.alpha(1.0).to_oklab();
-    let toward = |end: Color, t: f32| {
-        let to = end.to_oklab();
-        Color::from_oklab(std::array::from_fn(|i| from[i] + (to[i] - from[i]) * t))
-    };
-    let reach = |end: Color| {
-        if !fits(end, surfaces, min) {
-            return None;
-        }
-        let (mut low, mut high) = (0.0f32, 1.0f32);
-        for _ in 0..24 {
-            let mid = (low + high) * 0.5;
-            if fits(toward(end, mid), surfaces, min) { high = mid } else { low = mid }
-        }
-        Some(toward(end, high))
-    };
-    let by_luminance = |a: &&Color, b: &&Color| a.luminance().total_cmp(&b.luminance());
-    let edges = [surfaces.iter().min_by(by_luminance), surfaces.iter().max_by(by_luminance)];
-    let moved = |c: Color| {
-        let [l, a, b, _] = c.to_oklab();
-        (l - from[0]).powi(2) + (a - from[1]).powi(2) + (b - from[2]).powi(2)
-    };
-    let kit = edges.into_iter().flatten().map(|&s| legible(color, s, min)).filter(|&c| fits(c, surfaces, min));
-    let searched = [reach(Color::BLACK), reach(Color::WHITE)].into_iter().flatten();
-    kit.chain(searched).min_by(|&a, &b| moved(a).total_cmp(&moved(b))).unwrap_or(if least(Color::BLACK, surfaces) >= least(Color::WHITE, surfaces) { Color::BLACK } else { Color::WHITE })
+    let lum = surfaces.iter().map(|s| s.luminance());
+    let (lo, hi) = (lum.clone().fold(f32::INFINITY, f32::min), lum.fold(0.0, f32::max));
+    let (under, above) = ((lo + 0.05) / 0.05, 1.05 / (hi + 0.05));
+    if under.max(above) < min {
+        return if under >= above { Color::BLACK } else { Color::WHITE };
+    }
+    legible_on_all(color, surfaces, min)
 }
 
 pub fn surfaces(paint: &Paint, floors: &[Color]) -> Vec<Color> {
@@ -90,21 +71,15 @@ fn kit_surfaces(k: &Kit, behind: Color) -> [Color; 3] {
 }
 
 pub fn hold_kit(mut k: Kit, behinds: Backdrops) -> Kit {
-    let mut m = k.clone();
-    [m.c.bg_base, m.c.bg_deep, m.c.layer_01] = kit_surfaces(&k, behinds[0]);
-    let m = m.legible_text();
     let all: Vec<Color> = behinds.iter().flat_map(|&b| kit_surfaces(&k, b)).collect();
     let (body, faint) = if k.increased_contrast { (7.0, 4.5) } else { (4.5, 3.0) };
-    let keep = |served: Color, lifted: Color, min: f32| if fits(lifted, &all, min) { lifted } else { held(served, &all, min) };
     let c = &mut k.c;
-    c.text_strong = keep(c.text_strong, m.c.text_strong, body);
-    c.text_base = keep(c.text_base, m.c.text_base, body);
-    c.text_weak = keep(c.text_weak, m.c.text_weak, body);
-    c.text_muted = keep(c.text_muted, m.c.text_muted, body);
-    c.text_accent = keep(c.text_accent, m.c.text_accent, body);
-    c.text_faint = keep(c.text_faint, m.c.text_faint, faint);
+    for token in [&mut c.text_strong, &mut c.text_base, &mut c.text_weak, &mut c.text_muted, &mut c.text_accent] {
+        *token = held(*token, &all, body);
+    }
+    c.text_faint = held(c.text_faint, &all, faint);
     for role in TextRole::ALL {
-        k.roles.set(role, keep(k.roles.get(role), m.roles.get(role), body));
+        k.roles.set(role, held(k.roles.get(role), &all, body));
     }
     k
 }

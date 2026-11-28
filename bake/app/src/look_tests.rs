@@ -175,6 +175,16 @@ fn text_over_a_light_floor_and_dark_glass_stays_clear_of_everything_between() {
 }
 
 #[test]
+fn text_no_colour_can_hold_to_the_floor_on_every_surface_gets_the_most_contrast_it_can() {
+    let grey = Color { r: 0.2, g: 0.2, b: 0.2, a: 1.0 };
+    let wide = [Color { r: 0.1, g: 0.1, b: 0.1, a: 1.0 }, Color { r: 0.4, g: 0.4, b: 0.4, a: 1.0 }];
+    let held = legible::held(grey, &wide, 4.5);
+    assert_eq!(held, Color::BLACK, "black reaches 3:1 on the darker part, white only 2.3:1 on the brighter");
+    assert!(!reads(held, &wide, 4.5) && as_well_as_any(held, &wide, 4.5), "short of 4.5:1, but no colour does better without sitting between the two");
+    assert_eq!(legible::held(grey, &[Color::WHITE, Color::BLACK], 4.5), Color::BLACK);
+}
+
+#[test]
 fn kit_text_over_glass_on_a_light_and_a_dark_part_of_the_wallpaper_reads_on_both() {
     let paint = Paint { pane: rune::oklch(0.16, 0.008, 275.0).alpha(0.3), ..Paint::dark() };
     let roles = Kit::neutral(true).roles;
