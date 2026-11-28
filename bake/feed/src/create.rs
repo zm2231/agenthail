@@ -516,21 +516,21 @@ impl Client {
     }
 
     pub fn session_options(&self, host: &str) -> Result<SessionOptions> {
-        Ok(serde_json::from_value(self.get_json(&path("/api/v1/session-options", &[host_query(host)]))?)?)
+        Ok(crate::reply::parse(self.get_json(&path("/api/v1/session-options", &[host_query(host)]))?)?)
     }
 
     pub fn models(&self, surface: &str, host: &str) -> Result<Vec<ModelOption>> {
         let value = self.get_json(&path("/api/v1/models", &[format!("surface={}", enc(surface)), host_query(host)]))?;
-        Ok(serde_json::from_value(value["models"].clone()).unwrap_or_default())
+        Ok(crate::reply::parse(value["models"].clone()).unwrap_or_default())
     }
 
     pub fn claude_pick(&self, host: &str) -> Result<RootPick> {
         let value = self.get_json(&path("/api/v1/session-options/claude-pick", &[host_query(host)]))?;
-        Ok(serde_json::from_value(value["pick"].clone())?)
+        Ok(crate::reply::parse(value["pick"].clone())?)
     }
 
     pub fn claude_usage(&self, root: &str, host: &str) -> Result<RootUsage> {
-        Ok(serde_json::from_value(self.get_json(&path("/api/v1/session-options/claude-usage", &[format!("root={}", enc(root)), host_query(host)]))?)?)
+        Ok(crate::reply::parse(self.get_json(&path("/api/v1/session-options/claude-usage", &[format!("root={}", enc(root)), host_query(host)]))?)?)
     }
 
     pub fn create_session(&self, launch: &Launch) -> Outcome {
@@ -768,7 +768,7 @@ mod tests {
 
     #[test]
     fn a_root_reads_its_usage_once_it_arrives() {
-        let mut root: ConfigRoot = serde_json::from_value(json!({"name": "default", "root": "/r", "login": "proxy", "proxy": "shared"})).unwrap();
+        let mut root: ConfigRoot = crate::reply::parse(json!({"name": "default", "root": "/r", "login": "proxy", "proxy": "shared"})).unwrap();
         let now = crate::catalog::parse_time("2026-11-26T08:00:00Z").unwrap();
         assert_eq!(root.usage_line(now), None);
         let usage: RootUsage = serde_json::from_str(r#"{"best":"a@example.com","proxy":"shared","root":"/r","usage":{"fetchedAt":"2026-11-26T07:07:00Z","limits":[{"kind":"weekly_all","percent":74.4,"resetsAt":"2026-11-28T01:00:00Z"},{"kind":"5h","percent":12}]}}"#).unwrap();

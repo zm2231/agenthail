@@ -102,7 +102,7 @@ pub fn resume(lines: impl Iterator<Item = std::io::Result<String>>, mut at: Resu
             return Ok(at.settle());
         }
         let Some(json) = sse.line(&line) else { continue };
-        let Ok(wire) = serde_json::from_str::<Wire>(&json) else { continue };
+        let Ok(wire) = crate::reply::parse_str::<Wire>(&json) else { continue };
         at.seq = at.seq.max(wire.seq);
         match at.rebuild.apply(wire) {
             Outcome::Events(seq, events) => {

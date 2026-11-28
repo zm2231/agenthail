@@ -402,17 +402,7 @@ fn expiring(cookie: &WebSession, now: OffsetDateTime) -> bool {
 
 #[cfg(target_os = "macos")]
 fn web_cookie(session: &WebSession, page: &str) -> Result<wry::cookie::Cookie<'static>, String> {
-    let host = feed::extensions::page_host(page).ok_or_else(|| format!("{page} has no host"))?;
-    let mut cookie = wry::cookie::Cookie::build((session.name.clone(), session.value.clone()))
-        .domain(host)
-        .path(if session.path.is_empty() { "/".to_string() } else { session.path.clone() })
-        .http_only(true)
-        .same_site(wry::cookie::SameSite::Strict)
-        .secure(page.starts_with("https://"));
-    if let Ok(at) = OffsetDateTime::parse(&session.expires_at, &Rfc3339) {
-        cookie = cookie.expires(at);
-    }
-    Ok(cookie.build())
+    feed::extensions::page_cookie(session, page).ok_or_else(|| format!("{page} has no host"))
 }
 
 #[cfg(target_os = "macos")]

@@ -303,11 +303,11 @@ pub(crate) fn write_failure(scope: &'static str, error: RespondError) -> Failure
 
 pub(crate) fn read<T: DeserializeOwned>(client: &Client, path: &str, scope: &'static str) -> Result<T, Failure> {
     let value = client.get_reply(path).map_err(|(status, body)| read_failure(scope, status, &body))?;
-    serde_json::from_value(value).map_err(|e| Failure::new(format!("the daemon's reply couldn't be read: {e}")))
+    crate::reply::parse(value).map_err(|e| Failure::new(format!("the daemon's reply couldn't be read: {e}")))
 }
 
 pub(crate) fn reply<T: DeserializeOwned>(value: Value) -> Result<T, Failure> {
-    serde_json::from_value(value).map_err(|e| Failure { uncertain: true, ..Failure::new(format!("the daemon's reply couldn't be read: {e}")) })
+    crate::reply::parse(value).map_err(|e| Failure { uncertain: true, ..Failure::new(format!("the daemon's reply couldn't be read: {e}")) })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -656,14 +656,14 @@ impl CompactDraft {
 mod tests {
     #[test]
     fn agent_switches_read_and_word_their_state_like_the_mac_app() {
-        let st: Settings = serde_json::from_value(json!({"agents": [{"id": "claude", "label": "Claude", "mode": "auto", "state": "on"}, {"id": "devin", "label": "Devin", "mode": "on", "state": "missing", "detail": "devin is not on PATH"}, {"id": "codex", "label": "Codex", "mode": "off", "state": "off"}]})).unwrap();
+        let st: Settings = crate::reply::parse(json!({"agents": [{"id": "claude", "label": "Claude", "mode": "auto", "state": "on"}, {"id": "devin", "label": "Devin", "mode": "on", "state": "missing", "detail": "devin is not on PATH"}, {"id": "codex", "label": "Codex", "mode": "off", "state": "off"}]})).unwrap();
         let lines: Vec<String> = st.agents.iter().map(AgentSwitch::state_line).collect();
         assert_eq!(lines, ["In use on this Mac.", "devin is not on PATH", "Off: Agenthail leaves Codex alone."]);
         assert!(st.agents[1].missing());
         let bare = AgentSwitch { id: "x".into(), label: "X".into(), mode: "on".into(), state: "missing".into(), detail: None };
         assert_eq!(bare.state_line(), "X is on but not installed.");
         assert_eq!(AgentSwitch { state: "unavailable".into(), ..bare }.state_line(), "Not installed on this Mac.");
-        assert!(serde_json::from_value::<Settings>(json!({})).unwrap().agents.is_empty());
+        assert!(crate::reply::parse::<Settings>(json!({})).unwrap().agents.is_empty());
     }
 
     use super::*;

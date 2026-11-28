@@ -21,7 +21,7 @@ impl Steps {
     }
 
     pub fn from_reply(reply: &serde_json::Value) -> Steps {
-        serde_json::from_value::<HashMap<String, String>>(reply["phaseLabels"].clone()).map(|l| Steps::from_labels(&l)).unwrap_or_default()
+        crate::reply::parse::<HashMap<String, String>>(reply["phaseLabels"].clone()).map(|l| Steps::from_labels(&l)).unwrap_or_default()
     }
 
     pub fn name(&self, i: usize) -> &str {
@@ -165,15 +165,15 @@ mod tests {
 
     #[test]
     fn work_reads_its_phase_from_the_ledger_not_from_its_log_words() {
-        let w: Work = serde_json::from_value(serde_json::json!({"id": "w", "state": "in_progress", "phase": "review", "timeline": [{"at": "2026-11-27T01:00:00Z", "kind": "log", "text": "gate passed, verified"}]})).unwrap();
+        let w: Work = crate::reply::parse(serde_json::json!({"id": "w", "state": "in_progress", "phase": "review", "timeline": [{"at": "2026-11-27T01:00:00Z", "kind": "log", "text": "gate passed, verified"}]})).unwrap();
         assert_eq!(PHASES[phase(&w)], "Review");
-        let older: Work = serde_json::from_value(serde_json::json!({"id": "w", "state": "in_progress", "timeline": [{"at": "2026-11-27T01:00:00Z", "kind": "log", "text": "verified"}]})).unwrap();
+        let older: Work = crate::reply::parse(serde_json::json!({"id": "w", "state": "in_progress", "timeline": [{"at": "2026-11-27T01:00:00Z", "kind": "log", "text": "verified"}]})).unwrap();
         assert_eq!(PHASES[phase(&older)], "Build");
     }
 
     #[test]
     fn merged_work_still_in_review_waits_on_its_check_and_shows_ship() {
-        let w: Work = serde_json::from_value(serde_json::json!({"id": "w", "state": "in_review", "phase": "ship"})).unwrap();
+        let w: Work = crate::reply::parse(serde_json::json!({"id": "w", "state": "in_review", "phase": "ship"})).unwrap();
         assert_eq!(phase(&w), CHECK);
         assert_eq!(shown_step(&w.phase, &w.state), Some(SHIP));
         assert_eq!(step_word(&w.phase, &w.state, &w.steps), "Ship");
@@ -185,7 +185,7 @@ mod tests {
 
     #[test]
     fn a_project_that_renames_two_steps_shows_its_names_and_keeps_the_rest() {
-        let steps: Steps = serde_json::from_value(serde_json::json!({"scope": "Scope", "build": "Make", "review": "Review", "verify": "  ", "check": "Sign-off", "ship": "Ship"})).unwrap();
+        let steps: Steps = crate::reply::parse(serde_json::json!({"scope": "Scope", "build": "Make", "review": "Review", "verify": "  ", "check": "Sign-off", "ship": "Ship"})).unwrap();
         assert_eq!(steps.names().collect::<Vec<_>>(), ["Scope", "Make", "Review", "Verify", "Sign-off", "Ship"]);
         assert_eq!(step_word("build", "in_progress", &steps), "Make");
         assert_eq!(step_word("CHECK", "in_review", &steps), "Sign-off");
@@ -196,12 +196,12 @@ mod tests {
 
     #[test]
     fn default_names_when_a_project_has_none() {
-        let same: Steps = serde_json::from_value(serde_json::json!({"scope": "Scope", "build": "Build", "review": "Review", "verify": "Verify", "check": "Check", "ship": "Ship"})).unwrap();
+        let same: Steps = crate::reply::parse(serde_json::json!({"scope": "Scope", "build": "Build", "review": "Review", "verify": "Verify", "check": "Check", "ship": "Ship"})).unwrap();
         assert_eq!(same, Steps::default());
-        assert_eq!(serde_json::from_value::<Steps>(serde_json::Value::Null).unwrap(), Steps::default());
+        assert_eq!(crate::reply::parse::<Steps>(serde_json::Value::Null).unwrap(), Steps::default());
         assert_eq!(Steps::from_reply(&serde_json::json!({"work": []})), Steps::default());
         assert_eq!(Steps::default().names().collect::<Vec<_>>(), PHASES);
-        let w: Work = serde_json::from_value(serde_json::json!({"id": "w", "state": "in_progress", "phase": "verify"})).unwrap();
+        let w: Work = crate::reply::parse(serde_json::json!({"id": "w", "state": "in_progress", "phase": "verify"})).unwrap();
         assert_eq!(step_word(&w.phase, &w.state, &w.steps), "Verify");
     }
 

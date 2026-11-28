@@ -193,8 +193,8 @@ impl Listing {
 
 fn read(client: &Client, path: &str) -> Result<Page, String> {
     let page = client.get_reply(path).map_err(|(code, body)| failure("the session list", code, &body))?;
-    let sessions = serde_json::from_value(page["sessions"].clone()).map_err(|e| format!("Agenthail sent sessions this app can't read: {e}"))?;
-    let view = serde_json::from_value(page["view"].clone()).map_err(|e| format!("Agenthail sent a session list this app can't read: {e}"))?;
+    let sessions = crate::reply::member(&page, "sessions").map_err(|e| format!("Agenthail sent sessions this app can't read: {e}"))?;
+    let view = crate::reply::parse(page["view"].clone()).map_err(|e| format!("Agenthail sent a session list this app can't read: {e}"))?;
     Ok(Page { sessions, view, next: page["nextCursor"].as_str().filter(|c| !c.is_empty()).map(String::from) })
 }
 

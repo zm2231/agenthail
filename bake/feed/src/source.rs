@@ -19,7 +19,7 @@ pub enum Message {
 
 fn feed_line(line: &str, sse: &mut Sse, rebuild: &mut Rebuild, tx: &impl Post<Message>) -> Result<bool, ()> {
     let Some(json) = sse.line(line) else { return Ok(true) };
-    let Ok(wire) = serde_json::from_str::<Wire>(&json) else { return Ok(true) };
+    let Ok(wire) = crate::reply::parse_str::<Wire>(&json) else { return Ok(true) };
     match rebuild.apply(wire) {
         Outcome::Events(seq, events) => Ok(tx.post(Message::Batch(Batch { seq, events })).is_ok()),
         Outcome::Skip => Ok(true),

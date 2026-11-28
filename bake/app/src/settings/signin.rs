@@ -180,7 +180,7 @@ mod tests {
     }
 
     fn data() -> Signin {
-        serde_json::from_value(json!({"profiles": [], "consumers": [{"id": "notion", "label": "Notion", "mode": "auto"}],
+        feed::reply::parse(json!({"profiles": [], "consumers": [{"id": "notion", "label": "Notion", "mode": "auto"}],
             "browsers": [{"browser": "chrome", "label": "Chrome", "available": true, "profiles": [{"profile": "Default", "name": "Personal"}, {"profile": "Profile 2", "name": "Work"}]}]}))
         .unwrap()
     }

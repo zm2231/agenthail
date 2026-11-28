@@ -496,11 +496,11 @@ impl Client {
     }
 
     pub fn session_commands(&self, session: &str) -> Result<RuntimeCommands, String> {
-        serde_json::from_value(self.read(&format!("/api/v1/session-commands?id={}", enc(session)))?).map_err(|e| e.to_string())
+        crate::reply::parse(self.read(&format!("/api/v1/session-commands?id={}", enc(session)))?).map_err(|e| e.to_string())
     }
 
     pub fn session_files(&self, session: &str, query: &str) -> Result<SessionFiles, String> {
-        serde_json::from_value(self.read(&format!("/api/v1/session-files?id={}&q={}&limit={FILES_ASKED}", enc(session), enc(query)))?).map_err(|e| e.to_string())
+        crate::reply::parse(self.read(&format!("/api/v1/session-files?id={}&q={}&limit={FILES_ASKED}", enc(session), enc(query)))?).map_err(|e| e.to_string())
     }
 
     pub fn prompts(&self, session: Option<&str>, query: &str) -> Result<Vec<Prompt>, String> {
@@ -562,7 +562,7 @@ impl Client {
         }
         let value = self.read(&path)?;
         let more = value["nextBefore"].as_str().is_some_and(|c| !c.is_empty());
-        Ok((serde_json::from_value(value["prompts"].clone()).map_err(|e| e.to_string())?, more))
+        Ok((crate::reply::member(&value, "prompts").map_err(|e| e.to_string())?, more))
     }
 
     pub fn fork(&self, session: &str, before: Option<&str>, key: &str) -> Result<String, RespondError> {
@@ -851,5 +851,12 @@ mod tests {
         let (client, _seen) = daemon(replies(&[(202, r#"{"ok":true,"status":"submitted"}"#), (200, r#"{"ok":true,"result":{}}"#)]));
         assert!(client.fork("s1", Some("t1"), "k3").unwrap_err().maybe_delivered, "a request still running isn't a fork yet");
         assert!(client.fork("s1", Some("t1"), "k3").unwrap_err().maybe_delivered, "nor is a reply without a session");
+    }
+
+    #[test]
+    fn null_prompts_are_none_found() {
+        let (client, _seen) = daemon(replies(&[(200, r#"{"prompts":null,"nextBefore":null}"#), (200, r#"{"nextBefore":""}"#)]));
+        assert!(client.prompts(None, "").unwrap().is_empty());
+        assert!(client.prompts(None, "").is_err(), "a reply without prompts is unreadable");
     }
 }

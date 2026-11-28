@@ -136,7 +136,7 @@ impl Client {
             None => json!({"sessionId": session, "wake": "finished"}),
         };
         let reply = crate::catalog::confirmed(self.action("session-snooze", payload)?)?;
-        Ok(serde_json::from_value(reply["snooze"].clone()).ok())
+        Ok(crate::reply::parse(reply["snooze"].clone()).ok())
     }
 
     pub fn session_wake(&self, session: &str) -> Result<(), RespondError> {

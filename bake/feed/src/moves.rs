@@ -187,7 +187,7 @@ mod tests {
         let mut x = session();
         x.moving = Some(Move { state: "copying".into(), host: "h1".into(), ..Move::default() });
         assert!(!x.movable(), "one move at a time");
-        let x: Session = serde_json::from_value(json!({"id": "s1", "surface": "claude", "subagent": null, "move": {"state": "holding", "host": "h1", "hostName": "forge"}})).unwrap();
+        let x: Session = crate::reply::parse(json!({"id": "s1", "surface": "claude", "subagent": null, "move": {"state": "holding", "host": "h1", "hostName": "forge"}})).unwrap();
         assert_eq!(x.moving.unwrap().label(), "Moving to forge: holding");
     }
 

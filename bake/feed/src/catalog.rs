@@ -855,12 +855,12 @@ impl Client {
 
     pub fn snapshot(&self) -> Result<Snapshot> {
         let response = self.agent.get(&format!("{}/api/v1/snapshot", self.base)).set("Authorization", &format!("Bearer {}", self.token)).set("Accept", "application/json").call().map_err(|e| anyhow!(e.to_string()))?;
-        Ok(response.into_json()?)
+        Ok(crate::reply::parse(response.into_json()?)?)
     }
 
     pub fn work_item(&self, project: &str, id: &str) -> Result<WorkItem> {
         let value = self.get(&format!("/api/v1/ledger?projectKey={}&view=item&id={}", enc(project), enc(id)))?;
-        let item: WorkItem = serde_json::from_value(value["item"]["item"].clone())?;
+        let item: WorkItem = crate::reply::parse(value["item"]["item"].clone())?;
         Ok(WorkItem { steps: crate::derive::phase::Steps::from_reply(&value), ..item })
     }
 
@@ -873,7 +873,7 @@ impl Client {
                 path.push_str(&format!("&cursor={}", enc(c)));
             }
             let value = self.get(&path)?;
-            let page: Vec<BoardRow> = serde_json::from_value(value["work"].clone()).unwrap_or_default();
+            let page: Vec<BoardRow> = crate::reply::parse(value["work"].clone()).unwrap_or_default();
             rows.extend(page);
             cursor = value["nextCursor"].as_str().filter(|c| !c.is_empty()).map(String::from);
             if cursor.is_none() {
@@ -885,7 +885,7 @@ impl Client {
 
     pub fn requests(&self, session: &str) -> Result<Vec<OpenRequest>> {
         let value = self.get(&format!("/api/v1/requests?sessionId={}", enc(session)))?;
-        Ok(serde_json::from_value(value["requests"].clone()).unwrap_or_default())
+        Ok(crate::reply::parse(value["requests"].clone()).unwrap_or_default())
     }
 
     pub fn respond(&self, session: &str, request: &str, choices: Vec<String>, answers: std::collections::BTreeMap<String, String>) -> std::result::Result<(), RespondError> {
@@ -1096,7 +1096,7 @@ mod time_tests {
 
     #[test]
     fn a_zero_time_arrives_empty_so_it_sorts_with_the_missing_ones() {
-        let read = |v: serde_json::Value| serde_json::from_value::<super::Session>(v).unwrap().last_active;
+        let read = |v: serde_json::Value| crate::reply::parse::<super::Session>(v).unwrap().last_active;
         let base = serde_json::json!({"id": "s1", "surface": "claude", "name": "n"});
         let with = |t: &str| { let mut v = base.clone(); v["lastActive"] = t.into(); v };
         assert_eq!(read(with("0001-01-01T00:00:00.000000000Z")), "");

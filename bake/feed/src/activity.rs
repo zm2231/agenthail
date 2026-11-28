@@ -70,7 +70,7 @@ impl Client {
             path.push_str(&format!("&cursor={}", enc(c)));
         }
         let page = self.get_reply(&path).map_err(|(code, body)| failure("earlier sessions", code, &body))?;
-        let sessions = serde_json::from_value(page["sessions"].clone()).map_err(|e| format!("Agenthail sent sessions this app can't read: {e}"))?;
+        let sessions = crate::reply::member(&page, "sessions").map_err(|e| format!("Agenthail sent sessions this app can't read: {e}"))?;
         Ok(Page { sessions, next: page["nextCursor"].as_str().filter(|c| !c.is_empty()).map(String::from) })
     }
 
@@ -83,7 +83,7 @@ impl Client {
 
     pub fn project_activity(&self) -> anyhow::Result<Vec<ProjectActivity>> {
         let page = self.get_json("/api/v1/projects/activity")?;
-        Ok(serde_json::from_value(page["projects"].clone())?)
+        Ok(crate::reply::member(&page, "projects")?)
     }
 }
 
@@ -94,7 +94,7 @@ mod tests {
     use serde_json::json;
 
     fn session(id: &str, project: &str, last_active: &str) -> Session {
-        serde_json::from_value(json!({"id": id, "project": {"id": project, "name": project}, "lastActive": last_active})).unwrap()
+        crate::reply::parse(json!({"id": id, "project": {"id": project, "name": project}, "lastActive": last_active})).unwrap()
     }
 
     #[test]
@@ -119,13 +119,13 @@ mod tests {
         let now = parse_time("2026-11-27T12:00:00Z").unwrap();
         let old = session("a", "p", "2026-11-01T00:00:00Z");
         assert!(!is_now(&old, now));
-        let waiting: Session = serde_json::from_value(json!({"id": "a", "lastActive": "2026-11-01T00:00:00Z", "attention": {"kind": "ask"}})).unwrap();
+        let waiting: Session = crate::reply::parse(json!({"id": "a", "lastActive": "2026-11-01T00:00:00Z", "attention": {"kind": "ask"}})).unwrap();
         assert!(is_now(&waiting, now));
-        let crew: Session = serde_json::from_value(json!({"id": "a", "lastActive": "2026-11-01T00:00:00Z", "subagents": {"count": 2, "working": 1}})).unwrap();
+        let crew: Session = crate::reply::parse(json!({"id": "a", "lastActive": "2026-11-01T00:00:00Z", "subagents": {"count": 2, "working": 1}})).unwrap();
         assert!(is_now(&crew, now));
-        let held: Session = serde_json::from_value(json!({"id": "a", "lastActive": "2026-11-01T00:00:00Z", "waitingOn": {"kind": "ask"}})).unwrap();
+        let held: Session = crate::reply::parse(json!({"id": "a", "lastActive": "2026-11-01T00:00:00Z", "waitingOn": {"kind": "ask"}})).unwrap();
         assert!(is_now(&held, now));
-        let asked = |routed: &str, answered: &str| -> Session { serde_json::from_value(json!({"id": "a", "lastActive": "2026-11-01T00:00:00Z", "ask": {"id": "q1", "routedTo": routed, "answeredAt": answered}})).unwrap() };
+        let asked = |routed: &str, answered: &str| -> Session { crate::reply::parse(json!({"id": "a", "lastActive": "2026-11-01T00:00:00Z", "ask": {"id": "q1", "routedTo": routed, "answeredAt": answered}})).unwrap() };
         assert!(is_now(&asked("person", ""), now));
         assert!(!is_now(&asked("lead", ""), now));
         assert!(!is_now(&asked("person", "2026-11-02T00:00:00Z"), now));

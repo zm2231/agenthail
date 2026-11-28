@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn the_snapshot_says_which_sessions_can_be_opened() {
-        let x: Session = serde_json::from_value(json!({"id": "s1", "capabilities": {"lifecycle": {"adopt": true, "resume": true}}})).unwrap();
+        let x: Session = crate::reply::parse(json!({"id": "s1", "capabilities": {"lifecycle": {"adopt": true, "resume": true}}})).unwrap();
         assert!(x.adoptable() && x.capabilities.lifecycle.resume);
     }
 

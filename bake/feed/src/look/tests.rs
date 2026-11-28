@@ -36,7 +36,7 @@ fn defaults_follow_the_schema_without_a_daemon() {
 
 #[test]
 fn out_of_range_numbers_are_held_to_the_schema() {
-    let view = View { values: serde_json::from_value(json!({"text.scale": 3, "glass.blur": -2, "background.dim": 0.95, "theme": "light"})).unwrap(), ..View::default() };
+    let view = View { values: crate::reply::parse(json!({"text.scale": 3, "glass.blur": -2, "background.dim": 0.95, "theme": "light"})).unwrap(), ..View::default() };
     let look = Look::from_view(&view);
     assert_eq!((look.text_scale, look.blur, look.dim), (1.6, 0.0, 0.8));
     assert!(!look.dark(true));

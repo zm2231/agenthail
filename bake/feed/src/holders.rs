@@ -135,7 +135,7 @@ mod tests {
     use super::*;
 
     fn session(id: &str, surface: &str, holders: Value) -> Session {
-        serde_json::from_value(json!({"id": id, "surface": surface, "holders": holders})).unwrap()
+        crate::reply::parse(json!({"id": id, "surface": surface, "holders": holders})).unwrap()
     }
 
     fn two() -> Value {

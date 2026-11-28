@@ -26,7 +26,7 @@ impl SessionRole {
 }
 
 pub fn role_of(detail: &Value) -> Option<SessionRole> {
-    serde_json::from_value(detail.get("role")?.clone()).ok()
+    crate::reply::parse(detail.get("role")?.clone()).ok()
 }
 
 impl Client {

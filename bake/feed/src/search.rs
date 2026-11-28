@@ -43,10 +43,13 @@ impl Codex {
 }
 
 pub fn read_codex(value: &Value) -> Result<Codex, String> {
-    let rows = value["results"].as_array().ok_or("Codex history search returned no results list")?;
+    let rows = match &value["results"] {
+        Value::Null if value.get("results").is_some() => &[][..],
+        v => v.as_array().ok_or("Codex history search returned no results list")?.as_slice(),
+    };
     let mut hits = Vec::new();
     for row in rows {
-        let mut session: Session = serde_json::from_value(row["session"].clone()).map_err(|e| format!("Codex history search returned a session Agenthail can't read: {e}"))?;
+        let mut session: Session = crate::reply::parse(row["session"].clone()).map_err(|e| format!("Codex history search returned a session Agenthail can't read: {e}"))?;
         session.name = one_line(&session.name);
         let snippet = one_line(row["snippet"].as_str().unwrap_or_default());
         hits.push(CodexHit { session, snippet });
@@ -218,7 +221,7 @@ impl Client {
 
     pub fn history(&self, filter: &Filter, before: i64) -> Result<Page, String> {
         match self.get_reply(&filter.path(before)) {
-            Ok(value) => serde_json::from_value(value).map_err(|e| format!("Agenthail sent activity history this app can't read: {e}")),
+            Ok(value) => crate::reply::parse(value).map_err(|e| format!("Agenthail sent activity history this app can't read: {e}")),
             Err((code, body)) => Err(failure("activity history", code, &body)),
         }
     }
@@ -254,7 +257,7 @@ pub fn reread(detail: crate::gone::Detail, known: &Session) -> Recheck {
         Detail::Missing | Detail::Unreachable => return Recheck::Gone,
         Detail::Failed(e) => return Recheck::Unknown(e),
     };
-    let Ok(fresh) = serde_json::from_value::<Session>(v["session"].clone()) else {
+    let Ok(fresh) = crate::reply::parse::<Session>(v["session"].clone()) else {
         return Recheck::Unknown("Agenthail sent a session this app can't read".into());
     };
     if fresh.id != known.id {
@@ -267,7 +270,7 @@ pub fn reread(detail: crate::gone::Detail, known: &Session) -> Recheck {
     row.last_active = fresh.last_active;
     row.cwd = fresh.cwd.or(row.cwd);
     row.alias = v["alias"].as_str().filter(|a| !a.is_empty()).map(String::from);
-    if let Ok(caps) = serde_json::from_value(v["capabilities"].clone()) {
+    if let Ok(caps) = crate::reply::parse(v["capabilities"].clone()) {
         row.capabilities = caps;
     }
     row.read_only = v["readOnly"].as_bool().unwrap_or(false);
@@ -373,6 +376,12 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn a_null_results_list_reads_as_no_hits_and_a_missing_one_is_refused() {
+        assert!(read_codex(&json!({"results": null})).is_ok());
+        assert!(read_codex(&json!({})).is_err());
+    }
+
+    #[test]
     fn codex_search_waits_for_three_characters() {
         assert_eq!(codex_query("  ab "), None);
         assert_eq!(codex_query(" abc "), Some("abc".into()));
@@ -428,7 +437,7 @@ mod tests {
     }
 
     fn entry(v: Value) -> Entry {
-        serde_json::from_value(v).unwrap()
+        crate::reply::parse(v).unwrap()
     }
 
     #[test]

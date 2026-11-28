@@ -158,13 +158,13 @@ fn load_fixture(s: &mut App, id: &str) {
     let Some(f) = &s.fixtures else { return };
     let Ok(raw) = std::fs::read_to_string(format!("{}/settings/{id}.json", f.dir)) else { return };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else { return };
-    if let Ok(set) = serde_json::from_value(value["settings"].clone()) {
+    if let Ok(set) = feed::reply::parse(value["settings"].clone()) {
         s.menus.settings.insert(id.to_string(), set);
     }
-    if let Ok(models) = serde_json::from_value(value["models"].clone()) {
+    if let Ok(models) = feed::reply::parse(value["models"].clone()) {
         s.menus.models.insert(id.to_string(), models);
     }
-    if let Ok(usage) = serde_json::from_value(value["context"].clone()) {
+    if let Ok(usage) = feed::reply::parse(value["context"].clone()) {
         s.menus.context.insert(id.to_string(), usage);
     }
 }

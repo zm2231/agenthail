@@ -95,7 +95,7 @@ fn tools_after_failure(w: &mut Win) {
 
 fn state(mut value: Value) -> State {
     value["protocol"] = json!(1);
-    serde_json::from_value(value).unwrap_or_default()
+    feed::reply::parse(value).unwrap_or_default()
 }
 
 fn job(effects: Vec<Effect>) -> Option<Job> {
