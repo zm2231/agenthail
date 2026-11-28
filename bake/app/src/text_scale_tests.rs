@@ -411,10 +411,12 @@ fn a_session_at_larger_text_in_the_smallest_window_keeps_its_controls_and_messag
     assert!(switch[0] + switch[2] <= pane[0] + pane[2] + 0.5, "Focus and Show work {switch:?} stay inside the conversation {pane:?}");
     let field = rect(&rt, "composer");
     let k = rune_kit::Kit::neutral(true).with_text_scale(1.6);
-    let x = rt.state.ov.d.session("a").expect("a is listed").clone();
-    let shown = crate::ui::session::placeholder(&rt.state, &x, &k);
-    assert!(shown.starts_with("Message Fix") && shown.ends_with('…'), "the placeholder is cut to fit: {shown}");
-    assert!(rune::text::advance(&shown, k.text(crate::theme::BODY)) <= field[2] + 0.5, "{shown} fits on the message box's one line {field:?}");
+    let hint = format!("Message {LONG_TITLE}");
+    assert!(rune::text::advance(&hint, k.text(crate::theme::BODY)) > field[2], "the whole placeholder is wider than the message box {field:?}");
+    let line = k.text(crate::theme::BODY).size;
+    assert!(field[3] >= 2.0 * line, "the message box {field:?} is tall enough for the wrapped placeholder");
+    let send = rect(&rt, "send");
+    assert!(field[1] + field[3] <= send[1] + 0.5, "the message box {field:?} ends above Send {send:?}");
 }
 
 #[test]
