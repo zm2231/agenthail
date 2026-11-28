@@ -68,7 +68,7 @@ struct KeyboardSettings: View {
                 HStack {
                     Spacer()
                     Button("Restore Defaults") { store.resetAll() }
-                        .disabled(store.overrides.isEmpty && KeyboardShortcuts.getShortcut(for: .openPalette) == nil)
+                        .disabled(!store.anyCustomized && KeyboardShortcuts.getShortcut(for: .openPalette) == nil)
                 }
             }
         }

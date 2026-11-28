@@ -230,6 +230,7 @@ SOURCES=(
   macOS/UsageFocus.swift
   macOS/InspectorSettingText.swift
   macOS/ShortcutStore.swift
+  macOS/SharedAppShortcuts.swift
   macOS/SlashCommand.swift
   macOS/SnapshotBudget.swift
   macOS/SpotlightIndex.swift
