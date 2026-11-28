@@ -331,7 +331,7 @@ impl Client {
             command["cursor"] = json!(cursor);
         }
         let reply = self.action("native-queue", json!({"sessionId": session, "nativeQueue": command}))?;
-        serde_json::from_value(reply["result"].clone()).map_err(|e| RespondError { message: format!("Codex's queue couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: false, answered: true, reply, status: 0 })
+        crate::reply::member(&reply, "result").map_err(|e| RespondError { message: format!("Codex's queue couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: false, answered: true, reply, status: 0 })
     }
 
     pub fn native_queue(&self, session: &str, act: &Act, key: &str) -> Result<(), RespondError> {

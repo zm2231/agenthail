@@ -98,19 +98,19 @@ mod tests {
     use super::*;
 
     fn session(capabilities: Value, read_only: bool) -> Session {
-        serde_json::from_value(json!({"id": "s1", "capabilities": capabilities, "readOnly": read_only})).unwrap()
+        crate::reply::parse(json!({"id": "s1", "capabilities": capabilities, "readOnly": read_only})).unwrap()
     }
 
     #[test]
     fn a_read_only_session_or_one_that_takes_no_messages_gets_the_closed_notice() {
         assert_eq!(read_only(&session(json!({"send": true}), false)), None);
-        assert_eq!(read_only(&serde_json::from_value(json!({"id": "s1"})).unwrap()), None);
+        assert_eq!(read_only(&crate::reply::parse(json!({"id": "s1"})).unwrap()), None);
         assert_eq!(read_only(&session(json!({"send": true}), true)).as_deref(), Some(READ_ONLY));
         assert_eq!(read_only(&session(json!({"send": false}), false)).as_deref(), Some(READ_ONLY));
         assert_eq!(read_only(&session(json!({}), false)).as_deref(), Some(READ_ONLY));
-        let why: Session = serde_json::from_value(json!({"id": "s1", "capabilities": {"send": true}, "readOnly": true, "readOnlyReason": "This Claude session is being written to from another computer."})).unwrap();
+        let why: Session = crate::reply::parse(json!({"id": "s1", "capabilities": {"send": true}, "readOnly": true, "readOnlyReason": "This Claude session is being written to from another computer."})).unwrap();
         assert_eq!(read_only(&why).as_deref(), Some("This Claude session is being written to from another computer."));
-        let blank: Session = serde_json::from_value(json!({"id": "s1", "readOnly": true, "readOnlyReason": " "})).unwrap();
+        let blank: Session = crate::reply::parse(json!({"id": "s1", "readOnly": true, "readOnlyReason": " "})).unwrap();
         assert_eq!(read_only(&blank).as_deref(), Some(READ_ONLY));
     }
 

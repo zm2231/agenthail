@@ -160,3 +160,15 @@ fn working_chips_count_by_project_and_merge_names_in_count_order() {
     assert_eq!(by_project.iter().map(|b| (b.0.as_str(), b.2)).collect::<Vec<_>>(), vec![("b", 4), ("a1", 3), ("a2", 3)]);
     assert_eq!(crate::derive::sessions::busy_by_group(&list), vec![("A".to_string(), 6), ("B".to_string(), 4)]);
 }
+
+#[test]
+fn a_session_list_with_null_lists_reads_as_empty() {
+    let empty = json!({"sessions": null, "nextCursor": null, "view": {"counts": null, "surfaces": null, "refreshAt": null, "projects": null, "families": null}}).to_string();
+    let rows = json!({"sessions": [{"id": "a", "heldWork": null, "prs": null, "cwd": null, "capabilities": null}], "view": {"counts": {}, "projects": [{"id": "p", "name": "P", "collapsedFamilyIds": null}], "families": [{"id": "a", "rootId": "a", "projectId": "p", "members": null}]}}).to_string();
+    let (client, _seen) = daemon(replies(&[(200, &empty), (200, &rows)]));
+    let request = Request { scope: "all".into(), ..Request::default() };
+    let page = client.listing_page(&request, None).unwrap();
+    assert!(page.sessions.is_empty() && page.view.families.is_empty() && page.view.projects.is_empty() && page.next.is_none());
+    let page = client.listing_page(&request, None).unwrap();
+    assert_eq!((page.sessions[0].held_work.len(), page.sessions[0].prs.len(), page.view.families[0].members.len()), (0, 0, 0));
+}

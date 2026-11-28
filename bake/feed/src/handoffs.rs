@@ -317,7 +317,7 @@ impl Client {
     pub fn find_sessions(&self, query: &str) -> Result<Vec<Pick>, Failure> {
         let path = format!("/api/v1/snapshot?scope=all&members=1&limit=20&q={}", enc(query.trim()));
         let value = self.get_reply(&path).map_err(|(status, body)| crate::prefs::read_failure("read", status, &body))?;
-        let found: Found = serde_json::from_value(value).map_err(|e| Failure::new(format!("the daemon's reply couldn't be read: {e}")))?;
+        let found: Found = crate::reply::parse(value).map_err(|e| Failure::new(format!("the daemon's reply couldn't be read: {e}")))?;
         Ok(found.sessions)
     }
 
@@ -339,7 +339,7 @@ impl Client {
 
     pub fn channel_send(&self, name: &str, message: &str, key: &str) -> Result<Sent, Failure> {
         let reply = self.action_keyed("channel-send", json!({"channel": name, "message": message, "author": "person"}), key).and_then(confirmed).map_err(unsettled)?;
-        Ok(serde_json::from_value(reply).unwrap_or_default())
+        Ok(crate::reply::parse(reply).unwrap_or_default())
     }
 
     pub fn relay_add(&self, draft: &RelayDraft) -> Result<(), Failure> {

@@ -238,7 +238,7 @@ pub enum Done {
 impl Client {
     fn queue_rows(&self, path: &str, host: &str) -> anyhow::Result<Vec<Queued>> {
         let value = self.get_json(path)?;
-        let mut rows: Vec<Queued> = serde_json::from_value(value["items"].clone()).unwrap_or_default();
+        let mut rows: Vec<Queued> = crate::reply::parse(value["items"].clone()).unwrap_or_default();
         for row in &mut rows {
             row.host = host.to_string();
         }
@@ -351,13 +351,13 @@ mod tests {
         assert!(steer.can_cancel() && !steer.can_take_back());
         assert!(!Queued { author: "agent".into(), ..pending.clone() }.can_take_back());
         assert_eq!(pending.row(), crate::catalog::QueueRow { id: 1, session_id: "s1".into(), status: "pending".into() });
-        let read: Queued = serde_json::from_value(json!({"id": 4, "target": "@b", "status": "pending", "askId": "q1"})).unwrap();
+        let read: Queued = crate::reply::parse(json!({"id": 4, "target": "@b", "status": "pending", "askId": "q1"})).unwrap();
         assert_eq!((read.target.as_str(), read.ask_id.as_str()), ("@b", "q1"));
     }
 
     #[test]
     fn a_row_reads_the_daemons_fields() {
-        let rows: Vec<Queued> = serde_json::from_value(json!([{"id": 7, "sessionId": "s1", "target": "@b", "message": "\n check the build\nthen ship", "status": "pending", "attempts": 0, "queuedAt": "2026-11-26T10:00:00Z", "heldBy": "busy", "historical": false, "evidence": "queued", "operation": "message", "author": "person", "serviceTier": "flex"}])).unwrap();
+        let rows: Vec<Queued> = crate::reply::parse(json!([{"id": 7, "sessionId": "s1", "target": "@b", "message": "\n check the build\nthen ship", "status": "pending", "attempts": 0, "queuedAt": "2026-11-26T10:00:00Z", "heldBy": "busy", "historical": false, "evidence": "queued", "operation": "message", "author": "person", "serviceTier": "flex"}])).unwrap();
         let r = &rows[0];
         assert_eq!((r.id, r.first_line(), r.service_tier.as_str()), (7, "check the build", "flex"));
         let now = crate::catalog::parse_time("2026-11-26T10:05:00Z").unwrap();

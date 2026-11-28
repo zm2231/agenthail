@@ -161,7 +161,7 @@ impl Client {
             Err((0, error)) => return Err(error),
             Err((code, body)) => return Err(RespondError::from_status("read", code, &body).message),
         };
-        serde_json::from_value(reply).map_err(|e| format!("the reply couldn't be read: {e}"))
+        crate::reply::parse(reply).map_err(|e| format!("the reply couldn't be read: {e}"))
     }
 
     pub fn extension_changes(&self, host: Option<&str>, limit: usize) -> Result<Vec<Change>, String> {
@@ -180,14 +180,14 @@ impl Client {
         let reply = match self.post_json_keyed(&on_host("/api/v1/extensions/build", host), "build", json!({"message": message}), key) {
             Ok(reply) => reply,
             Err(error) => {
-                let made: Started = serde_json::from_value(error.reply.clone()).unwrap_or_default();
+                let made: Started = crate::reply::parse(error.reply.clone()).unwrap_or_default();
                 return match made.session_id() {
                     Some(_) => Ok(Started { failure: Some(error.message), ..made }),
                     None => Err(forwarded(host, error)),
                 };
             }
         };
-        let started: Started = serde_json::from_value(reply.clone()).map_err(|e| unreadable("builder", e, true))?;
+        let started: Started = crate::reply::parse(reply.clone()).map_err(|e| unreadable("builder", e, true))?;
         match started.session_id() {
             Some(_) => Ok(started),
             None => {

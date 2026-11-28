@@ -185,7 +185,7 @@ pub fn load(s: &mut App) {
     if let Some(pins) = v["extensionPins"].as_array() {
         s.ov.ext.pins = pins.iter().filter_map(|p| p.as_str().map(str::to_string)).collect();
     }
-    if let Ok(saved) = serde_json::from_value(v["projectTiles"].clone()) {
+    if let Ok(saved) = feed::reply::parse(v["projectTiles"].clone()) {
         s.ov.projects.tiles = feed::projects::Tiles::restore(saved);
     }
     if let Some(m) = v["leadDrafts"].as_object() {

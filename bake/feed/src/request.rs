@@ -323,11 +323,11 @@ mod tests {
     use crate::catalog::RequestOption;
 
     fn field(value: Value) -> Field {
-        serde_json::from_value(value).unwrap()
+        crate::reply::parse(value).unwrap()
     }
 
     fn request(value: Value) -> OpenRequest {
-        serde_json::from_value(value).unwrap()
+        crate::reply::parse(value).unwrap()
     }
 
     #[test]

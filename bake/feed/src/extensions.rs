@@ -511,12 +511,12 @@ impl Client {
             Some(host) => format!("/api/v1/extensions?host={}", enc(host)),
             None => "/api/v1/extensions".into(),
         };
-        Ok(serde_json::from_value(self.get_json(&path)?)?)
+        Ok(crate::reply::parse(self.get_json(&path)?)?)
     }
 
     pub fn web_session(&self) -> std::result::Result<WebSession, RespondError> {
         let reply = self.post_json("/api/v1/web-session", json!({}))?;
-        serde_json::from_value(reply).map_err(|e| RespondError { message: format!("the web session reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: false, answered: true, reply: Value::Null, status: 0 })
+        crate::reply::parse(reply).map_err(|e| RespondError { message: format!("the web session reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: false, answered: true, reply: Value::Null, status: 0 })
     }
 
     pub fn approve_extension(&self, id: &str) -> std::result::Result<List, RespondError> {
@@ -529,7 +529,7 @@ impl Client {
 
     fn extensions_post(&self, body: Value) -> std::result::Result<List, RespondError> {
         let reply = self.post_json("/api/v1/extensions", body)?;
-        serde_json::from_value(reply).map_err(|e| RespondError { message: format!("the extensions reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: Value::Null, status: 0 })
+        crate::reply::parse(reply).map_err(|e| RespondError { message: format!("the extensions reply couldn't be read: {e}"), code: "unreadable_reply".into(), maybe_delivered: true, answered: true, reply: Value::Null, status: 0 })
     }
 }
 

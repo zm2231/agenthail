@@ -673,7 +673,7 @@ impl Client {
 
     pub fn lead_send(&self, project: &str, message: &str) -> Outcome<Delivered> {
         let reply = self.action("coordinator-send", json!({"project": project, "message": message, "author": "person"}))?;
-        let readable = serde_json::from_value::<crate::composer::Receipt>(reply["result"].clone()).is_ok_and(|r| !r.evidence.is_empty());
+        let readable = crate::reply::parse::<crate::composer::Receipt>(reply["result"].clone()).is_ok_and(|r| !r.evidence.is_empty());
         if !readable {
             return Ok(Delivered::Unconfirmed);
         }
@@ -686,7 +686,7 @@ impl Client {
 
     pub fn put_tiles(&self, order: &TileOrder) -> TileReply {
         let body = serde_json::to_value(order).unwrap_or(Value::Null);
-        let read = |v: &Value| v["revision"].is_i64().then(|| serde_json::from_value::<TileOrder>(v.clone()).ok()).flatten();
+        let read = |v: &Value| v["revision"].is_i64().then(|| crate::reply::parse::<TileOrder>(v.clone()).ok()).flatten();
         match self.put_json("/api/v1/projects/tiles", body) {
             Ok(reply) => read(&reply["tileOrder"]).map(TileReply::Saved).unwrap_or_else(|| TileReply::Failed("Agenthail's answer had no project order".into())),
             Err(e) if e.status == 409 => read(&e.reply["tileOrder"]).map(TileReply::Stale).unwrap_or(TileReply::Failed(e.message)),
@@ -700,12 +700,12 @@ impl Client {
             payload["removeIgnored"] = json!(remove_ignored);
         }
         let reply = self.action("work-clean", payload).and_then(confirmed)?;
-        serde_json::from_value(reply["worktree"].clone()).map_err(|e| unreadable("the worktree", e, reply))
+        crate::reply::parse(reply["worktree"].clone()).map_err(|e| unreadable("the worktree", e, reply))
     }
 }
 
 fn lead(reply: Value) -> Outcome<Lead> {
-    match serde_json::from_value::<Lead>(reply["coordinator"].clone()) {
+    match crate::reply::parse::<Lead>(reply["coordinator"].clone()) {
         Ok(lead) if !lead.name.is_empty() => Ok(lead),
         Ok(_) => Err(unreadable("the lead", "it had no name", reply)),
         Err(e) => Err(unreadable("the lead", e, reply)),

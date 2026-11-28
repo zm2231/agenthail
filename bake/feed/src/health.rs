@@ -427,11 +427,11 @@ mod tests {
     use crate::mock::{daemon, replies};
 
     fn surface(v: Value) -> Surface {
-        serde_json::from_value(v).unwrap()
+        crate::reply::parse(v).unwrap()
     }
 
     fn session(v: Value) -> Session {
-        serde_json::from_value(v).unwrap()
+        crate::reply::parse(v).unwrap()
     }
 
     #[test]
@@ -496,20 +496,20 @@ mod tests {
 
     #[test]
     fn the_summary_counts_what_the_native_overview_counts() {
-        let daemon = |v: Value| -> crate::devices::Daemon { serde_json::from_value(v).unwrap() };
+        let daemon = |v: Value| -> crate::devices::Daemon { crate::reply::parse(v).unwrap() };
         let surfaces = [surface(json!({"name": "claude", "connected": true})), surface(json!({"name": "codex", "connected": false}))];
         let sessions = [session(json!({"id": "a", "surface": "claude", "status": "busy", "queueCount": 1}))];
         assert_eq!(summary(&daemon(json!({"running": true})), &surfaces, &tally(&sessions), 1), ("1 agent app connected · 1 working · 1 needs you · 1 message queued".into(), false));
         assert_eq!(summary(&daemon(json!({"running": true})), &surfaces[1..], &Tally::new(), 2).0, "No agent apps connected · 2 need you");
         assert_eq!(summary(&daemon(json!({})), &surfaces, &Tally::new(), 0).0, "Start Agenthail to deliver work.");
         assert_eq!(summary(&daemon(json!({"running": true, "stale": true, "refreshError": "codex timed out"})), &surfaces, &Tally::new(), 0), ("Showing cached data. codex timed out".into(), true));
-        let base: crate::prefs::Base = serde_json::from_value(json!({"surfaces": null, "daemon": {"running": true}})).unwrap();
+        let base: crate::prefs::Base = crate::reply::parse(json!({"surfaces": null, "daemon": {"running": true}})).unwrap();
         assert!(base.surfaces.is_empty() && base.daemon.running);
     }
 
     #[test]
     fn grants_read_with_their_targets_and_states() {
-        let p: Permissions = serde_json::from_value(json!({"supported": true, "holder": "Agenthail Daemon", "grants": [
+        let p: Permissions = crate::reply::parse(json!({"supported": true, "holder": "Agenthail Daemon", "grants": [
             {"name": "Accessibility", "state": "granted", "pane": "Accessibility", "url": "x-apple.systempreferences:a"},
             {"name": "Automation", "target": "com.apple.Safari", "targetName": "Safari", "state": "target_not_running", "pane": "Automation", "url": "x-apple.systempreferences:b"},
             {"name": "Screen Recording", "state": "missing", "pane": "Screen Recording", "url": "x-apple.systempreferences:c"}]})).unwrap();
@@ -517,7 +517,7 @@ mod tests {
         assert_eq!(p.grants[1].id(), "Automationcom.apple.Safari");
         assert_eq!(p.grants.iter().map(Grant::state_label).collect::<Vec<_>>(), vec!["Granted", "Not checked: Safari is not running", "Missing"]);
         assert!(p.askable() && p.grants[0].granted());
-        let none: Permissions = serde_json::from_value(json!({"supported": false, "grants": null})).unwrap();
+        let none: Permissions = crate::reply::parse(json!({"supported": false, "grants": null})).unwrap();
         assert!(!none.supported && none.grants.is_empty() && !none.askable());
     }
 

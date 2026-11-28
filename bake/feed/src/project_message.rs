@@ -71,7 +71,7 @@ pub fn sent(result: &Broadcast, name: impl Fn(&str) -> String) -> String {
 }
 
 fn read(reply: &Value) -> Option<Broadcast> {
-    reply["recipients"].is_array().then(|| serde_json::from_value(reply.clone()).ok()).flatten()
+    reply["recipients"].is_array().then(|| crate::reply::parse(reply.clone()).ok()).flatten()
 }
 
 impl Client {
@@ -105,7 +105,7 @@ mod tests {
 
     #[test]
     fn the_summary_names_who_got_it_and_who_did_not() {
-        let result: Broadcast = serde_json::from_value(json!({
+        let result: Broadcast = crate::reply::parse(json!({
             "recipients": [
                 {"sessionId": "s1", "outcome": "sent"},
                 {"coordinator": "@lead", "outcome": "queued"},

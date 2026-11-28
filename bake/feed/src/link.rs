@@ -106,7 +106,7 @@ pub fn listed_row(detail: &Value) -> Option<Session> {
         }
     }
     row.insert("open".into(), Value::Bool(true));
-    let mut session: Session = serde_json::from_value(Value::Object(row)).ok()?;
+    let mut session: Session = crate::reply::parse(Value::Object(row)).ok()?;
     session.id = session.id.trim().to_string();
     session.alias = session.alias.filter(|a| !a.is_empty());
     (!session.id.is_empty()).then_some(session)

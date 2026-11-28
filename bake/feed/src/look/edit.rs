@@ -162,17 +162,17 @@ impl Client {
 
     pub fn ui_log(&self, limit: usize) -> Result<Vec<Entry>, Failure> {
         let value: Value = read(self, &format!("/api/v1/ui/log?limit={limit}"), "read")?;
-        Ok(serde_json::from_value(value["entries"].clone()).unwrap_or_default())
+        Ok(crate::reply::parse(value["entries"].clone()).unwrap_or_default())
     }
 
     pub fn ui_presets(&self) -> Result<Vec<Preset>, Failure> {
         let value: Value = read(self, "/api/v1/ui/presets", "read")?;
-        Ok(serde_json::from_value(value["presets"].clone()).unwrap_or_default())
+        Ok(crate::reply::parse(value["presets"].clone()).unwrap_or_default())
     }
 
     pub fn ui_change(&self, class: &str, device: &str, change: &Change) -> Result<View, Failure> {
         let value = self.post_json(&format!("/api/v1/ui?{}", device_query(class, device)), change.0.clone()).map_err(|e| write_failure("settings", e))?;
-        serde_json::from_value(value).map_err(|e| Failure { uncertain: true, ..Failure::new(format!("the daemon's reply couldn't be read: {e}")) })
+        crate::reply::parse(value).map_err(|e| Failure { uncertain: true, ..Failure::new(format!("the daemon's reply couldn't be read: {e}")) })
     }
 
     pub fn ui_upload(&self, name: &str, data: &[u8]) -> Result<String, Failure> {

@@ -38,7 +38,7 @@ impl Upload {
     }
 
     pub fn from_json(value: &Value) -> Option<Upload> {
-        serde_json::from_value::<Upload>(value.clone()).ok().filter(|u| !u.id.trim().is_empty())
+        crate::reply::parse::<Upload>(value.clone()).ok().filter(|u| !u.id.trim().is_empty())
     }
 
     pub fn is_image(&self) -> bool {

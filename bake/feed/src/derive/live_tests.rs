@@ -928,3 +928,48 @@ fn a_read_that_finds_nothing_new_within_the_minute_asks_for_no_rebuild() {
     ov.take_ledger("old", Instant::now(), Ok(Ledger { rows: vec![], actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps: Default::default() }));
     assert!(ov.stale(), "a project that was loading shows its rows");
 }
+
+fn read_overview(snapshot: Value, usage: Value, hosts: Value, activity: Value) -> anyhow::Result<Fetched> {
+    let bodies = [snapshot, usage, hosts, activity].map(|v| v.to_string());
+    let (client, _seen) = crate::mock::daemon(crate::mock::replies(&bodies.iter().map(|b| (200, b.as_str())).collect::<Vec<_>>()));
+    super::live::fetch(&client, &super::live::Known::default(), None)
+}
+
+#[test]
+fn a_fresh_daemon_with_no_projects_reads_as_an_empty_overview() {
+    let snapshot = json!({"updatedAt": "2026-11-28T03:04:30Z", "hostEpoch": "e", "catalogSeq": 3, "sessions": [], "signin": [{"id": "notion", "profileId": null}], "tileOrder": {"order": [], "pinned": [], "revision": 0}});
+    let usage = json!({"sets": [{"name": "default", "provider": "claude", "meters": []}]});
+    let hosts = json!({"host": {"id": "h", "name": "forge", "state": "local"}, "hosts": []});
+    let fetched = read_overview(snapshot, usage, hosts, json!({"projects": []})).unwrap();
+    assert!(fetched.recorded.projects.is_empty());
+    assert_eq!(fetched.recorded.hosts.len(), 1);
+}
+
+#[test]
+fn a_snapshot_without_its_stamps_reads_with_empty_ones() {
+    let hosts = json!({"host": {"id": "h", "name": "forge", "state": "local"}, "hosts": []});
+    let fetched = read_overview(json!({"sessions": []}), json!({"sets": []}), hosts, json!({"projects": []})).unwrap();
+    assert_eq!((fetched.recorded.updated_at.as_str(), fetched.recorded.host_epoch.as_str(), fetched.recorded.catalog_seq, fetched.recorded.tile_order.is_none()), ("", "", 0, true));
+}
+
+#[test]
+fn every_list_the_overview_reads_may_arrive_as_null() {
+    let snapshot = json!({"updatedAt": "2026-11-28T03:04:30Z", "projects": [{"id": "p", "displayName": "P", "coordinators": null, "checkouts": null, "mcp": null}], "sessions": null, "tileOrder": {"order": null, "pinned": null, "revision": 0}});
+    let usage = json!({"sets": [{"name": "default", "meters": null}]});
+    let hosts = json!({"host": {"id": "h", "name": "forge", "state": "local"}, "hosts": null});
+    let fetched = read_overview(snapshot, usage, hosts, json!({"projects": null})).unwrap();
+    let p = &fetched.recorded.projects[0];
+    assert_eq!((p.id.as_str(), p.coordinators.len(), p.checkouts.len(), p.mcp.as_deref()), ("p", 0, 0, None));
+    let tiles = fetched.recorded.tile_order.unwrap();
+    assert!(tiles.order.is_empty() && tiles.pinned.is_empty());
+    assert!(fetched.sessions.is_empty());
+    assert!(!fetched.recorded.activity_missing, "an activity reply with no projects is still a reply");
+}
+
+#[test]
+fn ledger_rows_with_a_null_timeline_read_as_empty() {
+    let reply = json!({"work": [{"id": "w", "state": "open", "assignee": null, "timeline": null}], "phaseLabels": null, "nextCursor": null}).to_string();
+    let (client, _seen) = crate::mock::daemon(crate::mock::replies(&[(200, &reply)]));
+    let ledger = super::live::ledger(&client, "p", &super::live::Known::default()).unwrap();
+    assert_eq!((ledger.rows[0].id.as_str(), ledger.rows[0].timeline.len(), ledger.rows[0].assignee.clone()), ("w", 0, None));
+}

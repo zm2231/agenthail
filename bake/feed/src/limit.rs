@@ -177,7 +177,7 @@ mod tests {
     fn session(extra: Value) -> Session {
         let mut base = json!({"id": "s1", "name": "s1"});
         base.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
-        serde_json::from_value(base).unwrap()
+        crate::reply::parse(base).unwrap()
     }
 
     #[test]
@@ -258,14 +258,14 @@ mod tests {
         if let Some(email) = email {
             value["signedInAs"] = json!({"email": email});
         }
-        serde_json::from_value(value).unwrap()
+        crate::reply::parse(value).unwrap()
     }
 
     #[test]
     fn the_daemons_pick_comes_first_and_the_current_account_is_left_out() {
         let stop = Stop { label: String::new(), waiting: true, held: true, offer: Some(MoveOffer { root: "/r/b".into(), account: Some("b@example.com".into()), reason: Some("most room".into()) }), since: String::new() };
         let mut b = root("b", "/r/b", Some("b@example.com"));
-        b.take_usage(serde_json::from_value(json!({"root": "/r/b", "usage": {"limits": [{"kind": "5h", "percent": 12}]}})).unwrap());
+        b.take_usage(crate::reply::parse(json!({"root": "/r/b", "usage": {"limits": [{"kind": "5h", "percent": 12}]}})).unwrap());
         let mut c = root("c", "/r/c", Some("c@example.com"));
         c.full = true;
         let roots = vec![root("a", "/r/a", Some("a@example.com")), b, c, root("x", "/r/x", None)];
@@ -277,7 +277,7 @@ mod tests {
         spent[1].full = true;
         assert!(targets(&stop, Some("/r/a"), &spent, now)[0].full, "a suggested account that has run out can't be picked");
         let mut exhausted = roots.clone();
-        exhausted[0].take_usage(serde_json::from_value(json!({"root": "/r/a", "usage": {"limits": [{"kind": "5h", "percent": 100, "resetsAt": "2026-11-26T11:00:00Z"}]}})).unwrap());
+        exhausted[0].take_usage(crate::reply::parse(json!({"root": "/r/a", "usage": {"limits": [{"kind": "5h", "percent": 100, "resetsAt": "2026-11-26T11:00:00Z"}]}})).unwrap());
         assert!(targets(&Stop { offer: None, ..stop.clone() }, None, &exhausted, now)[0].full, "a direct account at its limit can't be picked");
         let no_offer = Stop { offer: None, ..stop };
         assert_eq!(targets(&no_offer, None, &roots, now).iter().map(|t| t.root.as_str()).collect::<Vec<_>>(), ["/r/a", "/r/b", "/r/c"]);

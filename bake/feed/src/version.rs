@@ -37,7 +37,7 @@ pub fn notice(app: &Build, daemon: &Build) -> Option<String> {
 
 impl Client {
     pub fn version(&self) -> anyhow::Result<Build> {
-        Ok(serde_json::from_value(self.get_json("/api/v1/version")?)?)
+        Ok(crate::reply::parse(self.get_json("/api/v1/version")?)?)
     }
 }
 

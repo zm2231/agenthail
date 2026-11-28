@@ -51,7 +51,7 @@ mod unchecked_tests {
     use crate::derive::world::Work;
 
     fn work(timeline: serde_json::Value) -> Work {
-        serde_json::from_value(serde_json::json!({"id": "w", "timeline": timeline})).unwrap()
+        crate::reply::parse(serde_json::json!({"id": "w", "timeline": timeline})).unwrap()
     }
 
     #[test]

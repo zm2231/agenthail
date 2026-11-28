@@ -296,12 +296,12 @@ pub fn failure(error: &RespondError) -> String {
 
 impl Client {
     pub fn usage_sets(&self) -> anyhow::Result<Vec<Set>> {
-        Ok(serde_json::from_value::<Option<Vec<Set>>>(self.get_json("/api/v1/usage")?["sets"].clone())?.unwrap_or_default())
+        Ok(crate::reply::parse::<Option<Vec<Set>>>(self.get_json("/api/v1/usage")?["sets"].clone())?.unwrap_or_default())
     }
 
     pub fn prefer_plan(&self, proxy: &str, account: &str, set: Prefer, now: bool) -> anyhow::Result<Plan> {
         let path = format!("/api/v1/proxies/prefer?proxy={}&account={}&set={}&now={now}", enc(proxy), enc(account), set.as_str());
-        Ok(serde_json::from_value(self.get_json(&path)?)?)
+        Ok(crate::reply::parse(self.get_json(&path)?)?)
     }
 
     pub fn prefer_apply(&self, proxy: &str, account: &str, set: Prefer, now: bool, plan: &str) -> Result<String, RespondError> {
@@ -318,7 +318,7 @@ mod tests {
     use std::sync::mpsc;
 
     fn sets() -> Vec<Set> {
-        serde_json::from_value(json!([
+        crate::reply::parse(json!([
             {"host": "laptop", "local": false, "provider": "proxy", "proxy": {"name": "shared", "id": "px"}, "accounts": [{"id": "far.json", "provider": "claude", "label": "far"}]},
             {"host": "mac", "local": true, "provider": "claude", "login": "claude.ai", "account": "a@example.com", "name": "main", "meters": [{"kind": "session", "label": "Session", "percent": 40}]},
             {"host": "mac", "local": true, "provider": "claude", "login": "signed_out", "name": "spare", "meters": null, "problem": "Not signed in"},
@@ -341,28 +341,28 @@ mod tests {
         let [lead, _, gpt] = &groups[0].accounts[..] else { panic!() };
         assert!(lead.preferred && groups[0].has_peers(lead));
         assert!(!groups[0].has_peers(gpt));
-        let tied: ProxyAccount = serde_json::from_value(json!({"id": "b.json", "provider": "claude", "preference": 10, "preferred": false})).unwrap();
+        let tied: ProxyAccount = crate::reply::parse(json!({"id": "b.json", "provider": "claude", "preference": 10, "preferred": false})).unwrap();
         assert!(tied.set_to_prefer() && lead.set_to_prefer(), "a tie at the preferred value can still be turned off");
         assert!(!groups[0].accounts[1].set_to_prefer());
-        let disabled: ProxyAccount = serde_json::from_value(json!({"id": "d.json", "provider": "claude", "status": "disabled", "preference": 10})).unwrap();
+        let disabled: ProxyAccount = crate::reply::parse(json!({"id": "d.json", "provider": "claude", "status": "disabled", "preference": 10})).unwrap();
         assert_eq!([lead.prefer_label(), tied.prefer_label(), disabled.prefer_label(), groups[0].accounts[1].prefer_label()], ["Preferred ✓", "Set to prefer ✓", "Set to prefer ✓", "Prefer"]);
         assert_eq!(accounts(&sets).iter().map(|s| s.title()).collect::<Vec<_>>(), ["a@example.com", "spare", "Codex"]);
     }
 
     #[test]
     fn an_account_runs_the_sessions_started_under_its_root_on_its_computer() {
-        let set: Set = serde_json::from_value(json!({"host": "mac", "hostId": "h1", "local": true, "root": "/r/a"})).unwrap();
-        let session = |host: Value, root: &str| -> crate::catalog::Session { serde_json::from_value(json!({"id": "s", "host": host, "claudeConfigRoot": {"name": "a", "root": root}})).unwrap() };
+        let set: Set = crate::reply::parse(json!({"host": "mac", "hostId": "h1", "local": true, "root": "/r/a"})).unwrap();
+        let session = |host: Value, root: &str| -> crate::catalog::Session { crate::reply::parse(json!({"id": "s", "host": host, "claudeConfigRoot": {"name": "a", "root": root}})).unwrap() };
         assert!(set.runs(&session(json!({"state": "local"}), "/r/a")));
         assert!(!set.runs(&session(json!({"state": "local"}), "/r/b")));
         assert!(!set.runs(&session(json!({"id": "h2", "state": "connected"}), "/r/a")));
-        let far: Set = serde_json::from_value(json!({"host": "forge", "hostId": "h2", "root": "/r/a"})).unwrap();
+        let far: Set = crate::reply::parse(json!({"host": "forge", "hostId": "h2", "root": "/r/a"})).unwrap();
         assert!(far.runs(&session(json!({"id": "h2", "state": "connected"}), "/r/a")));
     }
 
     #[test]
     fn a_root_through_a_proxy_is_an_account_and_the_proxys_own_set_is_its_group() {
-        let sets: Vec<Set> = serde_json::from_value(json!([
+        let sets: Vec<Set> = crate::reply::parse(json!([
             {"host": "mac", "local": true, "provider": "claude", "name": "main", "account": "a@example.com", "root": "/r/main", "meters": [{"label": "Session", "percent": 10}]},
             {"host": "mac", "local": true, "provider": "claude", "name": "team", "root": "/r/team", "login": "proxy", "proxy": {"name": "shared", "id": "px"}, "meters": null},
             {"host": "mac", "local": true, "provider": "proxy", "name": "shared", "proxy": {"name": "shared", "id": "px"}, "accounts": [{"id": "dev.json", "provider": "claude", "label": "dev@example.com", "meters": [{"label": "Claude", "percent": 18, "severity": "critical"}]}], "problem": "Every shared Claude account is over its ceiling."}
@@ -376,7 +376,7 @@ mod tests {
 
     #[test]
     fn a_proxy_says_what_the_daemon_explains_and_whether_it_is_still_reading_its_accounts() {
-        let sets: Vec<Set> = serde_json::from_value(json!([
+        let sets: Vec<Set> = crate::reply::parse(json!([
             {"host": "mac", "local": true, "provider": "proxy", "proxy": {"name": "shared", "id": "px"}, "accounts": [], "proxyProblem": "reading", "problem": "Reading the shared proxy's accounts."},
             {"host": "mac", "local": true, "provider": "proxy", "proxy": {"name": "team", "id": "pt"}, "accounts": [{"id": "a.json", "provider": "claude"}], "problem": "Every team Claude account is over its ceiling."},
             {"host": "mac", "local": true, "provider": "proxy", "proxy": {"name": "old", "id": "po"}, "proxyProblem": "unauthorized"}
@@ -392,9 +392,9 @@ mod tests {
 
     #[test]
     fn a_meter_at_its_ceiling_is_critical_whatever_its_percent() {
-        let at_ceiling: Meter = serde_json::from_value(json!({"label": "Session", "percent": 50, "severity": "critical"})).unwrap();
-        let busy: Meter = serde_json::from_value(json!({"label": "Session", "percent": 92})).unwrap();
-        let calm: Meter = serde_json::from_value(json!({"label": "Session", "percent": 50, "severity": "warning"})).unwrap();
+        let at_ceiling: Meter = crate::reply::parse(json!({"label": "Session", "percent": 50, "severity": "critical"})).unwrap();
+        let busy: Meter = crate::reply::parse(json!({"label": "Session", "percent": 92})).unwrap();
+        let calm: Meter = crate::reply::parse(json!({"label": "Session", "percent": 50, "severity": "warning"})).unwrap();
         assert_eq!([at_ceiling.critical(), busy.critical(), calm.critical()], [true, true, false]);
     }
 
@@ -408,9 +408,9 @@ mod tests {
 
     #[test]
     fn a_plan_reads_as_the_native_sheet_does() {
-        let empty: Plan = serde_json::from_value(json!({"set": "on", "planId": "p2", "changes": null, "release": null, "hosts": [{"host": "mac", "roots": null, "sessions": null}], "warnings": null})).unwrap();
+        let empty: Plan = crate::reply::parse(json!({"set": "on", "planId": "p2", "changes": null, "release": null, "hosts": [{"host": "mac", "roots": null, "sessions": null}], "warnings": null})).unwrap();
         assert_eq!(empty.affect_lines(), ["mac:  · no running sessions"]);
-        let plan: Plan = serde_json::from_value(json!({
+        let plan: Plan = crate::reply::parse(json!({
             "set": "only", "planId": "p1",
             "changes": [{"id": "spare.json", "label": "spare", "before": 0, "after": 10}, {"id": "lead.json", "label": "lead", "before": 10, "after": 0}, {"id": "x", "label": "x", "before": 2.5, "after": 0}],
             "release": [{"id": "lead.json", "label": "lead"}],

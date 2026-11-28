@@ -196,8 +196,8 @@ fn field_name(key: &str) -> &str {
 }
 
 pub fn metadata(value: &Value) -> Metadata {
-    let goal = serde_json::from_value::<Goal>(value["goal"].clone()).ok().filter(|g| !g.objective.is_empty());
-    let runs = value.get("claudeRuns").filter(|v| !v.is_null()).map(|v| serde_json::from_value(v.clone()).unwrap_or_default());
+    let goal = crate::reply::parse::<Goal>(value["goal"].clone()).ok().filter(|g| !g.objective.is_empty());
+    let runs = value.get("claudeRuns").filter(|v| !v.is_null()).map(|v| crate::reply::parse(v.clone()).unwrap_or_default());
     let mut keys: Vec<(&String, &Value)> = value["errors"].as_object().into_iter().flatten().collect();
     keys.sort_by(|a, b| a.0.cmp(b.0));
     let warnings = keys
@@ -517,7 +517,7 @@ impl Client {
 
     pub fn lifecycle(&self, session: &str, act: LifecycleAct) -> Result<LifecycleResult, RespondError> {
         let reply = crate::catalog::confirmed(self.action(&format!("session-lifecycle-{}", act.name()), json!({"sessionId": session}))?)?;
-        Ok(serde_json::from_value(reply["result"].clone()).unwrap_or_default())
+        Ok(crate::reply::parse(reply["result"].clone()).unwrap_or_default())
     }
 }
 
@@ -527,7 +527,7 @@ mod tests {
     use crate::mock::{daemon, replies};
 
     fn session(v: Value) -> Session {
-        serde_json::from_value(v).unwrap()
+        crate::reply::parse(v).unwrap()
     }
 
     fn noon() -> OffsetDateTime {
@@ -535,7 +535,7 @@ mod tests {
     }
 
     fn goal(v: Value) -> Goal {
-        serde_json::from_value(v).unwrap()
+        crate::reply::parse(v).unwrap()
     }
 
     #[test]

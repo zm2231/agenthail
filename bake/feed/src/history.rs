@@ -56,7 +56,7 @@ fn read_page(value: &Value) -> Result<Page, Miss> {
     if value["catchingUp"].as_bool() == Some(true) {
         return Err(Miss::Failed("the session is still catching up".into()));
     }
-    let timeline: Timeline = serde_json::from_value(value["timeline"].clone()).map_err(|e| Miss::Failed(e.to_string()))?;
+    let timeline: Timeline = crate::reply::parse(value["timeline"].clone()).map_err(|e| Miss::Failed(e.to_string()))?;
     if let Some(reason) = timeline.unavailable_reason.filter(|r| !r.is_empty()) {
         return Err(Miss::Failed(reason));
     }

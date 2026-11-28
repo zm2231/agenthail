@@ -515,7 +515,7 @@ pub enum Change {
 }
 
 fn roles_reply(value: Value) -> Result<Roles, Failure> {
-    serde_json::from_value(value).map_err(|e| Failure::new(format!("the daemon's reply couldn't be read: {e}")))
+    crate::reply::parse(value).map_err(|e| Failure::new(format!("the daemon's reply couldn't be read: {e}")))
 }
 
 #[cfg(test)]
@@ -523,7 +523,7 @@ mod tests {
     use super::*;
 
     fn role(json: Value) -> RoleView {
-        serde_json::from_value(json).unwrap()
+        crate::reply::parse(json).unwrap()
     }
 
     fn action(name: &str, default: &str) -> ActionView {
@@ -535,6 +535,13 @@ mod tests {
         let r = role(json!({"name": "reviewer", "definition": {"reach": "project", "tools": null, "ledgers": ["p-1"], "description": "", "actions": {}, "depth": 0}}));
         let body = Draft::of(&r).request().body();
         assert_eq!(body, json!({"op": "put", "name": "reviewer", "role": {"reach": "project", "tools": null, "ledgers": ["p-1"]}}));
+    }
+
+    #[test]
+    fn a_role_put_sends_back_the_nulls_inside_fields_this_app_does_not_edit() {
+        let r = role(json!({"name": "reviewer", "definition": {"reach": "project", "limits": {"turns": null, "hosts": [null]}}}));
+        let body = Draft::of(&r).request().body();
+        assert_eq!(body["role"]["limits"], json!({"turns": null, "hosts": [null]}));
     }
 
     #[test]
