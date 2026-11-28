@@ -122,3 +122,25 @@ fn a_translucent_surface_is_measured_as_the_window_blends_it() {
     let pane = Color { r: 0.02, g: 0.03, b: 0.05, a: 1.0 };
     assert_eq!(over(pane, Color::WHITE), pane, "an opaque surface is itself");
 }
+
+#[test]
+fn kits_are_rebuilt_when_any_colour_they_draw_with_moves() {
+    let paint = Paint::dark();
+    let roles = Kit::neutral(true).roles;
+    let behind = paint.card_deep;
+    let key = kit_key(&paint, &roles, true, true, behind);
+    assert_eq!(key, kit_key(&paint, &roles, true, true, behind));
+    let nudged = |c: Color| c.mix(Color { r: 0.2, g: 0.2, b: 0.2, a: c.a }, 0.3);
+    for moved in [
+        Paint { accent: nudged(paint.accent), ..paint },
+        Paint { text: nudged(paint.text), ..paint },
+        Paint { pane: paint.pane.alpha(0.5), ..paint },
+        Paint { border: Color::WHITE.alpha(0.2), ..paint },
+        Paint { card_deep: nudged(paint.card_deep), ..paint },
+    ] {
+        assert_ne!(kit_key(&moved, &roles, true, true, behind), key, "a lifted accent, text or surface reaches the kit");
+    }
+    assert_ne!(kit_key(&paint, &roles, true, true, nudged(behind)), key, "what shows through the glass reaches the kit");
+    let link = TextRoles { link: nudged(roles.link), ..roles };
+    assert_ne!(kit_key(&paint, &link, true, true, behind), key);
+}

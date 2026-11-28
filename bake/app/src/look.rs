@@ -501,6 +501,12 @@ fn chrome_kit(env: &KitEnv, paint: &Paint, roles: TextRoles, translucent: bool, 
     hold_kit(k, behind)
 }
 
+fn kit_key(paint: &Paint, roles: &TextRoles, translucent: bool, drawn: bool, behind: Color) -> String {
+    let q = |c: Color| [quant(fl::gamma(c.r)), quant(fl::gamma(c.g)), quant(fl::gamma(c.b)), quant(c.a)];
+    let colors: Vec<[u32; 4]> = [paint.text, paint.muted, paint.faint, paint.accent, paint.pane, paint.border, paint.card_deep, behind].into_iter().chain(rune_kit::TextRole::ALL.iter().map(|r| roles.get(*r))).map(q).collect();
+    format!("{}:{translucent}:{drawn}:{colors:?}", paint.dark)
+}
+
 fn accented(k: &mut Kit, a: Color) {
     k.c.bg_accent = a;
     k.c.text_accent = a;
@@ -548,7 +554,6 @@ pub fn frame<S, R>(cx: &mut Cx<S>, session: bool, glass: bool, build: impl FnOnc
         };
         let translucent = glass && s.look.translucent(dark);
         let drawn = s.look.drawn(dark);
-        let mut glass_key = String::new();
         let behind = if translucent {
             let ground = ground_rgb(dark);
             let tint = tint_rgb(&s.look, dark, accent_rgb);
@@ -562,7 +567,6 @@ pub fn frame<S, R>(cx: &mut Cx<S>, session: bool, glass: bool, build: impl FnOnc
             paint.glass_tint = rgb(float_rgb).alpha(float);
             paint.blur = s.look.blur / 3.0;
             paint.ground = rgb(ground);
-            glass_key = format!(":{}:{}:{:?}", quant(pane), quant(s.look.border), pane_rgb.map(quant));
             paint.pane = rgb(pane_rgb).alpha(pane);
             paint.border = Color::WHITE.alpha(s.look.border);
             rgb(fl::blend(fl::blend(ground, worst, strength), if dark { [0.0; 3] } else { [1.0; 3] }, s.look.dim))
@@ -572,15 +576,7 @@ pub fn frame<S, R>(cx: &mut Cx<S>, session: bool, glass: bool, build: impl FnOnc
         };
         let floor = if translucent { over(paint.pane, behind) } else { behind };
         hold_paint(&mut paint, &mut roles, floor, s.look.target.max(if increased { 7.0 } else { 4.5 }), increased);
-        let roles_key: Vec<[u32; 3]> = rune_kit::TextRole::ALL.iter().map(|r| srgb(roles.get(*r)).map(quant)).collect();
-        let key = format!(
-            "{dark}:{translucent}:{drawn}:{:?}:{:?}:{:?}:{:?}:{roles_key:?}:{:?}{glass_key}",
-            accent_rgb.map(quant),
-            srgb(paint.text).map(quant),
-            srgb(paint.muted).map(quant),
-            srgb(paint.faint).map(quant),
-            srgb(behind).map(quant)
-        );
+        let key = kit_key(&paint, &roles, translucent, drawn, behind);
         let kit = cached(s, format!("kit:{key}"), move |env| main_kit(env, &paint, roles, translucent, behind));
         let chrome = cached(s, format!("chrome:{key}"), move |env| chrome_kit(env, &paint, roles, translucent, drawn, behind));
         (paint, kit, chrome)
