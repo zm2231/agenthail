@@ -58,7 +58,7 @@ impl Search {
 
 pub fn read(value: &Value) -> Result<Search, String> {
     let rows = value["items"].as_array().ok_or("Work search returned no items list")?;
-    let items = rows.iter().map(|r| serde_json::from_value(r.clone()).map_err(|e| format!("Work search returned an item Agenthail can't read: {e}"))).collect::<Result<_, _>>()?;
+    let items = rows.iter().map(|r| crate::reply::parse(r.clone()).map_err(|e| format!("Work search returned an item Agenthail can't read: {e}"))).collect::<Result<_, _>>()?;
     Ok(Search { items, truncated: value["truncated"].as_bool().unwrap_or(false) })
 }
 
@@ -74,7 +74,7 @@ impl Client {
     pub fn found_work(&self, ledger: &str, id: &str) -> Result<Work, String> {
         let path = format!("/api/v1/ledger?projectKey={}&view=item&id={}", enc(ledger), enc(id));
         match self.timed(TIMEOUT).get_reply(&path) {
-            Ok(value) => serde_json::from_value::<Work>(value["item"]["item"].clone()).map(|w| Work { steps: crate::derive::phase::Steps::from_reply(&value), ..w }).map_err(|e| format!("This work item came back in a form Agenthail can't read: {e}")),
+            Ok(value) => crate::reply::parse::<Work>(value["item"]["item"].clone()).map(|w| Work { steps: crate::derive::phase::Steps::from_reply(&value), ..w }).map_err(|e| format!("This work item came back in a form Agenthail can't read: {e}")),
             Err((code, body)) => Err(failure("this work item", code, &body)),
         }
     }

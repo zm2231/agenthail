@@ -204,7 +204,7 @@ impl Catalog {
         let d = &e.data;
         let id = d["sessionId"].as_str().unwrap_or_default().to_string();
         match e.kind.as_str() {
-            "session.upserted" => match serde_json::from_value::<Session>(d["session"].clone()) {
+            "session.upserted" => match crate::reply::parse::<Session>(d["session"].clone()) {
                 Ok(row) if !row.id.is_empty() => {
                     out.touched.push(row.id.clone());
                     match self.sessions.iter_mut().find(|x| x.id == row.id) {

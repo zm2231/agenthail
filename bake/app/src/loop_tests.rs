@@ -53,7 +53,7 @@ fn session(id: &str, minutes_ago: u64, extra: serde_json::Value) -> Session {
     if let (Some(row), Some(extra)) = (row.as_object_mut(), extra.as_object()) {
         row.extend(extra.clone());
     }
-    serde_json::from_value(row).unwrap()
+    feed::reply::parse(row).unwrap()
 }
 
 fn sessions(ids: &[&str]) -> Vec<Session> {
@@ -61,7 +61,7 @@ fn sessions(ids: &[&str]) -> Vec<Session> {
 }
 
 fn recorded(seq: u64, sessions: Vec<Session>) -> Recorded {
-    let mut raw: Recorded = serde_json::from_value(json!({
+    let mut raw: Recorded = feed::reply::parse(json!({
         "updatedAt": at(seq),
         "hostEpoch": EPOCH,
         "catalogSeq": seq,
@@ -231,7 +231,7 @@ fn a_failed_project_order_is_sent_again_on_the_next_read_within_the_same_minute(
     let read = |at: &str| {
         let mut raw = recorded(2, sessions(&["a"]));
         raw.updated_at = at.into();
-        raw.projects.push(serde_json::from_value(json!({"id": "p2", "displayName": "Beta"})).unwrap());
+        raw.projects.push(feed::reply::parse(json!({"id": "p2", "displayName": "Beta"})).unwrap());
         raw.tile_order = Some(feed::projects::TileOrder { order: vec!["p1".into(), "p2".into()], pinned: Vec::new(), revision: 1 });
         Bg::Overview(Box::new(fetched(raw)))
     };
@@ -275,7 +275,7 @@ fn a_session_list_that_brings_a_quiet_project_back_reads_its_work_at_once() {
     rt.state.overview_poke = Some(poke);
     let quiet = |last: &str| session("q", 0, json!({"lastActive": last, "project": {"id": "p2", "name": "Beta"}}));
     let mut raw = recorded(2, vec![session("a", 0, json!({})), quiet("2026-11-01T10:00:00Z")]);
-    raw.projects.push(serde_json::from_value(json!({"id": "p2", "displayName": "Beta"})).unwrap());
+    raw.projects.push(feed::reply::parse(json!({"id": "p2", "displayName": "Beta"})).unwrap());
     send(&rt, Bg::Overview(Box::new(fetched(raw))));
     rt.frame(DT);
     assert!(!asked.try_iter().any(|a| a == crate::Ask::Read("p2".into())), "a project quiet for weeks isn't read");
@@ -1137,7 +1137,7 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
 
     crate::over::worksearch::open(&mut rt.state, &zk("shared:z", "z-W9"));
     let mut loaded = fetched(recorded(3, sessions(&["a"])));
-    let row: feed::derive::world::Work = serde_json::from_value(json!({"id": "z-W9", "text": "Parked export", "state": "in_progress"})).unwrap();
+    let row: feed::derive::world::Work = feed::reply::parse(json!({"id": "z-W9", "text": "Parked export", "state": "in_progress"})).unwrap();
     loaded.recorded.projects[0].ledger_key = "shared:z".into();
     loaded.ledgers.insert("p1".into(), (std::time::Instant::now(), Ok(vec![row.into()])));
     send(&rt, Bg::Overview(Box::new(loaded)));
@@ -1300,7 +1300,7 @@ fn jump_searches_every_ledger_after_typing_settles_and_opens_an_unloaded_item() 
     typed(&mut rt, "exporter");
     assert_eq!(highlighted_session(&rt), Some("exporter".into()));
     let mut grew = fetched(recorded(5, sessions(&["a", "exporter"])));
-    grew.ledgers.insert("p1".into(), (std::time::Instant::now(), Ok(vec![std::sync::Arc::new(serde_json::from_value(json!({"id": "p1-W1", "text": "Fix the exporter", "state": "in_progress"})).unwrap())])));
+    grew.ledgers.insert("p1".into(), (std::time::Instant::now(), Ok(vec![std::sync::Arc::new(feed::reply::parse(json!({"id": "p1-W1", "text": "Fix the exporter", "state": "in_progress"})).unwrap())])));
     send(&rt, Bg::Overview(Box::new(grew)));
     rt.frame(DT);
     assert!(rt.state.ov.d.work.contains_key(&zk("p1", "p1-W1")));

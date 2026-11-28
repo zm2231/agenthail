@@ -220,7 +220,7 @@ mod tests {
     use crate::mock::{daemon, replies};
 
     fn state() -> Signin {
-        serde_json::from_value(json!({
+        crate::reply::parse(json!({
             "profiles": [{"id": "p1", "label": "Work", "browser": "chrome", "profile": "Profile 1", "createdAt": "2026-11-20T10:00:00Z"}],
             "consumers": [
                 {"id": "notion", "label": "Notion", "purpose": "Reads Notion's sign-in.", "mode": "auto", "browser": "chrome", "browserLabel": "Chrome", "profile": "Default", "profileName": "Personal"},
@@ -245,7 +245,7 @@ mod tests {
         assert_eq!(s.consumers.iter().map(Consumer::choice).collect::<Vec<_>>(), vec!["auto", "p1", "none", "auto", "auto"]);
         assert_eq!(s.choices(), vec![("Automatic (system default browser)".into(), "auto".into()), ("Work".into(), "p1".into()), ("Off".into(), "none".into())]);
         assert_eq!(s.pinned_detail(&s.profiles[0]), "Chrome · Profile 1");
-        let clash: Signin = serde_json::from_value(json!({"profiles": [
+        let clash: Signin = crate::reply::parse(json!({"profiles": [
             {"id": "a", "label": "Off", "browser": "chrome", "profile": "Default"},
             {"id": "b", "label": "Automatic (system default browser)", "browser": "arc", "profile": "Default"},
             {"id": "c", "label": "Work", "browser": "chrome", "profile": "Profile 1"},

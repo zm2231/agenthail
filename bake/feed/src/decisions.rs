@@ -340,7 +340,7 @@ pub fn saved_history(history: &[Handled]) -> serde_json::Value {
 }
 
 pub fn restored_history(value: &serde_json::Value) -> Vec<Handled> {
-    let mut list: Vec<Handled> = value.as_array().into_iter().flatten().filter_map(|v| serde_json::from_value(v.clone()).ok()).collect();
+    let mut list: Vec<Handled> = value.as_array().into_iter().flatten().filter_map(|v| crate::reply::parse(v.clone()).ok()).collect();
     list.truncate(HISTORY_KEPT);
     list
 }
@@ -352,7 +352,7 @@ impl Client {
             None => "/api/v1/decisions".into(),
         };
         let value = self.get_coded(&path).map_err(|(status, code)| if older(status, &code) { Unread::Older } else { Unread::Failed })?;
-        serde_json::from_value(value).map_err(|_| Unread::Failed)
+        crate::reply::parse(value).map_err(|_| Unread::Failed)
     }
 
     pub fn inbox(&self) -> Inbox {

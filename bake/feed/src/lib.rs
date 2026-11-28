@@ -5,6 +5,7 @@ pub mod background;
 pub mod blocks;
 pub mod brief;
 pub mod question;
+pub mod reply;
 pub mod request;
 pub mod review;
 pub mod role;

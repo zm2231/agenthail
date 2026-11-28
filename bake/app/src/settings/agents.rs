@@ -675,7 +675,7 @@ mod tests {
     use super::*;
 
     fn session(id: &str, name: &str, alias: Option<&str>) -> feed::catalog::Session {
-        serde_json::from_value(serde_json::json!({"id": id, "name": name, "alias": alias})).unwrap()
+        feed::reply::parse(serde_json::json!({"id": id, "name": name, "alias": alias})).unwrap()
     }
 
     #[test]

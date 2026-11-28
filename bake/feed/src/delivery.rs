@@ -73,7 +73,7 @@ impl Client {
 
     fn history_at(&self, path: &str) -> Result<Vec<Entry>, String> {
         let page = self.get_reply(path).map_err(|(code, body)| failure("delivery history", code, &body))?;
-        serde_json::from_value(page["items"].clone()).map_err(|e| format!("Agenthail sent delivery history this app can't read: {e}"))
+        crate::reply::member(&page, "items").map_err(|e| format!("Agenthail sent delivery history this app can't read: {e}"))
     }
 }
 
@@ -84,7 +84,7 @@ mod tests {
     use serde_json::json;
 
     fn entry(v: serde_json::Value) -> Entry {
-        serde_json::from_value(v).unwrap()
+        crate::reply::parse(v).unwrap()
     }
 
     #[test]
@@ -119,5 +119,13 @@ mod tests {
         assert!(client.recent_history().unwrap().is_empty());
         assert_eq!(seen.recv().unwrap().0, "/api/v1/history?limit=50");
         assert_eq!(client.session_history("s").unwrap_err(), "a session's history takes only a limit");
+    }
+
+    #[test]
+    fn a_null_history_is_empty_and_a_missing_one_is_unreadable() {
+        let (client, _seen) = daemon(replies(&[(200, r#"{"items":null}"#), (200, r#"{"items":[{"id":1,"kind":"send","evidence":null,"target":null}]}"#), (200, r#"{}"#)]));
+        assert!(client.recent_history().unwrap().is_empty());
+        assert_eq!(client.recent_history().unwrap()[0].id, 1);
+        assert!(client.recent_history().is_err());
     }
 }

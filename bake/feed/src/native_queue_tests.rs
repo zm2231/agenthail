@@ -4,11 +4,11 @@ use super::*;
 use crate::mock::{daemon, replies};
 
 fn session(v: Value) -> Session {
-    serde_json::from_value(v).unwrap()
+    crate::reply::parse(v).unwrap()
 }
 
 fn page(v: Value) -> Page {
-    serde_json::from_value(v).unwrap()
+    crate::reply::parse(v).unwrap()
 }
 
 fn ids(q: &Queue) -> Vec<&str> {

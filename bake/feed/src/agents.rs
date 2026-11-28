@@ -515,7 +515,7 @@ pub enum Change {
 }
 
 fn roles_reply(value: Value) -> Result<Roles, Failure> {
-    serde_json::from_value(value).map_err(|e| Failure::new(format!("the daemon's reply couldn't be read: {e}")))
+    crate::reply::parse(value).map_err(|e| Failure::new(format!("the daemon's reply couldn't be read: {e}")))
 }
 
 #[cfg(test)]
@@ -523,7 +523,7 @@ mod tests {
     use super::*;
 
     fn role(json: Value) -> RoleView {
-        serde_json::from_value(json).unwrap()
+        crate::reply::parse(json).unwrap()
     }
 
     fn action(name: &str, default: &str) -> ActionView {

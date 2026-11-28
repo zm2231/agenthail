@@ -100,7 +100,7 @@ impl Client {
     pub fn session_read(&self, session: &str, revision: &str, read: bool) -> Outcome<Option<ReadState>> {
         let name = if read { "session-read" } else { "session-unread" };
         let reply = crate::catalog::confirmed(self.action(name, json!({"sessionId": session, "revision": revision}))?)?;
-        Ok(serde_json::from_value(reply["readState"].clone()).ok())
+        Ok(crate::reply::parse(reply["readState"].clone()).ok())
     }
 
     pub fn turn_setting(&self, session: &str, setting: &str, value: &str) -> Outcome<()> {
@@ -143,7 +143,7 @@ impl Client {
             error.maybe_delivered |= error.code == "internal_error";
             error
         })?;
-        serde_json::from_value(reply["prs"].clone()).map_err(|e| RespondError {
+        crate::reply::member(&reply, "prs").map_err(|e| RespondError {
             message: format!("the daemon's answer didn't list the session's pull requests: {e}"),
             code: "unreadable_reply".into(),
             maybe_delivered: true,
@@ -439,5 +439,12 @@ mod tests {
     fn a_payload_that_is_not_an_object_is_refused_before_sending() {
         let error = Client::new("http://127.0.0.1:0", "secret").action("compact", json!(["s1"])).unwrap_err();
         assert_eq!((error.code.as_str(), error.maybe_delivered), ("invalid_request", false));
+    }
+
+    #[test]
+    fn a_null_pull_request_list_is_empty() {
+        let (client, _seen) = daemon(vec![(200, r#"{"ok":true,"sessionId":"s1","prs":null}"#), (200, r#"{"ok":true,"sessionId":"s1","prs":[{"repo":"o/r","number":1,"title":null,"checks":null}]}"#)]);
+        assert!(client.pr("s1", PrOp::Unwatch, "12").unwrap().is_empty());
+        assert_eq!(client.pr("s1", PrOp::Watch, "1").unwrap()[0].number, 1);
     }
 }

@@ -99,7 +99,7 @@ pub fn check(reply: &Value) -> Result<Build, Problem> {
     if !(low..=high).contains(&PROTOCOL) {
         return Err(Problem::Incompatible(protocol));
     }
-    serde_json::from_value(reply.clone()).map_err(|e| Problem::Failed(e.to_string()))
+    crate::reply::parse(reply.clone()).map_err(|e| Problem::Failed(e.to_string()))
 }
 
 impl Client {

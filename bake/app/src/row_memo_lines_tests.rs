@@ -20,7 +20,7 @@ pub(super) fn people() -> Vec<Session> {
 }
 
 pub(super) fn world(dir: &Dir) -> Runtime<App> {
-    let mut raw: Recorded = serde_json::from_value(json!({
+    let mut raw: Recorded = feed::reply::parse(json!({
         "updatedAt": "2026-11-27T10:00:00Z",
         "hostEpoch": EPOCH,
         "catalogSeq": 1,
@@ -30,7 +30,7 @@ pub(super) fn world(dir: &Dir) -> Runtime<App> {
     raw.sessions = people();
     raw.ledgers.insert(
         "p1".into(),
-        serde_json::from_value(json!([
+        feed::reply::parse(json!([
             shipped("W1", "Wire the export", "2026-11-27T09:50:00Z"),
             shipped("W2", "Check the import", "2026-11-27T09:40:00Z"),
             shipped("W3", "Fix the menu", "2026-11-27T09:30:00Z"),
@@ -244,7 +244,7 @@ fn a_review_need_rebuilds_when_its_review_changes_and_acts_on_the_review_it_show
     assert_eq!(rebuilt(&mut rt, "need-", |s| listed(s, review("2026-11-27T09:30:00Z"))), [row.clone()], "a resubmitted review no longer holds the note");
     assert_eq!(rebuilt(&mut rt, "need-", |s| s.ov.inbox.inbox = None), [row.clone()], "no review listed");
     let pr = "need-w:p1|W3".to_string();
-    assert_eq!(rebuilt(&mut rt, "need-", |s| work(s, "W3").timeline.push(serde_json::from_value(json!({"kind": "log", "at": "2026-11-27T09:55:00Z", "text": "Opened https://github.com/o/r/pull/7"})).unwrap())), [pr], "the pull request a failing build opens");
+    assert_eq!(rebuilt(&mut rt, "need-", |s| work(s, "W3").timeline.push(feed::reply::parse(json!({"kind": "log", "at": "2026-11-27T09:55:00Z", "text": "Opened https://github.com/o/r/pull/7"})).unwrap())), [pr], "the pull request a failing build opens");
 
     rt.update(|s, _| listed(s, review("2026-11-27T09:40:00Z")));
     settle(&mut rt);

@@ -31,7 +31,7 @@ pub struct Identity {
 }
 
 pub fn identity(x: &Session) -> Option<Identity> {
-    x.subagent.as_ref().and_then(|v| serde_json::from_value::<Identity>(v.clone()).ok()).filter(|i| !i.parent_id.is_empty())
+    x.subagent.as_ref().and_then(|v| crate::reply::parse::<Identity>(v.clone()).ok()).filter(|i| !i.parent_id.is_empty())
 }
 
 pub fn parent_of(x: &Session) -> Option<String> {
@@ -189,7 +189,7 @@ pub fn claude_subagents(metadata: &Value) -> Result<ClaudeSubagents, String> {
     if let Some(error) = metadata["errors"]["claudeSubagents"].as_str() {
         return Err(error.to_string());
     }
-    let links: Vec<ClaudeSubagent> = serde_json::from_value(metadata["claudeSubagents"].clone()).unwrap_or_default();
+    let links: Vec<ClaudeSubagent> = crate::reply::parse(metadata["claudeSubagents"].clone()).unwrap_or_default();
     let total = metadata["claudeSubagentsTotal"].as_u64().map_or(links.len(), |t| t as usize);
     Ok(ClaudeSubagents { links, total })
 }
@@ -238,7 +238,7 @@ pub fn detail_row(detail: &Value) -> Result<Session, String> {
     if let Some(alias) = detail["alias"].as_str().filter(|a| !a.is_empty()) {
         raw.insert("alias".into(), Value::String(alias.into()));
     }
-    let row: Session = serde_json::from_value(Value::Object(raw)).map_err(|e| e.to_string())?;
+    let row: Session = crate::reply::parse(Value::Object(raw)).map_err(|e| e.to_string())?;
     if row.id.is_empty() {
         return Err("Agenthail returned no session".into());
     }
@@ -268,7 +268,7 @@ impl Client {
                 path.push_str(&format!("&cursor={}", enc(c)));
             }
             let page = self.get_coded(&path)?;
-            sessions.extend(serde_json::from_value::<Vec<Session>>(page["sessions"].clone()).map_err(|e| (0, e.to_string()))?);
+            sessions.extend(crate::reply::member::<Vec<Session>>(&page, "sessions").map_err(|e| (0, e.to_string()))?);
             cursor = page["nextCursor"].as_str().filter(|c| !c.is_empty()).map(String::from);
             if cursor.is_none() {
                 return Ok(sessions);
@@ -538,5 +538,11 @@ mod tests {
         assert!(!seen.read("c2", 8, true));
         seen.settle(None);
         assert!(seen.read("c2", 8, true));
+    }
+
+    #[test]
+    fn a_null_page_of_subagents_is_empty() {
+        let (client, _seen) = daemon(replies(&[(200, r#"{"sessions":null,"nextCursor":null}"#)]));
+        assert!(client.subagent_sessions("p").unwrap().is_empty());
     }
 }

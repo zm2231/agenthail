@@ -79,7 +79,7 @@ pub fn open(s: &mut App) {
     if s.client.is_none() {
         let recorded = s.fixtures.as_ref().and_then(|f| std::fs::read_to_string(format!("{}/usage.json", f.dir)).ok()).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
         s.accounts.sets = Some(match recorded {
-            Some(value) => serde_json::from_value(value["sets"].clone()).map_err(|e| e.to_string()),
+            Some(value) => feed::reply::parse(value["sets"].clone()).map_err(|e| e.to_string()),
             None => Err("Fixture mode: usage is read from the daemon".into()),
         });
         return;

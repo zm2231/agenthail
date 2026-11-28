@@ -36,7 +36,7 @@ pub struct Saved {
 pub fn read(v: &serde_json::Value) -> Vec<Saved> {
     let Some(list) = v.as_array() else { return Vec::new() };
     let mut out: Vec<Saved> = Vec::new();
-    for w in list.iter().filter_map(|w| serde_json::from_value::<Saved>(w.clone()).ok()) {
+    for w in list.iter().filter_map(|w| crate::reply::parse::<Saved>(w.clone()).ok()) {
         if !w.session.is_empty() && !out.iter().any(|o| o.session == w.session) {
             out.push(w);
         }
@@ -67,7 +67,7 @@ mod tests {
 
     #[test]
     fn a_frame_without_a_scale_reads_as_points() {
-        let f: Frame = serde_json::from_value(json!({"x": 0, "y": 0, "width": 900, "height": 820})).unwrap();
+        let f: Frame = crate::reply::parse(json!({"x": 0, "y": 0, "width": 900, "height": 820})).unwrap();
         assert_eq!((f.scale, f.size_points()), (1.0, (900.0, 820.0)));
         let retina = Frame { width: 1800, height: 1640, scale: 2.0, ..f };
         assert_eq!(retina.size_points(), (900.0, 820.0));

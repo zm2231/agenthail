@@ -282,7 +282,7 @@ pub struct World {
 
 impl World {
     pub fn from_json(json: &str) -> serde_json::Result<World> {
-        Ok(World::new(serde_json::from_str(json)?))
+        Ok(World::new(crate::reply::parse_str(json)?))
     }
 
     pub fn new(raw: Recorded) -> World {

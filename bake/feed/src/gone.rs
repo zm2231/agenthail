@@ -263,7 +263,7 @@ impl Client {
             }
             let page = self.get_json(&path).map_err(|e| e.to_string())?;
             if let Some(row) = page["sessions"].as_array().into_iter().flatten().find(|r| r["id"] == id) {
-                return serde_json::from_value(row.clone()).map(Some).map_err(|e| e.to_string());
+                return crate::reply::parse(row.clone()).map(Some).map_err(|e| e.to_string());
             }
             match page["nextCursor"].as_str().filter(|c| !c.is_empty() && cursor.as_deref() != Some(*c)) {
                 Some(c) => cursor = Some(c.to_string()),
@@ -291,7 +291,7 @@ mod tests {
     use serde_json::json;
 
     fn row(json: Value) -> Session {
-        serde_json::from_value(json).unwrap()
+        crate::reply::parse(json).unwrap()
     }
 
     fn detail() -> Detail {

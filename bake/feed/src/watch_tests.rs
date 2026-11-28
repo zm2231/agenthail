@@ -17,7 +17,7 @@ fn upsert(seq: u64, id: &str, status: &str) -> CatalogEvent {
 }
 
 fn row(id: &str, status: &str) -> Session {
-    serde_json::from_value(json!({"id": id, "status": status})).unwrap()
+    crate::reply::parse(json!({"id": id, "status": status})).unwrap()
 }
 
 fn statuses(c: &Catalog) -> Vec<(String, String)> {
@@ -93,7 +93,7 @@ fn session_changes_apply_in_place_without_a_reread() {
 fn a_known_session_moves_in_the_list_only_when_its_placement_changes() {
     let placed = |seq: u64, id: &str, status: &str, placement: &str| CatalogEvent { seq, kind: "session.upserted".into(), data: json!({"session": {"id": id, "status": status, "placement": placement}}) };
     let mut c = Catalog::default();
-    c.adopt(vec![serde_json::from_value(json!({"id": "a", "status": "idle", "placement": "p1"})).unwrap()], "e", 10);
+    c.adopt(vec![crate::reply::parse(json!({"id": "a", "status": "idle", "placement": "p1"})).unwrap()], "e", 10);
     let same = c.apply(vec![placed(11, "a", "idle", "p1")]);
     assert!(same.changed && !same.placed && !same.news);
     let moved = c.apply(vec![placed(12, "a", "working", "p2")]);

@@ -74,7 +74,7 @@ fn an_older_read_of_a_work_item_does_not_replace_a_newer_one() {
     let dir = Dir::new("work-steps-order");
     let mut rt = holding(&dir, json!({"id": "W1", "text": "Ship it", "state": "in_progress", "phase": "build"}));
     let key = zk("p1", "W1");
-    let item = |phase: &str| serde_json::from_value::<feed::catalog::WorkItem>(json!({"id": "W1", "state": "in_progress", "phase": phase})).unwrap();
+    let item = |phase: &str| feed::reply::parse::<feed::catalog::WorkItem>(json!({"id": "W1", "state": "in_progress", "phase": phase})).unwrap();
     rt.state.item_reads.1.insert(key.clone(), 2);
     send(&rt, Bg::Item(key.clone(), 1, Some(item("review"))));
     rt.frame(DT);
@@ -99,7 +99,7 @@ fn a_read_of_an_item_dropped_by_its_ledger_changing_does_not_come_back() {
     let dir = Dir::new("work-steps-dropped");
     let mut rt = holding(&dir, json!({"id": "W1", "text": "Ship it", "state": "in_progress", "phase": "build"}));
     let hidden = zk("p1", "W9");
-    let item = serde_json::from_value::<feed::catalog::WorkItem>(json!({"id": "W9", "state": "in_progress", "phase": "review"})).unwrap();
+    let item = feed::reply::parse::<feed::catalog::WorkItem>(json!({"id": "W9", "state": "in_progress", "phase": "review"})).unwrap();
     rt.state.items.insert(hidden.clone(), item.clone());
     rt.state.item_reads.1.insert(hidden.clone(), 7);
     send(&rt, Bg::LedgerChanged("p1".into(), std::time::Instant::now()));
@@ -121,8 +121,8 @@ fn renamed(dir: &Dir, item_labels: Option<serde_json::Value>) -> Runtime<App> {
     }
     let held = json!({"heldWork": [{"itemId": "W1", "projectKey": "p1", "state": "in_progress"}]});
     let mut raw = recorded(1, vec![session("a", 0, held)]);
-    raw.ledgers.insert("p1".into(), serde_json::from_value(json!([w1, w2])).unwrap());
-    raw.steps.insert("p1".into(), serde_json::from_value(labels).unwrap());
+    raw.ledgers.insert("p1".into(), feed::reply::parse(json!([w1, w2])).unwrap());
+    raw.steps.insert("p1".into(), feed::reply::parse(labels).unwrap());
     let mut app = crate::empty(Overview::recorded(raw), false);
     app.sessions = app.ov.d.sessions.clone();
     app.now = app.ov.d.now;

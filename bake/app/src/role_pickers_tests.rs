@@ -13,7 +13,7 @@ fn roles_with_actions(scale: f32) -> Runtime<Prefs> {
     let agents = TABS.iter().position(|t| *t == "Agents").expect("an Agents tab");
     let mut rt = settings_on(agents, 0);
     rt.update(|s, _| {
-        let roles = serde_json::from_value(json!({
+        let roles = feed::reply::parse(json!({
             "roles": [{"name": "lead", "builtIn": true, "reach": "project", "definition": {"reach": "project"}, "effectiveDefaults": {"project-rename": "allow"}}],
             "actions": [
                 {"name": "session-create-remote", "default": "notify", "detail": "Start a session on a paired computer"},

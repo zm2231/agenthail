@@ -227,7 +227,7 @@ impl Tabs {
     }
 
     pub fn from_json(v: &serde_json::Value) -> Option<Tabs> {
-        serde_json::from_value(v.clone()).ok()
+        crate::reply::parse(v.clone()).ok()
     }
 
     pub fn to_json(&self) -> serde_json::Value {

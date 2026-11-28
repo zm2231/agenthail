@@ -97,7 +97,7 @@ pub fn tokens(n: i64) -> String {
 
 impl Client {
     pub fn session_settings(&self, session: &str) -> Result<SessionSettings> {
-        Ok(serde_json::from_value(self.get_json(&format!("/api/v1/session-settings?id={}", enc(session)))?)?)
+        Ok(crate::reply::parse(self.get_json(&format!("/api/v1/session-settings?id={}", enc(session)))?)?)
     }
 
     pub fn settings_for(&self, session: &Session) -> Result<SessionSettings> {
@@ -128,7 +128,7 @@ impl Client {
 
     pub fn session_models(&self, surface: &str, session: &str) -> Result<Vec<ModelOption>> {
         let value = self.get_json(&format!("/api/v1/models?surface={}&id={}", enc(surface), enc(session)))?;
-        Ok(serde_json::from_value(value["models"].clone()).unwrap_or_default())
+        Ok(crate::reply::parse(value["models"].clone()).unwrap_or_default())
     }
 
     pub fn context_read(&self, session: &str) -> ContextRead {
@@ -143,7 +143,7 @@ fn context_of(value: &serde_json::Value) -> Result<Option<ContextUsage>> {
     if let Some(error) = value["errors"]["context"].as_str() {
         anyhow::bail!("{error}");
     }
-    Ok(serde_json::from_value(value["context"].clone()).ok())
+    Ok(crate::reply::parse(value["context"].clone()).ok())
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -338,11 +338,11 @@ mod tests {
     use serde_json::json;
 
     fn opts(models: serde_json::Value) -> Vec<ModelOption> {
-        serde_json::from_value(models).unwrap()
+        crate::reply::parse(models).unwrap()
     }
 
     fn claude_host() -> SessionSettings {
-        serde_json::from_value(json!({
+        crate::reply::parse(json!({
             "surface": "claude", "runtimeKind": "claude-host",
             "model": {"value": "claude-opus-5-5", "source": "transcript"}, "effort": null,
             "permission": {"mode": "bypassPermissions", "source": "runtime"},
@@ -352,7 +352,7 @@ mod tests {
     }
 
     fn codex() -> SessionSettings {
-        serde_json::from_value(json!({
+        crate::reply::parse(json!({
             "surface": "codex", "runtimeKind": "codex-app-server",
             "model": {"value": "gpt-6.1-sol", "source": "rollout", "listed": true},
             "effort": {"value": "xhigh", "source": "rollout"},
@@ -571,7 +571,7 @@ mod tests {
     }
 
     fn devin() -> SessionSettings {
-        let mut s: SessionSettings = serde_json::from_value(json!({
+        let mut s: SessionSettings = crate::reply::parse(json!({
             "surface": "devin", "runtimeKind": "acp",
             "model": {"value": "swe-2", "source": "started"},
             "unavailable": {"effort": "this surface does not report its settings", "permission": "this surface does not report its settings"}
@@ -617,7 +617,7 @@ mod tests {
             (200, r#"{"surfaces":[]}"#),
             (200, r#"{"surface":"claude"}"#),
         ]));
-        let mut remote: Session = serde_json::from_value(json!({"id": "d1", "surface": "devin", "host": {"id": "h3a", "state": "connected"}})).unwrap();
+        let mut remote: Session = crate::reply::parse(json!({"id": "d1", "surface": "devin", "host": {"id": "h3a", "state": "connected"}})).unwrap();
         let read = client.settings_for(&remote).unwrap();
         assert!(!read.agent_mode_unread);
         assert_eq!((read.permission.unwrap().mode, read.agent_modes, read.unavailable.get("mode")), ("ask".into(), vec!["ask".to_string(), "bypass".into()], None));
@@ -626,7 +626,7 @@ mod tests {
         assert!(half.permission.is_none() && half.agent_modes.is_empty());
         assert!(half.agent_mode_unread, "a half-read mode is read again");
         assert!(half.unavailable["mode"].starts_with("the current mode isn't readable"), "{:?}", half.unavailable);
-        let claude: Session = serde_json::from_value(json!({"id": "c1", "surface": "claude"})).unwrap();
+        let claude: Session = crate::reply::parse(json!({"id": "c1", "surface": "claude"})).unwrap();
         assert!(client.settings_for(&claude).unwrap().agent_modes.is_empty());
         let paths: Vec<String> = seen.try_iter().map(|(path, _)| path).collect();
         assert_eq!(

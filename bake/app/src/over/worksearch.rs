@@ -244,16 +244,16 @@ mod tests {
     use super::*;
 
     fn steps(build: &str) -> Steps {
-        serde_json::from_value(serde_json::json!({"build": build})).unwrap()
+        feed::reply::parse(serde_json::json!({"build": build})).unwrap()
     }
 
     fn item(id: &str, project: &str, ledger: &str, build: &str) -> Work {
-        let w: Work = serde_json::from_value(serde_json::json!({"id": id, "state": "in_progress", "phase": "build"})).unwrap();
+        let w: Work = feed::reply::parse(serde_json::json!({"id": id, "state": "in_progress", "phase": "build"})).unwrap();
         Work { project: project.into(), ledger_key: ledger.into(), steps: steps(build), ..w }
     }
 
     fn world() -> World {
-        World::new(serde_json::from_value(serde_json::json!({"projects": [{"id": "p-1", "ledgerKey": "project:p-1"}], "phaseLabels": {"p-1": {"build": "Craft"}}})).unwrap())
+        World::new(feed::reply::parse(serde_json::json!({"projects": [{"id": "p-1", "ledgerKey": "project:p-1"}], "phaseLabels": {"p-1": {"build": "Craft"}}})).unwrap())
     }
 
     fn word(d: &World, key: WorkKey) -> String {
@@ -270,7 +270,7 @@ mod tests {
         state.keep(&mut first);
         state.keep(&mut second);
         assert!(std::sync::Arc::ptr_eq(&first.work[&key], &second.work[&key]), "an unchanged kept item isn't copied per rebuild");
-        let mut named = World::new(serde_json::from_value(serde_json::json!({"projects": [{"id": "shared:z", "ledgerKey": "shared:z"}], "phaseLabels": {"shared:z": {"build": "Forge"}}})).unwrap());
+        let mut named = World::new(feed::reply::parse(serde_json::json!({"projects": [{"id": "shared:z", "ledgerKey": "shared:z"}], "phaseLabels": {"shared:z": {"build": "Forge"}}})).unwrap());
         state.keep(&mut named);
         assert_eq!(word(&named, key.clone()), "Forge", "the project's names still reach it");
         assert!(!std::sync::Arc::ptr_eq(&second.work[&key], &named.work[&key]));
@@ -309,7 +309,7 @@ mod tests {
         assert_eq!(d.steps_of("shared:z").name(1), "Forge");
         assert_eq!(word(&d, WorkKey::new("shared:z", "z-W1")), "Forge", "every kept item of the project shows the same names");
         assert_eq!(word(&d, WorkKey::new("shared:z", "z-W2")), "Forge");
-        let mut d = World::new(serde_json::from_value(serde_json::json!({"projects": [{"id": "shared:z", "ledgerKey": "shared:z"}], "phaseLabels": {"shared:z": {"build": "Craft"}}})).unwrap());
+        let mut d = World::new(feed::reply::parse(serde_json::json!({"projects": [{"id": "shared:z", "ledgerKey": "shared:z"}], "phaseLabels": {"shared:z": {"build": "Craft"}}})).unwrap());
         state.keep(&mut d);
         assert_eq!(word(&d, WorkKey::new("shared:z", "z-W1")), "Craft", "once the project's ledger is read its names win");
         assert!(state.steps.is_empty());
@@ -322,7 +322,7 @@ mod tests {
         let first = state.learn(&mut d, item("q-W1", "project:q", "project:q", "Make"), 1);
         state.found.insert(first.key(), first.clone().into());
         d.work.insert(first.key(), first.into());
-        let known = || World::new(serde_json::from_value(serde_json::json!({"projects": [{"id": "q", "ledgerKey": "project:q"}]})).unwrap());
+        let known = || World::new(feed::reply::parse(serde_json::json!({"projects": [{"id": "q", "ledgerKey": "project:q"}]})).unwrap());
         let mut d = known();
         state.keep(&mut d);
         assert_eq!(word(&d, WorkKey::new("project:q", "q-W1")), "Make", "the kept item keeps its names once its project is listed");
@@ -331,7 +331,7 @@ mod tests {
         let second = state.learn(&mut d, item("q-W2", "q", "project:q", "Forge"), 2);
         d.work.insert(second.key(), second.into());
         assert_eq!(word(&d, WorkKey::new("project:q", "q-W1")), "Forge", "a newer reply reaches the item opened before the project was listed");
-        let mut d = World::new(serde_json::from_value(serde_json::json!({"projects": [{"id": "q", "ledgerKey": "project:q"}], "phaseLabels": {"q": {"build": "Craft"}}})).unwrap());
+        let mut d = World::new(feed::reply::parse(serde_json::json!({"projects": [{"id": "q", "ledgerKey": "project:q"}], "phaseLabels": {"q": {"build": "Craft"}}})).unwrap());
         state.keep(&mut d);
         assert_eq!(word(&d, WorkKey::new("project:q", "q-W1")), "Craft", "the project's ledger read wins once it lands");
         assert!(state.steps.is_empty());

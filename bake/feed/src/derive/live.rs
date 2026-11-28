@@ -265,7 +265,7 @@ pub fn fetch(client: &Client, known: &Known, settled: Option<Instant>) -> Result
     let started = Instant::now();
     let snap = client.get_json("/api/v1/snapshot")?;
     let now = snap["updatedAt"].as_str().and_then(parse_time).unwrap_or_else(OffsetDateTime::now_utc);
-    let sessions: Vec<Session> = serde_json::from_value(snap["sessions"].clone()).unwrap_or_default();
+    let sessions: Vec<Session> = crate::reply::parse(snap["sessions"].clone()).unwrap_or_default();
     let recent: BTreeSet<String> = sessions.iter().filter(|s| hours(now, &s.last_active) < LEDGER_WINDOW_H).map(|s| s.project_key()).collect();
     let key_of: HashMap<String, String> = snap["projects"].as_array().into_iter().flatten().filter_map(|p| Some((p["id"].as_str()?.to_string(), p["ledgerKey"].as_str().filter(|k| !k.is_empty())?.to_string()))).collect();
     let moved = known.moved(&key_of);
@@ -308,7 +308,7 @@ pub fn fetch(client: &Client, known: &Known, settled: Option<Instant>) -> Result
     let activity_missing = activity.is_none();
     let projects = with_activity(snap["projects"].clone(), activity.unwrap_or_default());
     let raw = json!({"updatedAt": snap["updatedAt"], "hostEpoch": snap["hostEpoch"], "catalogSeq": snap["catalogSeq"], "projects": projects, "usage": usage, "hosts": hosts, "tileOrder": snap["tileOrder"]});
-    let mut recorded: Recorded = serde_json::from_value(raw)?;
+    let mut recorded: Recorded = crate::reply::parse(raw)?;
     let pool: BTreeSet<String> = ledgers.values().filter_map(|(_, r)| r.as_ref().ok()).flatten().flat_map(|w| &w.timeline).map(|t| t.actor.clone()).chain(known.candidates.iter().cloned()).collect();
     let actors_at = Instant::now();
     let (found, asked) = actors(client, &sessions, |a| known.skips_actor(a), pool);
@@ -355,7 +355,7 @@ fn hours(now: OffsetDateTime, at: &str) -> f64 {
 
 fn rows(client: &Client, project: &str, now: OffsetDateTime) -> Result<(Vec<Work>, Steps), String> {
     let (rows, steps) = client.ledger_rows(project).map_err(|e| e.to_string())?;
-    let rows = trim(rows, now - time::Duration::days(RECENT_DAYS)).into_iter().map(|r| serde_json::from_value(r).map_err(|e| e.to_string())).collect::<Result<_, _>>()?;
+    let rows = trim(rows, now - time::Duration::days(RECENT_DAYS)).into_iter().map(|r| crate::reply::parse(r).map_err(|e| e.to_string())).collect::<Result<_, _>>()?;
     Ok((rows, steps))
 }
 

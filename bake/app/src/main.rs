@@ -204,7 +204,7 @@ fn arg(name: &str) -> Option<String> {
 
 fn load_recorded(path: &str) -> Result<Recorded, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
-    serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))
+    feed::reply::parse_str(&text).map_err(|e| format!("{path}: {e}"))
 }
 
 #[derive(Clone, PartialEq)]

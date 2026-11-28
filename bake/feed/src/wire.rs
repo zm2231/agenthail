@@ -102,9 +102,9 @@ impl Rebuild {
             self.rows.insert(item.id.clone(), (item.clone(), bytes));
             events.push(Event::Upsert(item));
         } else if data.kind == "context" {
-            events.push(Event::State(Streamed::Context(serde_json::from_value(data.context.clone()).ok())));
+            events.push(Event::State(Streamed::Context(crate::reply::parse(data.context.clone()).ok())));
         } else if data.kind == "goal" {
-            events.push(Event::State(Streamed::Goal(serde_json::from_value::<crate::inspect::Goal>(data.goal.clone()).ok().filter(|g| !g.objective.is_empty()))));
+            events.push(Event::State(Streamed::Goal(crate::reply::parse::<crate::inspect::Goal>(data.goal.clone()).ok().filter(|g| !g.objective.is_empty()))));
         }
         if data.kind == "done" {
             events.push(Event::Done);

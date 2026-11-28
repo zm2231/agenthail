@@ -305,7 +305,7 @@ impl Client {
         let body = serde_json::to_value(action).map_err(|e| Failure::from(e.to_string()))?;
         let value = self.post_json("/api/v1/voice", body).map_err(|e| match e.status {
             0 => Failure::from(e.message),
-            status => Failure { message: failure(status, &e.reply.to_string()), host: serde_json::from_value(e.reply["state"].clone()).ok() },
+            status => Failure { message: failure(status, &e.reply.to_string()), host: crate::reply::parse(e.reply["state"].clone()).ok() },
         })?;
         parse(value).map_err(Failure::from)
     }
@@ -339,7 +339,7 @@ fn failure(status: u16, body: &str) -> String {
 }
 
 fn parse(value: Value) -> Result<State, String> {
-    let state: State = serde_json::from_value(value).map_err(|e| format!("the daemon's voice reply couldn't be read: {e}"))?;
+    let state: State = crate::reply::parse(value).map_err(|e| format!("the daemon's voice reply couldn't be read: {e}"))?;
     if state.protocol != PROTOCOL {
         return Err(format!("This Agenthail speaks voice protocol {}; this app speaks {PROTOCOL}. Update both to the same version.", state.protocol));
     }

@@ -97,7 +97,7 @@ pub struct Receipt {
 pub const DELIVERED_AS_NOTE: &str = "Delivered as a note";
 
 pub fn receipt_line(base: &str, reply: &Value) -> String {
-    let receipt: Receipt = serde_json::from_value(reply["result"].clone()).unwrap_or_default();
+    let receipt: Receipt = crate::reply::parse(reply["result"].clone()).unwrap_or_default();
     let note = (receipt.delivered_as.as_deref() == Some("note")).then_some(DELIVERED_AS_NOTE);
     [Some(base), note, receipt.notice.as_deref().filter(|n| !n.is_empty())].into_iter().flatten().collect::<Vec<_>>().join(" · ")
 }
@@ -118,7 +118,7 @@ impl Delivered {
         if result.is_null() {
             return if reply["status"] == "submitted" { Delivered::Unconfirmed } else { Delivered::Sent };
         }
-        let receipt: Receipt = serde_json::from_value(result.clone()).unwrap_or_default();
+        let receipt: Receipt = crate::reply::parse(result.clone()).unwrap_or_default();
         match (receipt.evidence.as_str(), receipt.not_steered) {
             ("queued", _) if receipt.waiting_on.as_ref().is_some_and(|w| !w.is_null()) => Delivered::QueuedUntilAnswer(receipt.queue_id),
             ("queued", _) => Delivered::Queued(receipt.queue_id),

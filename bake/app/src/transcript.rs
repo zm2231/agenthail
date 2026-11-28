@@ -46,7 +46,7 @@ impl Replay {
             }
             self.next += 1;
             let Some(json) = self.sse.line(line) else { continue };
-            let Ok(wire) = serde_json::from_str::<Wire>(&json) else { continue };
+            let Ok(wire) = feed::reply::parse_str::<Wire>(&json) else { continue };
             if let Outcome::Events(seq, events) = self.rebuild.apply(wire) {
                 changed |= transcript.apply(seq, events);
             }
