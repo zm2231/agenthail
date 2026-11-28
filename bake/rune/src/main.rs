@@ -8,7 +8,7 @@ use feed::wire::{Outcome, Rebuild, Sse, Wire};
 use feed::Transcript;
 use rune::tok;
 use rune::{AppSpec, Cx, El, GrowthSpec, KeyEvent, ScrollSpec, TextStyle, Tx, col, memo, row, text};
-use rune_kit::MarkdownStyle;
+use rune_kit::{Kit, MarkdownStyle};
 use rune_kit::markdown::Markdown;
 
 const META: TextStyle = TextStyle::new(11.5, 400.0);
@@ -160,8 +160,9 @@ fn first_line(text: &str, max: usize) -> String {
     if line.chars().count() <= max { line.to_string() } else { format!("{}…", line.chars().take(max).collect::<String>()) }
 }
 
-fn markdown(body: &str) -> El {
-    Markdown::new(body.to_string()).selectable(true).render(&MarkdownStyle::neutral(true)).selection_group(false)
+fn markdown(body: &str, increased: bool) -> El {
+    let kit = if increased { Kit::neutral(true).increased_contrast() } else { Kit::neutral(true) };
+    Markdown::new(body.to_string()).selectable(true).render(&MarkdownStyle::from_kit(&kit)).selection_group(false)
 }
 
 fn entry_el(entry: &Entry) -> El {
@@ -226,12 +227,12 @@ fn agent_el(entry: &AgentEntry) -> El {
         .child(text(first_line(&entry.agent.summary, 200)).font(META).color(t.text_secondary.alpha(0.7)).truncate())
 }
 
-fn block_el(block: &Block, open: bool, gap: f32, last: bool) -> El {
+fn block_el(block: &Block, open: bool, gap: f32, last: bool, increased: bool) -> El {
     let t = tok::theme(true);
     let body = match &block.kind {
-        Kind::User(body) => col().w_full().items_end().child(col().max_w(620.0).fill(t.card).radius(14.0).px(14.0).py(9.0).child(markdown(body))),
+        Kind::User(body) => col().w_full().items_end().child(col().max_w(620.0).fill(t.card).radius(14.0).px(14.0).py(9.0).child(markdown(body, increased))),
         Kind::Assistant(body) => {
-            let mut c = col().w_full().gap(4.0).child(markdown(body));
+            let mut c = col().w_full().gap(4.0).child(markdown(body, increased));
             if let Some(took) = &block.finished {
                 c = c.child(text(format!("Took {took}")).font(META).color(t.text_secondary));
             }
@@ -276,8 +277,9 @@ fn gap_for(blocks: &[Block], ix: usize) -> f32 {
     }
 }
 
-fn view(s: &App, _: &mut Cx<App>) -> El {
+fn view(s: &App, cx: &mut Cx<App>) -> El {
     let t = tok::theme(true);
+    let increased = cx.system_increased_contrast();
     let working = s.transcript.turn_open;
     let header = row()
         .w_full()
@@ -297,7 +299,7 @@ fn view(s: &App, _: &mut Cx<App>) -> El {
             let open = s.open.contains(&block.id);
             let last = i + 1 == s.blocks.len() && s.transcript.turn_open;
             let gap = gap_for(&s.blocks, i);
-            memo(&block.id, (s.revs[i], open, last, gap.to_bits()), || block_el(block, open, gap, last))
+            memo(&block.id, (s.revs[i], open, last, gap.to_bits()), || block_el(block, open, gap, last, increased))
         },
     );
     let transcript = col().key("transcript").w_full().grow(1.0).min_h(0.0).scroll(ScrollSpec { stick_bottom: true }).child(stack);

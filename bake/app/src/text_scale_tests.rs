@@ -598,3 +598,89 @@ fn now_drops_its_button_labels_in_steps_as_room_runs_out() {
     assert_eq!(shown(1.5, SIZE), (false, true, true, true), "at 1.5 Talk and New session go to icons first");
     assert_eq!(shown(1.6, SMALLEST), (false, false, false, true), "in the smallest window everything is an icon and Now keeps its title");
 }
+
+#[test]
+fn contrast_shot() {
+    let Some(dir_out) = std::env::var_os("AGENTHAIL_CONTRAST_SHOT_DIR") else { return };
+    if !isolated("text_scale::contrast_shot") {
+        return;
+    }
+    let out = std::path::PathBuf::from(dir_out);
+    let dir = Dir::new("contrast-shot");
+    for dark in [true, false] {
+        for increased in [false, true] {
+            for shown in ["code", "diff"] {
+                let mut rt = contrast_shown(&dir, shown, dark, increased);
+                let tag = format!("{}-{}", if dark { "dark" } else { "light" }, if increased { "increased" } else { "normal" });
+                render(&mut rt, SIZE, &out.join(format!("{shown}-{tag}.png")));
+            }
+        }
+    }
+}
+
+fn settled(rt: &mut Runtime<App>) {
+    for _ in 0..6 {
+        rt.frame(DT);
+        rt.settle_all();
+    }
+}
+
+fn contrast_items() -> Vec<feed::Item> {
+    let edit = json!({"file_path": "/w/src/look.rs", "old_string": "fn tint(dark: bool) -> f32 {\n    // the pane tint\n    if dark { 0.12 } else { 0.06 }\n}\n", "new_string": "fn tint(dark: bool, increased: bool) -> f32 {\n    // the pane tint, deeper for more contrast\n    let t = if dark { 0.12 } else { 0.06 };\n    if increased { t * 1.6 } else { t }\n}\n"});
+    serde_json::from_value(json!([
+        {"id": "cu1", "kind": "message", "role": "user", "text": "Deepen the pane tint when the system asks for more contrast."},
+        {"id": "ca1", "kind": "message", "role": "assistant", "text": "The tint now takes the contrast setting:\n\n```rust\n// Deeper tint for Increase Contrast\nfn tint(dark: bool, increased: bool) -> f32 {\n    let t: f32 = if dark { 0.12 } else { 0.06 };\n    if increased { t * 1.6 } else { t }\n}\n\nconst NAME: &str = \"pane\";\nstruct Pane { tint: f32, label: String }\n```"},
+        {"id": "ce1", "kind": "toolCall", "title": "Edit", "text": edit.to_string()},
+    ]))
+    .unwrap()
+}
+
+fn contrast_shown(dir: &Dir, shown: &str, dark: bool, increased: bool) -> Runtime<App> {
+    let items = contrast_items();
+    let mut rt = laid_out(1.0, "session", dir);
+    rt.set_system_dark(dark);
+    rt.set_system_increased_contrast(increased);
+    rt.update(|s, _| {
+        if let Some(pane) = s.panes.get_mut("a") {
+            pane.transcript.prepend(items);
+            let mut counter = 0;
+            pane.rebuild(&mut counter);
+        }
+        if shown == "diff" {
+            crate::show_changes(s);
+        }
+    });
+    settled(&mut rt);
+    rt
+}
+
+#[test]
+fn code_and_diffs_redraw_when_the_system_increases_contrast() {
+    if !isolated("text_scale::code_and_diffs_redraw_when_the_system_increases_contrast") {
+        return;
+    }
+    let dir = Dir::new("contrast-live");
+    for shown in ["code", "diff"] {
+        for dark in [true, false] {
+            let key = if shown == "code" { "item:ca1" } else { "diff" };
+            let mut live = contrast_shown(&dir, shown, dark, false);
+            let mut screen = Capture::new();
+            let before = screen.pixels(&mut live);
+            let shape = live.presented(key).unwrap_or_else(|| panic!("{key} is on screen")).0;
+            live.set_system_increased_contrast(true);
+            settled(&mut live);
+            let after = screen.pixels(&mut live);
+            let mut opened = contrast_shown(&dir, shown, dark, true);
+            let fresh = Capture::new().pixels(&mut opened);
+            assert!(within(&before, shape) != within(&after, shape), "the {shown} (dark {dark}) redraws when contrast increases");
+            assert!(after == fresh, "the {shown} (dark {dark}) switched live draws as one opened with more contrast");
+        }
+    }
+}
+
+fn within(rgba: &[u8], r: [f32; 4]) -> Vec<u8> {
+    let width = SIZE.0 as usize;
+    let (x0, x1) = (r[0].max(0.0) as usize, ((r[0] + r[2]) as usize).min(width));
+    let (y0, y1) = (r[1].max(0.0) as usize, ((r[1] + r[3]) as usize).min(SIZE.1 as usize));
+    (y0..y1).flat_map(|y| rgba[(y * width + x0) * 4..(y * width + x1) * 4].iter().copied()).collect()
+}

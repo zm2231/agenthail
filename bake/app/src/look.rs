@@ -465,6 +465,40 @@ fn cached(s: &mut State, key: String, build: impl Fn(&KitEnv) -> Kit + 'static) 
     theme
 }
 
+fn main_kit(env: &KitEnv, paint: &Paint, roles: TextRoles, translucent: bool) -> Kit {
+    let neutral = Kit::neutral(paint.dark);
+    let mut k = if env.increased_contrast { neutral.increased_contrast() } else { neutral };
+    if translucent {
+        k.c.bg_deep = paint.pane;
+        k.c.bg_base = Color::WHITE.alpha(0.025);
+        k.c.border_muted = paint.border;
+    }
+    k.c.text_base = paint.text;
+    k.c.text_muted = paint.muted;
+    k.c.text_faint = paint.faint;
+    accented(&mut k, paint.accent);
+    k.roles = roles;
+    k
+}
+
+fn chrome_kit(env: &KitEnv, paint: &Paint, roles: TextRoles, translucent: bool, drawn: bool) -> Kit {
+    let mut k = rune_theme_opencode::kit(&env.dark(paint.dark));
+    if translucent {
+        k.c.bg_deep = paint.pane;
+        k.c.bg_base = Color::WHITE.alpha(0.025);
+        k.c.border_muted = paint.border;
+    } else if paint.dark {
+        k.c.bg_deep = if drawn { paint.card_deep } else { Color::TRANSPARENT };
+        k.c.border_muted = Color::WHITE.alpha(0.09);
+    }
+    k.c.text_strong = paint.text;
+    k.c.text_base = paint.text;
+    k.c.text_weak = paint.muted;
+    accented(&mut k, paint.accent);
+    k.roles = roles;
+    k
+}
+
 fn accented(k: &mut Kit, a: Color) {
     k.c.bg_accent = a;
     k.c.text_accent = a;
@@ -533,37 +567,8 @@ pub fn frame<S, R>(cx: &mut Cx<S>, session: bool, glass: bool, build: impl FnOnc
         } else {
             paint.glass_tint = paint.card.alpha(if dark { 0.78 } else { 1.0 });
         }
-        let kit = cached(s, format!("kit:{key}"), move |_| {
-            let mut k = Kit::neutral(dark);
-            if translucent {
-                k.c.bg_deep = paint.pane;
-                k.c.bg_base = Color::WHITE.alpha(0.025);
-                k.c.border_muted = paint.border;
-            }
-            k.c.text_base = paint.text;
-            k.c.text_muted = paint.muted;
-            k.c.text_faint = paint.faint;
-            accented(&mut k, paint.accent);
-            k.roles = roles;
-            k
-        });
-        let chrome = cached(s, format!("chrome:{key}"), move |env| {
-            let mut k = rune_theme_opencode::kit(&env.dark(dark).increased_contrast(false));
-            if translucent {
-                k.c.bg_deep = paint.pane;
-                k.c.bg_base = Color::WHITE.alpha(0.025);
-                k.c.border_muted = paint.border;
-            } else if dark {
-                k.c.bg_deep = if drawn { paint.card_deep } else { Color::TRANSPARENT };
-                k.c.border_muted = Color::WHITE.alpha(0.09);
-            }
-            k.c.text_strong = paint.text;
-            k.c.text_base = paint.text;
-            k.c.text_weak = paint.muted;
-            accented(&mut k, paint.accent);
-            k.roles = roles;
-            k
-        });
+        let kit = cached(s, format!("kit:{key}"), move |env| main_kit(env, &paint, roles, translucent));
+        let chrome = cached(s, format!("chrome:{key}"), move |env| chrome_kit(env, &paint, roles, translucent, drawn));
         (paint, kit, chrome)
     });
     let themes = theme::Themes { main: kit, chrome };

@@ -27,7 +27,7 @@ pub fn dark() -> bool {
 
 pub fn theme() -> KitTheme {
     KitTheme::new(|env| {
-        let mut k = rune_theme_opencode::kit(&env.increased_contrast(false));
+        let mut k = rune_theme_opencode::kit(env);
         if env.dark {
             k.c.bg_deep = Color::TRANSPARENT;
             k.c.border_muted = Color::WHITE.alpha(0.09);

@@ -87,7 +87,7 @@ impl Paint {
 }
 
 fn first_chrome(env: &KitEnv) -> Kit {
-    let mut k = rune_theme_opencode::kit(&env.dark(true).increased_contrast(false));
+    let mut k = rune_theme_opencode::kit(&env.dark(true));
     k.c.bg_deep = Color::TRANSPARENT;
     k.c.border_muted = Color::WHITE.alpha(0.09);
     k
@@ -101,7 +101,7 @@ pub struct Themes {
 
 impl Themes {
     fn first() -> Themes {
-        Themes { main: KitTheme::new(|_| Kit::neutral(true)), chrome: KitTheme::new(first_chrome) }
+        Themes { main: KitTheme::new(|env| if env.increased_contrast { Kit::neutral(true).increased_contrast() } else { Kit::neutral(true) }), chrome: KitTheme::new(first_chrome) }
     }
 }
 

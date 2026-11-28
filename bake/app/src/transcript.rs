@@ -202,9 +202,19 @@ fn first_line(text: &str, max: usize) -> String {
 
 fn markdown(body: &str, k: &Kit) -> El {
     let p = crate::theme::paint();
-    let kit = Kit { roles: k.roles, ..Kit::neutral(p.dark).with_text_scale(k.text_scale) };
-    let style = MarkdownStyle::from_kit(&kit).text(p.text).muted(p.muted).code_block_text(kit.roles.code);
+    let style = markdown_style(&p, k);
     Markdown::new(body.to_string()).selectable(true).render(&style).selection_group(false)
+}
+
+fn markdown_style(p: &crate::theme::Paint, k: &Kit) -> MarkdownStyle {
+    let kit = markdown_kit(p.dark, k);
+    MarkdownStyle::from_kit(&kit).text(p.text).muted(p.muted).code_block_text(kit.roles.code)
+}
+
+fn markdown_kit(dark: bool, k: &Kit) -> Kit {
+    let neutral = Kit::neutral(dark);
+    let neutral = if k.increased_contrast { neutral.increased_contrast() } else { neutral };
+    Kit { roles: k.roles, ..neutral.with_text_scale(k.text_scale) }
 }
 
 fn roles_key(k: &Kit) -> u64 {
@@ -635,3 +645,7 @@ pub fn loading(note: String, k: &Kit) -> El {
 }
 
 pub use avatar as session_avatar;
+
+#[cfg(test)]
+#[path = "transcript_tests.rs"]
+mod tests;
