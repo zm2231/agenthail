@@ -1,6 +1,6 @@
 use feed::look as fl;
 use rune::Color;
-use rune_kit::{Kit, TextRole, TextRoles, legible};
+use rune_kit::{Kit, TextRole, TextRoles};
 
 use crate::theme::Paint;
 
@@ -30,16 +30,38 @@ pub fn reads(color: Color, surfaces: &[Color], min: f32) -> bool {
     surfaces.iter().all(|&s| contrast(over(color, s), s) >= min)
 }
 
+pub fn fits(color: Color, surfaces: &[Color], min: f32) -> bool {
+    let l = color.luminance();
+    let side = surfaces.iter().all(|s| l <= s.luminance()) || surfaces.iter().all(|s| l >= s.luminance());
+    side && reads(color, surfaces, min)
+}
+
 pub fn held(color: Color, surfaces: &[Color], min: f32) -> Color {
-    if reads(color, surfaces, min) {
+    if fits(color, surfaces, min) {
         return color;
     }
-    let forward = surfaces.iter().fold(color, |c, &s| legible(c, s, min));
-    let back = surfaces.iter().rev().fold(color, |c, &s| legible(c, s, min));
-    if let Some(c) = [forward, back].into_iter().find(|&c| least(c, surfaces) >= min) {
-        return c;
+    let from = color.alpha(1.0).to_oklab();
+    let toward = |end: Color, t: f32| {
+        let to = end.to_oklab();
+        Color::from_oklab(std::array::from_fn(|i| from[i] + (to[i] - from[i]) * t))
+    };
+    let goal = min * 1.01;
+    let reach = |end: Color| {
+        if !fits(end, surfaces, goal) {
+            return None;
+        }
+        let (mut low, mut high) = (0.0f32, 1.0f32);
+        for _ in 0..24 {
+            let mid = (low + high) * 0.5;
+            if fits(toward(end, mid), surfaces, goal) { high = mid } else { low = mid }
+        }
+        Some((high, toward(end, high)))
+    };
+    match [reach(Color::BLACK), reach(Color::WHITE)] {
+        [Some(a), Some(b)] => if a.0 <= b.0 { a.1 } else { b.1 },
+        [Some((_, c)), None] | [None, Some((_, c))] => c,
+        [None, None] => if least(Color::BLACK, surfaces) >= least(Color::WHITE, surfaces) { Color::BLACK } else { Color::WHITE },
     }
-    [color, forward, back, Color::BLACK, Color::WHITE].into_iter().max_by(|&a, &b| least(a, surfaces).total_cmp(&least(b, surfaces))).unwrap_or(color)
 }
 
 pub fn surfaces(paint: &Paint, floors: &[Color]) -> Vec<Color> {
@@ -68,7 +90,7 @@ pub fn hold_kit(mut k: Kit, behinds: [Color; 2]) -> Kit {
     let m = m.legible_text();
     let all: Vec<Color> = behinds.iter().flat_map(|&b| kit_surfaces(&k, b)).collect();
     let (body, faint) = if k.increased_contrast { (7.0, 4.5) } else { (4.5, 3.0) };
-    let keep = |served: Color, lifted: Color, min: f32| if reads(lifted, &all, min) { lifted } else { held(served, &all, min) };
+    let keep = |served: Color, lifted: Color, min: f32| if fits(lifted, &all, min) { lifted } else { held(served, &all, min) };
     let c = &mut k.c;
     c.text_strong = keep(c.text_strong, m.c.text_strong, body);
     c.text_base = keep(c.text_base, m.c.text_base, body);

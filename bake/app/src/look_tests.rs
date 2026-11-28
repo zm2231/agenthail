@@ -27,9 +27,17 @@ fn reads(color: Color, on: &[Color], min: f32) -> bool {
     legible::reads(color, on, min * 0.999)
 }
 
-fn as_well_as_any(color: Color, served: Color, on: &[Color], min: f32) -> bool {
-    let least = |c: Color| on.iter().map(|&s| contrast(c, s)).fold(f32::INFINITY, f32::min);
-    least(color) >= min * 0.999 || least(color) >= [Color::BLACK, Color::WHITE, served].map(least).into_iter().fold(0.0, f32::max) * 0.999
+fn one_sided_best(on: &[Color]) -> f32 {
+    let lums = on.iter().map(|s| s.luminance());
+    let (lo, hi) = lums.fold((f32::INFINITY, 0.0f32), |(lo, hi), l| (lo.min(l), hi.max(l)));
+    ((lo + 0.05) / 0.05).max(1.05 / (hi + 0.05))
+}
+
+fn as_well_as_any(color: Color, on: &[Color], min: f32) -> bool {
+    let l = color.luminance();
+    let side = on.iter().all(|s| l <= s.luminance() + 1e-6) || on.iter().all(|s| l + 1e-6 >= s.luminance());
+    let least = on.iter().map(|&s| contrast(color, s)).fold(f32::INFINITY, f32::min);
+    side && (least >= min * 0.999 || least >= one_sided_best(on) * 0.999)
 }
 
 fn dim_text(dark: bool) -> Color {
@@ -149,16 +157,20 @@ fn kits_are_rebuilt_when_any_colour_they_draw_with_moves() {
 }
 
 #[test]
-fn text_over_a_light_floor_and_dark_glass_reads_on_both() {
+fn text_over_a_light_floor_and_dark_glass_stays_clear_of_everything_between() {
     let light = Color { r: 0.9, g: 0.9, b: 0.9, a: 1.0 };
     let dark = Color { r: 0.01, g: 0.01, b: 0.012, a: 1.0 };
     let grey = Color { r: 0.2, g: 0.2, b: 0.2, a: 1.0 };
     for surfaces in [[light, dark], [dark, light]] {
         let held = legible::held(grey, &surfaces, 4.5);
-        let reads = surfaces.iter().map(|&s| contrast(held, s)).fold(f32::INFINITY, f32::min);
-        let best = [Color::BLACK, Color::WHITE, grey].map(|c| surfaces.iter().map(|&s| contrast(c, s)).fold(f32::INFINITY, f32::min)).into_iter().fold(0.0, f32::max);
-        assert!(reads >= 4.5 || reads >= best * 0.999, "text on {surfaces:?} reads at {reads}:1, as well as any colour can ({best}:1)");
+        assert!(as_well_as_any(held, &surfaces, 4.5), "{held:?} sits lighter or darker than every part of {surfaces:?}, as far from them as any colour can");
     }
+    let readable = Color { r: 0.004, g: 0.004, b: 0.004, a: 1.0 };
+    let pale = [Color::WHITE, Color { r: 0.5, g: 0.5, b: 0.5, a: 1.0 }];
+    let held = legible::held(grey, &pale, 4.5);
+    assert!(legible::fits(held, &pale, 4.5) && held.luminance() > readable.luminance(), "text darkens only as far as it must: {held:?}");
+    let mid = Color { r: 0.18, g: 0.18, b: 0.18, a: 1.0 };
+    assert!(!legible::fits(mid, &[Color::WHITE, Color::BLACK], 4.5), "a grey between the brightest and darkest parts can vanish over the middle of the wallpaper");
 }
 
 #[test]
@@ -169,11 +181,11 @@ fn kit_text_over_glass_on_a_light_and_a_dark_part_of_the_wallpaper_reads_on_both
     for (env, min) in [(KitEnv::new(true), 4.5), (KitEnv::new(true).increased_contrast(true), 7.0)] {
         for k in [main_kit(&env, &paint, roles, true, behinds), chrome_kit(&env, &paint, roles, true, true, behinds)] {
             let on: Vec<Color> = behinds.iter().flat_map(|&b| kit_surfaces(&k, b)).collect();
-            for (got, served) in [(k.c.text_base, paint.text), (k.c.text_muted, paint.muted), (k.c.text_weak, paint.muted)] {
-                assert!(as_well_as_any(got, served, &on, min), "{got:?} reads on every part of the glass as well as any colour can");
+            for got in [k.c.text_base, k.c.text_muted, k.c.text_weak] {
+                assert!(as_well_as_any(got, &on, min), "{got:?} reads on every part of the glass as well as any colour can");
             }
             for role in rune_kit::TextRole::ALL {
-                assert!(as_well_as_any(k.roles.get(role), roles.get(role), &on, min), "{role:?} reads on every part of the glass as well as any colour can");
+                assert!(as_well_as_any(k.roles.get(role), &on, min), "{role:?} reads on every part of the glass as well as any colour can");
             }
         }
     }
