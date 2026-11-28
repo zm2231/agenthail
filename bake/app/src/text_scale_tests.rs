@@ -2,9 +2,16 @@ use super::*;
 
 const SIZE: (f32, f32) = (1440.0, 900.0);
 
+const LONG_TITLE: &str = "Fix the flaky decisions test for other computers' inbox notes";
+const SMALLEST: (f32, f32) = (1100.0, 700.0);
+
 fn laid_out(scale: f32, screen: &str, dir: &Dir) -> Runtime<App> {
+    laid_out_in(scale, screen, dir, SIZE, None)
+}
+
+fn laid_out_in(scale: f32, screen: &str, dir: &Dir, size: (f32, f32), name: Option<&str>) -> Runtime<App> {
     crate::look::hold_text_scale(Some(scale));
-    let mut all = sessions(&["a", "b"]);
+    let mut all = vec![session("a", 0, name.map_or(json!({}), |n| json!({"name": n}))), session("b", 1, json!({}))];
     all.push(session("q", 3, json!({"surface": "codex", "name": "queue"})));
     let mut raw = recorded(1, all);
     if matches!(screen, "project" | "work") {
@@ -20,7 +27,7 @@ fn laid_out(scale: f32, screen: &str, dir: &Dir) -> Runtime<App> {
     app.now = app.ov.d.now;
     app.fixtures = Some(Fixtures { dir: dir.path(), streams: HashMap::new(), speed: 1.0 });
     app.status = "fixtures".into();
-    let mut rt = runtime(app, SIZE);
+    let mut rt = runtime(app, size);
     rt.update(|s, tx| match screen {
         "session" => {
             crate::over::open_session(s, "a");
@@ -184,6 +191,20 @@ fn shot() {
     for screen in ["now", "session", "sessions", "queue", "project", "work", "apps", "jump"] {
         let mut rt = laid_out(scale, screen, &dir);
         render(&mut rt, SIZE, &out.join(format!("{screen}-{scale}.png")));
+    }
+    for (size, tag) in [(SIZE, "wide"), (SMALLEST, "small")] {
+        for screen in ["now", "session", "sessions"] {
+            let mut rt = laid_out_in(scale, screen, &dir, size, Some(LONG_TITLE));
+            render(&mut rt, size, &out.join(format!("long-{tag}-{screen}-{scale}.png")));
+            let mut rt = laid_out_in(1.6, screen, &dir, size, Some(LONG_TITLE));
+            crate::look::hold_text_scale(Some(scale));
+            for _ in 0..4 {
+                rt.frame(DT);
+            }
+            rt.settle_all();
+            rt.frame(DT);
+            render(&mut rt, size, &out.join(format!("long-{tag}-{screen}-from-1.6-to-{scale}.png")));
+        }
     }
     for screen in ["now", "session", "project", "work"] {
         let mut rt = laid_out(1.6, screen, &dir);
@@ -360,4 +381,47 @@ fn the_jump_palette_holds_its_text_at_larger_sizes() {
     assert!(hint[0] >= panel[0] && hint[0] + hint[2] <= panel[0] + panel[2] + 0.5, "the hint {hint:?} stays inside the palette {panel:?}");
     assert!(panel[2] > 680.0 * 1.5, "the palette grows with the text: {panel:?}");
     assert!(panel[0] >= 0.0 && panel[0] + panel[2] <= SIZE.0, "and stays in the window: {panel:?}");
+}
+
+fn said(rt: &Runtime<App>, starts: &str) -> [f32; 4] {
+    rt.elements().into_iter().find(|e| !e.exiting && e.text.as_deref().is_some_and(|t| t.starts_with(starts))).map(|e| e.rect).unwrap_or_else(|| panic!("{starts} is shown"))
+}
+
+#[test]
+fn a_session_at_larger_text_in_the_smallest_window_keeps_its_controls_and_message_box_inside() {
+    if !isolated("text_scale::a_session_at_larger_text_in_the_smallest_window_keeps_its_controls_and_message_box_inside") {
+        return;
+    }
+    let dir = Dir::new("text-scale-small-session");
+    let mut rt = laid_out_in(1.6, "session", &dir, SMALLEST, Some(LONG_TITLE));
+    rt.frame(DT);
+    rt.frame(DT);
+    let pane = rect(&rt, "transcript-a");
+    let switch = rect(&rt, "focus-switch");
+    assert!(switch[0] + switch[2] <= pane[0] + pane[2] + 0.5, "Focus and Show work {switch:?} stay inside the conversation {pane:?}");
+    let field = rect(&rt, "composer");
+    let k = rune_kit::Kit::neutral(true).with_text_scale(1.6);
+    let x = rt.state.ov.d.session("a").expect("a is listed").clone();
+    let shown = crate::ui::session::placeholder(&rt.state, &x, &k);
+    assert!(shown.starts_with("Message Fix") && shown.ends_with('…'), "the placeholder is cut to fit: {shown}");
+    assert!(rune::text::advance(&shown, k.text(crate::theme::BODY)) <= field[2] + 0.5, "{shown} fits on the message box's one line {field:?}");
+}
+
+#[test]
+fn now_at_larger_text_in_the_smallest_window_keeps_its_title_buttons_and_notes_inside() {
+    if !isolated("text_scale::now_at_larger_text_in_the_smallest_window_keeps_its_title_buttons_and_notes_inside") {
+        return;
+    }
+    let dir = Dir::new("text-scale-small-now");
+    let mut rt = laid_out_in(1.6, "now", &dir, SMALLEST, Some(LONG_TITLE));
+    rt.frame(DT);
+    rt.frame(DT);
+    let head = rect(&rt, "decisions-head");
+    assert!(rect(&rt, "now-leading")[2] > 40.0, "Now keeps its title");
+    let trailing = rect(&rt, "now-trailing");
+    assert!(trailing[0] + trailing[2] <= head[0] + head[2] + 30.0, "the toolbar buttons {trailing:?} end inside the pane {head:?}");
+    for note in ["from every connected computer", "Decisions show when", "Last 12 hours", "Each line opens"] {
+        let r = said(&rt, note);
+        assert!(r[0] + r[2] <= head[0] + head[2] + 0.5, "{note} {r:?} stays inside the pane {head:?}");
+    }
 }

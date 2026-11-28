@@ -25,13 +25,16 @@ pub fn since_note(s: &App, looked: Option<&str>) -> String {
 }
 
 fn variant(brief: bool, tight: bool, k: &Kit) -> El {
+    if tight {
+        let (glyph, to) = if brief { (&icons::CHECKLIST, "Show three panes") } else { (&icons::FILE_DOCUMENT, "Show the brief") };
+        return rune_kit::IconButton::new(glyph).variant(rune_kit::IconButtonVariant::Ghost).control_size(ControlSize::Small).label(to).shortcut("⌥⌘B").on_press(move |s: &mut App| s.ov.now_brief = !brief).build(k).key("now-layout");
+    }
     let seg = SegmentedControl::new(&["Three panes", "Brief"], Some(if brief { 1 } else { 0 }))
         .label("Layout")
         .fit()
         .on_pick(|s: &mut App, i, _| s.ov.now_brief = i == 1)
         .build(k);
-    let r = row().gap(6.0).items_center().child(seg);
-    if tight { r } else { r.child(ui::ghost_keys(&["⌥⌘B"], k)) }
+    row().gap(6.0).items_center().child(seg).child(ui::ghost_keys(&["⌥⌘B"], k))
 }
 
 const BAR: &str = "now-bar";
@@ -244,7 +247,7 @@ fn toolbar<'a>(s: &'a App, strip: bool, k: &'a Kit) -> ui::Bar<'a> {
     let trailing = Part::row("now-trailing", (needs, brief, tight), move || {
         let r = row().gap(10.0).items_center();
         let r = if tight { r.child(talk_icon(k)).child(ui::new_session_icon(None, k)) } else { r.child(talk_button(k)).child(ui::new_session_button(None, k)) };
-        let r = r.child(variant(brief, tight, k)).child(ui::needs_button(s, k));
+        let r = r.child(variant(brief, tight, k)).child(if tight { ui::needs_count_button(s, k) } else { ui::needs_button(s, k) });
         if tight { r } else { ui::measured(r, full) }
     });
     ui::Bar { leading, center, trailing }
@@ -295,7 +298,7 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
             .gap(3.0)
             .pt(14.0)
             .child(ui::section_head("Since you left", None, Some(text(since).font(k.text(META)).color(weak(k))), k))
-            .child(text("Each line opens what it is about.".to_string()).font(k.text(META)).color(weak(k)))
+            .child(text("Each line opens what it is about.".to_string()).font(k.text(META)).color(weak(k)).wrap())
     }));
     for (p, lines) in digests.iter().take(6) {
         centre.push(digest_block(s, p, lines, 5, looked, false, k));

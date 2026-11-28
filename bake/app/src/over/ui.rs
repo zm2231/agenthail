@@ -320,7 +320,7 @@ pub fn mini_phase(phase: Option<usize>, label: &str, k: &Kit) -> El {
 }
 
 pub fn section_head(title: &str, count: Option<usize>, trailing: Option<El>, k: &Kit) -> El {
-    let mut r = row().w_full().items_center().gap(8.0).child(text(title.to_string()).font(k.text(HEAD)).color(strong(k)));
+    let mut r = row().w_full().items_center().gap(8.0).flex_wrap().child(text(title.to_string()).font(k.text(HEAD)).color(strong(k)));
     if let Some(n) = count {
         r = r.child(Badge::new(n.to_string()).variant(BadgeVariant::Subtle).build(k));
     }
@@ -457,14 +457,15 @@ pub fn needs_part<'a>(s: &'a App, k: &'a Kit) -> Part<'a> {
 }
 
 pub fn needs_button(s: &App, k: &Kit) -> El {
-    let n = s.ov.needs.len();
-    Button::new(format!("{n} need you"))
-        .variant(ButtonVariant::Ghost)
-        .icon(&icons::NOTIFICATIONS)
-        .shortcut("⌘J")
-        .help("Next thing that needs you (⌘J)")
-        .on_press(|s: &mut App| next_need(s))
-        .build(k)
+    needs_labelled(format!("{} need you", s.ov.needs.len()), k)
+}
+
+pub fn needs_count_button(s: &App, k: &Kit) -> El {
+    needs_labelled(s.ov.needs.len().to_string(), k)
+}
+
+fn needs_labelled(label: String, k: &Kit) -> El {
+    Button::new(label).variant(ButtonVariant::Ghost).icon(&icons::NOTIFICATIONS).shortcut("⌘J").help("Next thing that needs you (⌘J)").on_press(|s: &mut App| next_need(s)).build(k)
 }
 
 pub fn strip(s: &App, current: Option<&str>, k: &Kit) -> El {

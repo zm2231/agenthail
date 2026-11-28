@@ -39,13 +39,23 @@ pub(crate) fn header(s: &App, x: &Session, k: &Kit) -> El {
         .child(session_menu::button(x, k))
 }
 
+const PLACEHOLDER: &str = "composer-placeholder";
+
+pub(crate) fn placeholder(s: &App, x: &Session, k: &Kit) -> String {
+    let full = format!("Message {}", x.title());
+    match crate::over::ui::fit_width(s, PLACEHOLDER) {
+        Some(w) if w > 40.0 => crate::over::ui::fit_lines(&full, k.text(BODY), w - 33.0, 1),
+        _ => full,
+    }
+}
+
 pub(crate) fn composer(s: &App, x: &Session, k: &Kit) -> El {
     let input = super::paste::field(text_input(&s.composer, k.text(BODY))
         .key("composer")
         .w_full()
         .min_h(26.0)
         .color(theme::text())
-        .placeholder(format!("Message {}", x.title()), faint())
+        .placeholder(placeholder(s, x, k), faint())
         .on_edit(|s: &mut App| &mut s.composer))
         .on_input_key(super::complete::key)
         .on_submit(|s: &mut App, tx: &mut Tx| send(s, tx));
@@ -153,7 +163,7 @@ pub(crate) fn composer(s: &App, x: &Session, k: &Kit) -> El {
         .children(super::complete::search(s, x, k))
         .children(super::complete::menu(s, x, k))
         .children(super::paste::editor(s, k))
-        .child(col().w_full().px(16.0).pt(13.0).pb(4.0).child(input))
+        .child(crate::over::ui::measured(col().w_full().px(16.0).pt(13.0).pb(4.0), PLACEHOLDER.into()).child(input))
         .child(controls.child(send_button))
         .on_layout(|s: &mut App, r: [f32; 4]| {
             s.cover.set_composer(r);
@@ -227,6 +237,7 @@ pub(crate) fn tabs(s: &App, id: &str, k: &Kit) -> El {
     row()
         .w_full()
         .gap(4.0)
+        .flex_wrap()
         .px(28.0)
         .pb(10.0)
         .child(tab("tab-conversation", &icons::MESSAGE, "Conversation".into(), s.tab == Tab::Conversation).on_press(|s: &mut App| s.tab = Tab::Conversation))
