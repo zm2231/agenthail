@@ -406,7 +406,7 @@ pub fn need_slots<'a>(needs: &'a [Need], looked: Option<&str>, per_group: usize)
 }
 
 pub fn needs_list(s: &App, k: &Kit) -> El {
-    needs_part(s, k).el(k)
+    needs_part(s, k).el()
 }
 
 pub fn needs_part<'a>(s: &'a App, k: &'a Kit) -> Part<'a> {
@@ -422,7 +422,7 @@ pub fn needs_part<'a>(s: &'a App, k: &'a Kit) -> Part<'a> {
     Part::group("needs-list", crate::over::rows::version((), &parts), move || {
         let mut c = col().w_full().gap(2.0).padding(6.0);
         for p in parts {
-            c = c.child(p.el(k));
+            c = c.child(p.el());
         }
         card(c, k)
     })
@@ -453,7 +453,7 @@ pub fn strip(s: &App, current: Option<&str>, k: &Kit) -> El {
         let title = short_title(&s.ov.d.title(x), 18);
         let keyed = i < s.ov.hands_on.len();
         let shows = (i, id, on, busy, &project, &title, keyed);
-        r = r.child(crate::over::rows::memo(format!("tab-{id}"), shows, k, || {
+        r = r.child(crate::over::rows::memo(format!("tab-{id}"), shows, || {
             let id2 = id.clone();
             let mut tab = row()
                 .key(format!("tab-{id}"))
@@ -548,7 +548,7 @@ pub fn session_key(id: &str) -> String {
 }
 
 pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k: &Kit) -> El {
-    sidebar_part(s, current_project, selected, k).el(k)
+    sidebar_part(s, current_project, selected, k).el()
 }
 
 fn nav_row<'a>(id: &'static str, label: &'static str, glyph: &'static Icon, detail: Option<&'static str>, on: bool, k: &'a Kit, pick: fn(&mut App, &mut rune::Tx)) -> Part<'a> {
@@ -577,13 +577,13 @@ impl<'a> Section<'a> {
         crate::over::rows::version((&self.title, &self.key, self.count), &self.rows)
     }
 
-    fn build(self, k: &Kit) -> SidebarSection {
+    fn build(self) -> SidebarSection {
         let mut sec = SidebarSection::new(self.title).key(self.key);
         if let Some(n) = self.count {
             sec = sec.count(n);
         }
         for r in self.rows {
-            sec = sec.row(r.el(k));
+            sec = sec.row(r.el());
         }
         sec
     }
@@ -727,10 +727,10 @@ pub fn sidebar_part<'a>(s: &'a App, current_project: Option<&str>, selected: Opt
     Part::group("sidebar", v, move || {
         let mut sb = Sidebar::new().label("Navigation").inset(0.0).header_gap(2.0).header_padding(0.0, 12.0).row_gap(2.0);
         for h in heads {
-            sb = sb.header(h.el(k));
+            sb = sb.header(h.el());
         }
         for sec in sections {
-            sb = sb.section(sec.build(k));
+            sb = sb.section(sec.build());
         }
         sb.build(k)
     })
@@ -774,18 +774,18 @@ pub fn frame_now<'a>(cx: &mut Cx<App>, s: &'a App, sidebar: Option<Part<'a>>, ma
     let shape: Vec<bool> = parts.iter().map(Option::is_some).collect();
     let v = crate::over::rows::version((inset.to_bits(), reduced, &panes, shape), parts.into_iter().flatten());
     Part::group("now-frame", v, move || {
-        let mut v = SplitView::new(main.el(k));
+        let mut v = SplitView::new(main.el());
         if let Some(sb) = sidebar {
-            v = v.sidebar(&s.ov.now_side, |s: &mut App| &mut s.ov.now_side, sb.el(k)).sidebar_toggle(SidebarToggle::new().size(ControlSize::Large).past_lights(16.0).edge(18.0).gap(4.0).in_header());
+            v = v.sidebar(&s.ov.now_side, |s: &mut App| &mut s.ov.now_side, sb.el()).sidebar_toggle(SidebarToggle::new().size(ControlSize::Large).past_lights(16.0).edge(18.0).gap(4.0).in_header());
         } else {
             v = v.hide_sidebar_toggle();
         }
         if let Some(i) = inspector {
-            v = v.inspector(&s.ov.now_rail, |s: &mut App| &mut s.ov.now_rail, i.el(k));
+            v = v.inspector(&s.ov.now_rail, |s: &mut App| &mut s.ov.now_rail, i.el());
         }
-        let mut t = Toolbar::new().leading(bar.leading.el(k)).trailing(bar.trailing.el(k));
+        let mut t = Toolbar::new().leading(bar.leading.el()).trailing(bar.trailing.el());
         if let Some(c) = bar.center {
-            t = t.center(c.el(k));
+            t = t.center(c.el());
         }
         let split = v
             .toolbar(t)
@@ -796,9 +796,9 @@ pub fn frame_now<'a>(cx: &mut Cx<App>, s: &'a App, sidebar: Option<Part<'a>>, ma
             .pane_motion(PaneMotion::new().spring(Spring::new(0.3, 0.0)))
             .reduced_motion(reduced)
             .build(k);
-        col().w_full().h_full().child(col().w_full().grow(1.0).min_h(0.0).child(split)).child(status.el(k))
+        col().w_full().h_full().child(col().w_full().grow(1.0).min_h(0.0).child(split)).child(status.el())
     })
-    .el(k)
+    .el()
 }
 
 pub fn pane_strip(i: usize, glyph: &'static Icon, count: Option<(usize, Color)>, k: &Kit) -> El {
@@ -876,7 +876,7 @@ struct MeterShown {
 }
 
 pub fn status_bar(s: &App, k: &Kit, main_kit: &Kit) -> El {
-    status_part(s, k, main_kit).el(k)
+    status_part(s, k, main_kit).el()
 }
 
 pub fn status_part<'a>(s: &'a App, k: &'a Kit, main_kit: &'a Kit) -> Part<'a> {
@@ -962,7 +962,7 @@ pub fn crumb(parts: &[(&str, bool)], k: &Kit) -> El {
 }
 
 pub fn sessions_block(s: &App, compact: bool, k: &Kit) -> El {
-    sessions_part(s, compact, k).el(k)
+    sessions_part(s, compact, k).el()
 }
 
 pub fn sessions_part<'a>(s: &App, compact: bool, k: &'a Kit) -> Part<'a> {
@@ -999,7 +999,7 @@ pub fn sessions_part<'a>(s: &App, compact: bool, k: &'a Kit) -> Part<'a> {
         let open = Button::new("All sessions").variant(ButtonVariant::Ghost).control_size(ControlSize::Small).icon(&icons::ARROW_RIGHT).shortcut("⌘⇧S").on_press(|s: &mut App| go(s, Screen::Sessions)).build(k);
         let mut row_ = row().gap(6.0).flex_wrap().items_center();
         for c in chips {
-            row_ = row_.child(c.el(k));
+            row_ = row_.child(c.el());
         }
         let head = row()
             .w_full()

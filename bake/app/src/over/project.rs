@@ -49,7 +49,7 @@ pub fn work_card(s: &App, w: &Work, compact: bool, k: &Kit) -> El {
     let id = short_id(&w.id);
     let card = format!("w-{}-{}", w.ledger_key(), w.id);
     let shows = (&key, compact, phase, &who, width.map(f32::to_bits), &title, &mini, &last, &id);
-    crate::over::rows::memo(card.clone(), shows, k, || {
+    crate::over::rows::memo(card.clone(), shows, || {
         let open = key.clone();
         col()
             .key(card)
@@ -263,7 +263,7 @@ pub fn board(s: &App, cx: &mut Cx<App>, key: &str, _layer: &mut Vec<El>, main_ki
         let width = ui::fit_width(s, &fit);
         let ago = s.ov.d.ago(&l.at);
         let shows = (l.kind, &l.target, &l.text, &ago, width.map(f32::to_bits));
-        crate::over::rows::memo(fit.clone(), shows, &k, || {
+        crate::over::rows::memo(fit.clone(), shows, || {
             let (glyph, color) = ui::happened_style(l.kind, &k);
             let t = l.target.clone();
             col()

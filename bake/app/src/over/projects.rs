@@ -900,7 +900,7 @@ fn merged_row(s: &App, x: &feed::catalog::Session, w: &Worktree, k: &Kit) -> El 
     let ago = s.ov.d.ago(&x.last_active);
     let kept = s.ov.projects.kept.get(&id).cloned();
     let shows = (&id, cleaning, &title, &ago, &kept, format!("{w:?}"));
-    crate::over::rows::memo(format!("merged-{id}"), shows, k, || merged_card(id.clone(), cleaning, &title, &ago, kept.as_deref(), w, k))
+    crate::over::rows::memo(format!("merged-{id}"), shows, || merged_card(id.clone(), cleaning, &title, &ago, kept.as_deref(), w, k))
 }
 
 fn merged_card(id: String, cleaning: bool, title: &str, ago: &str, kept: Option<&str>, w: &Worktree, k: &Kit) -> El {

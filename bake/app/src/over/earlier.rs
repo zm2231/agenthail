@@ -197,7 +197,7 @@ fn session_row(s: &App, key: &str, x: &Session, k: &Kit) -> El {
     let title = ui::short_title(&s.ov.d.title(x), 34);
     let ago = s.ov.d.ago(&x.last_active);
     let shows = (key, &x.id, &place, &title, &ago);
-    crate::over::rows::memo(format!("earlier-row-{}", x.id), shows, k, || {
+    crate::over::rows::memo(format!("earlier-row-{}", x.id), shows, || {
         let (key, id) = (key.to_string(), x.id.clone());
         col()
             .key(format!("earlier-row-{}", x.id))
