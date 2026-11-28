@@ -603,8 +603,12 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
     sidebar_part(s, current_project, selected, k).el()
 }
 
+fn now_keys() -> Option<&'static str> {
+    crate::ui::bindings::read(|sc| sc.command_on(feed::shortcuts::NOW)).is_none().then_some("⌘⇧N")
+}
+
 fn nav_row<'a>(id: &'static str, label: &'static str, glyph: &'static Icon, detail: Option<&'static str>, on: bool, k: &'a Kit, pick: fn(&mut App, &mut rune::Tx)) -> Part<'a> {
-    Part::row(id, on, move || {
+    Part::row(id, (on, detail), move || {
         let mut r = SidebarRow::new(label).icon(glyph).height(k.text_size(32.0)).selected(on).on_select(move |s: &mut App, tx: &mut rune::Tx| pick(s, tx));
         if let Some(d) = detail {
             r = r.detail(d);
@@ -643,7 +647,7 @@ impl<'a> Section<'a> {
 
 pub fn sidebar_part<'a>(s: &'a App, current_project: Option<&str>, selected: Option<&str>, k: &'a Kit) -> Part<'a> {
     let mut heads = vec![
-        nav_row("home", "Now", &icons::DOT_GRID, Some("⌘⇧N"), matches!(s.screen, Screen::Now), k, |s, _| go(s, Screen::Now)),
+        nav_row("home", "Now", &icons::DOT_GRID, now_keys(), matches!(s.screen, Screen::Now), k, |s, _| go(s, Screen::Now)),
         nav_row("jump", "Jump to", &icons::MAGNIFYING_GLASS, Some("⌘K"), false, k, |s, tx| crate::over::open_jump(s, tx)),
         nav_row("sessions", "Sessions", &icons::BULLET_LIST, Some("⌘⇧S"), matches!(s.screen, Screen::Sessions), k, |s, _| go(s, Screen::Sessions)),
         nav_row("apps", "Apps", &icons::EXTENSIONS, None, matches!(s.screen, Screen::Extensions | Screen::Extension(_)), k, |s, _| go(s, Screen::Extensions)),

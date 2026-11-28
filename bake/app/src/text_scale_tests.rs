@@ -467,3 +467,20 @@ fn now_keeps_its_title_and_notes_when_more_things_need_you_or_the_brief_shows() 
     let note = said(&rt, "0 passed");
     assert!(note[0] + note[2] <= rail[0], "the evidence note {note:?} wraps before the rail {rail:?}");
 }
+
+#[test]
+fn the_sidebar_shows_nows_keys_only_while_no_command_holds_them() {
+    if !isolated("text_scale::the_sidebar_shows_nows_keys_only_while_no_command_holds_them") {
+        return;
+    }
+    let dir = Dir::new("text-scale-now-keys");
+    let hint = |rt: &Runtime<App>| rt.elements().into_iter().any(|e| !e.exiting && e.path.contains("home") && e.text.as_deref() == Some("⌘⇧N"));
+    let rt = laid_out(1.0, "session", &dir);
+    assert!(hint(&rt), "the sidebar shows ⌘⇧N for Now");
+    crate::ui::bindings::change(|sc| *sc = feed::shortcuts::Shortcuts::load(Some(br#"{"refresh":{"carbonKeyCode":45,"carbonModifiers":768}}"#), None)).unwrap();
+    let mut rt = laid_out(1.0, "session", &dir);
+    assert!(!hint(&rt), "a Refresh saved on ⇧⌘N takes the hint away");
+    rt.key(rune::KeyEvent { key: rune::Key::Command('n'), mods: rune::Mods { cmd: true, shift: true, ..rune::Mods::default() } });
+    rt.frame(DT);
+    assert!(rt.state.screen != Screen::Now, "and ⇧⌘N does what was saved for it");
+}

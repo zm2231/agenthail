@@ -181,10 +181,12 @@ pub const COMMANDS: &[Command] = &[
     cmd("composerPaste", "Paste (also ⌘V)", "ctrl+v", Group::Composer),
 ];
 
+pub const NOW: &str = "shift+mod+n";
+
 pub const FIXED: &[(&str, &str)] = &[
     ("mod+comma", "Settings"),
     ("shift+mod+s", "Sessions"),
-    ("shift+mod+n", "Now"),
+    (NOW, "Now"),
     ("mod+j", "Next session that needs you"),
     ("mod+1", "Hands-on session 1"),
     ("mod+2", "Hands-on session 2"),
@@ -252,6 +254,11 @@ impl Shortcuts {
             Some(chosen) => *chosen,
             None => default_of(id).filter(|d| !self.chosen_elsewhere(*d, id)),
         }
+    }
+
+    pub fn command_on(&self, spec: &str) -> Option<&'static str> {
+        let shortcut = Stored::parse(spec)?;
+        COMMANDS.iter().find(|c| self.get(c.id) == Some(shortcut)).map(|c| c.title)
     }
 
     fn chosen_elsewhere(&self, shortcut: Stored, id: &str) -> bool {
@@ -462,6 +469,8 @@ mod tests {
         assert_eq!(sc.get("textActual"), None, "the Mac app's saved ⌘0 keeps it");
         assert_eq!(sc.default_blocker("textActual"), Some("New tab"));
         assert_eq!(sc.spec("refresh").as_deref(), Some("shift+mod+n"));
+        assert_eq!(sc.command_on(NOW), Some("Refresh"), "the Mac app's saved ⇧⌘N takes Now's keys");
+        assert_eq!(Shortcuts::default().command_on(NOW), None);
         assert_eq!(sc.spec("textBigger").as_deref(), Some("mod+equal"), "untaken defaults stay");
         let mut freed = sc.clone();
         freed.set("newTab", None).unwrap();
