@@ -115,6 +115,11 @@ struct ShortcutStoreTest {
         open.resetAll()
         let afterReset = defaults.data(forKey: ShortcutStore.defaultsKey).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
         check(Set(afterReset.keys) == ["textSmaller", "talk"], "restore defaults keeps the other app's latest keys")
+
+        defaults.set(Data(#"{"newSession":{"carbonKeyCode":5,"carbonModifiers":256}}"#.utf8), forKey: ShortcutStore.defaultsKey)
+        let deadline = Date().addingTimeInterval(2)
+        while open.shortcut(for: .newSession) != commandG && Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
+        check(open.shortcut(for: .newSession) == commandG && open.isCustomized(.newSession) && open.anyCustomized, "a change the other app saves shows here without a local edit")
     }
 
     static func check(_ condition: Bool, _ message: String) {

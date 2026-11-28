@@ -157,12 +157,16 @@ final class ShortcutStore: ObservableObject {
     @Published private(set) var overrides: [String: StoredShortcut?]
     private let defaults: UserDefaults
     private let anyApp: AnyAppShortcut
+    private var external: AnyCancellable?
 
     init(defaults: UserDefaults, anyApp: AnyAppShortcut = AnyAppShortcut(current: { nil }, clear: {})) {
         self.defaults = defaults
         self.anyApp = anyApp
         overrides = [:]
         overrides = stored()
+        external = defaults.publisher(for: \.keyboardShortcuts, options: [.new])
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.reload() } }
     }
 
     func shortcut(for command: AppCommand) -> StoredShortcut? {
@@ -270,4 +274,8 @@ final class ShortcutStore: ObservableObject {
             defaults.set(data, forKey: Self.defaultsKey)
         }
     }
+}
+
+private extension UserDefaults {
+    @objc dynamic var keyboardShortcuts: Data? { data(forKey: "keyboardShortcuts") }
 }
