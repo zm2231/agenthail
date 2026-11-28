@@ -396,6 +396,7 @@ pub struct Overview {
     ledger_at: HashMap<String, Instant>,
     actor_at: HashMap<String, Instant>,
     stale: bool,
+    reads: u64,
     failed: HashSet<String>,
     covered: HashSet<String>,
     pending: HashSet<String>,
@@ -541,6 +542,10 @@ impl Overview {
         parse_time(&self.base.updated_at)
     }
 
+    pub fn reads(&self) -> u64 {
+        self.reads
+    }
+
     pub fn stale(&self) -> bool {
         self.stale
     }
@@ -607,6 +612,7 @@ impl Overview {
 
     pub fn refresh(&mut self, fetched: Fetched) {
         let before = self.shown();
+        self.reads += 1;
         let moved = self.take(fetched);
         self.stale |= moved || self.moved_since(&before);
     }

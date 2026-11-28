@@ -237,19 +237,31 @@ fn a_failed_project_order_is_sent_again_on_the_next_read_within_the_same_minute(
     };
     send(&rt, read("2026-11-27T10:02:10Z"));
     rt.frame(DT);
-    rt.update(|s, _| {
-        let tiles = &mut s.ov.projects.tiles;
-        assert!(tiles.change(&feed::projects::TileChange::Step("p2".into(), -1), &["p1".into(), "p2".into()]).is_some());
-        tiles.answered(feed::projects::TileReply::Failed("timed out".into()));
-        assert!(tiles.unsent());
-    });
-    rt.frame(DT);
+    let fail = |rt: &mut Runtime<App>| {
+        rt.update(|s, _| {
+            let tiles = &mut s.ov.projects.tiles;
+            let arranged: Vec<String> = tiles.saved().order;
+            let arranged = if arranged.is_empty() { vec!["p1".to_string(), "p2".to_string()] } else { arranged };
+            assert!(tiles.change(&feed::projects::TileChange::Step(arranged[1].clone(), -1), &arranged).is_some());
+            tiles.answered(feed::projects::TileReply::Failed("timed out".into()));
+            assert!(tiles.unsent());
+        });
+        rt.frame(DT);
+    };
+    fail(&mut rt);
     assert!(rt.state.ov.projects.tiles.unsent(), "nothing is sent again before a new read");
     let rebuilds = rt.state.rebuilds;
     send(&rt, read("2026-11-27T10:02:40Z"));
     rt.frame(DT);
     assert_eq!(rt.state.rebuilds, rebuilds, "the read changed nothing shown");
     assert!(!rt.state.ov.projects.tiles.unsent(), "the next read sends the order again");
+
+    send(&rt, snapshot(5, sessions(&["a"]), None));
+    rt.frame(DT);
+    fail(&mut rt);
+    send(&rt, read("2026-11-27T10:04:30Z"));
+    rt.frame(DT);
+    assert!(!rt.state.ov.projects.tiles.unsent(), "an overview read older than the session list still sends the order again");
 }
 
 #[test]
