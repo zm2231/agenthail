@@ -26,8 +26,12 @@ fn least(color: Color, surfaces: &[Color]) -> f32 {
     surfaces.iter().map(|&s| contrast(color, s)).fold(f32::INFINITY, f32::min)
 }
 
+pub fn reads(color: Color, surfaces: &[Color], min: f32) -> bool {
+    surfaces.iter().all(|&s| contrast(over(color, s), s) >= min)
+}
+
 pub fn held(color: Color, surfaces: &[Color], min: f32) -> Color {
-    if surfaces.iter().all(|&s| legible(color, s, min) == color) {
+    if reads(color, surfaces, min) {
         return color;
     }
     let forward = surfaces.iter().fold(color, |c, &s| legible(c, s, min));
@@ -39,8 +43,7 @@ pub fn held(color: Color, surfaces: &[Color], min: f32) -> Color {
 }
 
 pub fn surfaces(paint: &Paint, floors: &[Color]) -> Vec<Color> {
-    let base = floors.first().copied().unwrap_or(paint.card_deep);
-    floors.iter().copied().chain([paint.card, paint.card_deep, paint.raised, paint.glass_tint].map(|s| over(s, base))).collect()
+    floors.iter().flat_map(|&f| [f, over(paint.card, f), over(paint.card_deep, f), over(paint.raised, f), over(paint.glass_tint, f)]).collect()
 }
 
 pub fn hold_paint(paint: &mut Paint, roles: &mut TextRoles, floors: &[Color], body: f32, increased: bool) {
@@ -54,18 +57,27 @@ pub fn hold_paint(paint: &mut Paint, roles: &mut TextRoles, floors: &[Color], bo
     }
 }
 
-pub fn hold_kit(mut k: Kit, behind: Color) -> Kit {
+fn kit_surfaces(k: &Kit, behind: Color) -> [Color; 3] {
+    let deep = over(k.c.bg_deep, behind);
+    [over(k.c.bg_base, deep), deep, over(k.c.layer_01, deep)]
+}
+
+pub fn hold_kit(mut k: Kit, behinds: [Color; 2]) -> Kit {
     let mut m = k.clone();
-    m.c.bg_deep = over(k.c.bg_deep, behind);
-    m.c.bg_base = over(k.c.bg_base, m.c.bg_deep);
-    m.c.layer_01 = over(k.c.layer_01, m.c.bg_deep);
+    [m.c.bg_base, m.c.bg_deep, m.c.layer_01] = kit_surfaces(&k, behinds[0]);
     let m = m.legible_text();
-    k.c.text_strong = m.c.text_strong;
-    k.c.text_base = m.c.text_base;
-    k.c.text_weak = m.c.text_weak;
-    k.c.text_muted = m.c.text_muted;
-    k.c.text_accent = m.c.text_accent;
-    k.c.text_faint = m.c.text_faint;
-    k.roles = m.roles;
+    let all: Vec<Color> = behinds.iter().flat_map(|&b| kit_surfaces(&k, b)).collect();
+    let (body, faint) = if k.increased_contrast { (7.0, 4.5) } else { (4.5, 3.0) };
+    let keep = |served: Color, lifted: Color, min: f32| if reads(lifted, &all, min) { lifted } else { held(served, &all, min) };
+    let c = &mut k.c;
+    c.text_strong = keep(c.text_strong, m.c.text_strong, body);
+    c.text_base = keep(c.text_base, m.c.text_base, body);
+    c.text_weak = keep(c.text_weak, m.c.text_weak, body);
+    c.text_muted = keep(c.text_muted, m.c.text_muted, body);
+    c.text_accent = keep(c.text_accent, m.c.text_accent, body);
+    c.text_faint = keep(c.text_faint, m.c.text_faint, faint);
+    for role in TextRole::ALL {
+        k.roles.set(role, keep(k.roles.get(role), m.roles.get(role), body));
+    }
     k
 }

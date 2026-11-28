@@ -275,11 +275,11 @@ impl Picture {
         (w * fit / scale.max(1.0), h * fit / scale.max(1.0))
     }
 
-    fn worst(&mut self, dark: bool, blur: f32, shown: (f32, f32)) -> Rgb {
-        let sample = if dark { &self.brightest } else { &self.darkest };
+    fn worst(&mut self, bright: bool, blur: f32, shown: (f32, f32)) -> Rgb {
+        let sample = if bright { &self.brightest } else { &self.darkest };
         let per_point = (sample.0 as f32 / shown.0.max(1.0)).min(sample.1 as f32 / shown.1.max(1.0));
         let cell = (blur * per_point).round().max(1.0) as usize;
-        *self.worst.entry((dark, cell)).or_insert_with(|| fl::worst(&sample.2, sample.0, dark, cell))
+        *self.worst.entry((bright, cell)).or_insert_with(|| fl::worst(&sample.2, sample.0, bright, cell))
     }
 }
 
@@ -413,20 +413,20 @@ fn wallpaper_key(w: &Wallpaper) -> String {
     format!("{w:?}")
 }
 
-fn worst_of(s: &mut State, dark: bool) -> Option<Rgb> {
+fn worst_of(s: &mut State, dark: bool, bright: bool) -> Option<Rgb> {
     let w = s.look.wallpaper(dark).clone();
     let blur = if s.look.translucent(dark) { s.look.blur / 3.0 } else { 0.0 };
     let (area, scale, fit, position, screen) = (s.area, s.scale, s.look.fit, s.look.position, s.screen);
     match &w {
         Wallpaper::Image(path) => s.pictures.get_mut(path).and_then(|p| p.as_mut().ok()).map(|p| {
             let placed = fl::place(fit, position, p.size(scale, screen), area);
-            p.worst(dark, blur, (placed.rect[2], placed.rect[3]))
+            p.worst(bright, blur, (placed.rect[2], placed.rect[3]))
         }),
-        Wallpaper::Mesh { .. } => mesh_picture(s, &w).map(|p| p.worst(dark, blur, area)),
+        Wallpaper::Mesh { .. } => mesh_picture(s, &w).map(|p| p.worst(bright, blur, area)),
         Wallpaper::Linear { stops, .. } => {
             let key = |c: &Rgb| fl::luminance(*c);
             let colors = stops.iter().map(|(c, _)| *c);
-            if dark { colors.max_by(|a, b| key(a).total_cmp(&key(b))) } else { colors.min_by(|a, b| key(a).total_cmp(&key(b))) }
+            if bright { colors.max_by(|a, b| key(a).total_cmp(&key(b))) } else { colors.min_by(|a, b| key(a).total_cmp(&key(b))) }
         }
         Wallpaper::None | Wallpaper::Desktop => None,
     }
@@ -468,7 +468,7 @@ fn cached(s: &mut State, key: String, build: impl Fn(&KitEnv) -> Kit + 'static) 
     theme
 }
 
-fn main_kit(env: &KitEnv, paint: &Paint, roles: TextRoles, translucent: bool, behind: Color) -> Kit {
+fn main_kit(env: &KitEnv, paint: &Paint, roles: TextRoles, translucent: bool, behinds: [Color; 2]) -> Kit {
     let neutral = Kit::neutral(paint.dark);
     let mut k = if env.increased_contrast { neutral.increased_contrast() } else { neutral };
     if translucent {
@@ -481,10 +481,10 @@ fn main_kit(env: &KitEnv, paint: &Paint, roles: TextRoles, translucent: bool, be
     k.c.text_faint = paint.faint;
     accented(&mut k, paint.accent);
     k.roles = roles;
-    hold_kit(k, behind)
+    hold_kit(k, behinds)
 }
 
-fn chrome_kit(env: &KitEnv, paint: &Paint, roles: TextRoles, translucent: bool, drawn: bool, behind: Color) -> Kit {
+fn chrome_kit(env: &KitEnv, paint: &Paint, roles: TextRoles, translucent: bool, drawn: bool, behinds: [Color; 2]) -> Kit {
     let mut k = rune_theme_opencode::kit(&env.dark(paint.dark));
     if translucent {
         k.c.bg_deep = paint.pane;
@@ -499,12 +499,12 @@ fn chrome_kit(env: &KitEnv, paint: &Paint, roles: TextRoles, translucent: bool, 
     k.c.text_weak = paint.muted;
     accented(&mut k, paint.accent);
     k.roles = roles;
-    hold_kit(k, behind)
+    hold_kit(k, behinds)
 }
 
-fn kit_key(paint: &Paint, roles: &TextRoles, translucent: bool, drawn: bool, behind: Color) -> String {
+fn kit_key(paint: &Paint, roles: &TextRoles, translucent: bool, drawn: bool, behinds: [Color; 2]) -> String {
     let q = |c: Color| [quant(fl::gamma(c.r)), quant(fl::gamma(c.g)), quant(fl::gamma(c.b)), quant(c.a)];
-    let colors: Vec<[u32; 4]> = [paint.text, paint.muted, paint.faint, paint.accent, paint.pane, paint.border, paint.card_deep, behind].into_iter().chain(rune_kit::TextRole::ALL.iter().map(|r| roles.get(*r))).map(q).collect();
+    let colors: Vec<[u32; 4]> = [paint.text, paint.muted, paint.faint, paint.accent, paint.pane, paint.border, paint.card_deep, behinds[0], behinds[1]].into_iter().chain(rune_kit::TextRole::ALL.iter().map(|r| roles.get(*r))).map(q).collect();
     format!("{}:{translucent}:{drawn}:{colors:?}", paint.dark)
 }
 
@@ -555,11 +555,12 @@ pub fn frame<S, R>(cx: &mut Cx<S>, session: bool, glass: bool, build: impl FnOnc
         };
         let translucent = glass && s.look.translucent(dark);
         let drawn = s.look.drawn(dark);
-        let behind = if translucent {
+        let behinds = if translucent {
             let ground = ground_rgb(dark);
             let tint = tint_rgb(&s.look, dark, accent_rgb);
             let strength = if session { s.look.session_opacity } else { s.look.opacity };
-            let worst = worst_of(s, dark).unwrap_or(ground);
+            let worst = worst_of(s, dark, dark).unwrap_or(ground);
+            let other = worst_of(s, dark, !dark).unwrap_or(worst);
             let (pane, pane_rgb) = s.look.pane_tint(dark, accent_rgb, worst, ground, tint, strength, s.look.pane_opacity);
             let (float, float_rgb) = s.look.pane_tint(dark, accent_rgb, worst, ground, tint, strength, s.look.float_opacity);
             paint.card = paint.card.alpha(0.6);
@@ -570,21 +571,24 @@ pub fn frame<S, R>(cx: &mut Cx<S>, session: bool, glass: bool, build: impl FnOnc
             paint.ground = rgb(ground);
             paint.pane = rgb(pane_rgb).alpha(pane);
             paint.border = Color::WHITE.alpha(s.look.border);
-            rgb(fl::blend(fl::blend(ground, worst, strength), if dark { [0.0; 3] } else { [1.0; 3] }, s.look.dim))
+            let ink = if dark { [0.0; 3] } else { [1.0; 3] };
+            [worst, other].map(|w| rgb(fl::blend(fl::blend(ground, w, strength), ink, s.look.dim)))
         } else {
             paint.glass_tint = paint.card.alpha(if dark { 0.78 } else { 1.0 });
-            paint.card_deep
+            [paint.card_deep; 2]
         };
-        let floors = if translucent {
-            let pane = over(paint.pane, behind);
-            vec![pane, over(WASH, pane)]
+        let floors: Vec<Color> = if translucent {
+            behinds.iter().flat_map(|&b| {
+                let pane = over(paint.pane, b);
+                [pane, over(WASH, pane)]
+            }).collect()
         } else {
-            vec![behind]
+            behinds.to_vec()
         };
         hold_paint(&mut paint, &mut roles, &floors, s.look.target.max(if increased { 7.0 } else { 4.5 }), increased);
-        let key = kit_key(&paint, &roles, translucent, drawn, behind);
-        let kit = cached(s, format!("kit:{key}"), move |env| main_kit(env, &paint, roles, translucent, behind));
-        let chrome = cached(s, format!("chrome:{key}"), move |env| chrome_kit(env, &paint, roles, translucent, drawn, behind));
+        let key = kit_key(&paint, &roles, translucent, drawn, behinds);
+        let kit = cached(s, format!("kit:{key}"), move |env| main_kit(env, &paint, roles, translucent, behinds));
+        let chrome = cached(s, format!("chrome:{key}"), move |env| chrome_kit(env, &paint, roles, translucent, drawn, behinds));
         (paint, kit, chrome)
     });
     let themes = theme::Themes { main: kit, chrome };
