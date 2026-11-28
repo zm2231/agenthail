@@ -484,3 +484,56 @@ fn the_sidebar_shows_nows_keys_only_while_no_command_holds_them() {
     rt.frame(DT);
     assert!(rt.state.screen != Screen::Now, "and ⇧⌘N does what was saved for it");
 }
+
+#[test]
+fn the_settings_tabs_show_which_side_has_more_when_larger_text_makes_them_scroll() {
+    if !isolated("text_scale::the_settings_tabs_show_which_side_has_more_when_larger_text_makes_them_scroll") {
+        return;
+    }
+    let agents = crate::settings::TABS.iter().position(|t| *t == "Agents").expect("an Agents tab");
+    let sides = |scale: f32, tab: usize| {
+        crate::look::hold_text_scale(Some(scale));
+        let mut rt = settings_on(tab, 0);
+        for _ in 0..3 {
+            rt.frame(DT);
+        }
+        rt.settle_all();
+        rt.frame(DT);
+        (rt.presented("settings-tabs-before").is_some(), rt.presented("settings-tabs-after").is_some())
+    };
+    assert_eq!(sides(1.0, 0), (false, false), "the tabs fit at 1.0");
+    for scale in [1.5, 1.6] {
+        assert_eq!(sides(scale, 0), (false, true), "with Overview open at {scale}, more tabs wait to the right");
+        assert_eq!(sides(scale, agents), (true, false), "with Agents open at {scale}, more tabs wait to the left");
+    }
+    crate::look::hold_text_scale(Some(1.6));
+    let mut rt = settings_on(0, 0);
+    for _ in 0..3 {
+        rt.frame(DT);
+    }
+    let (x, y) = rt.find("settings-tabs-after").expect("the right chevron is shown");
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    rt.frame(DT);
+    assert_eq!(rt.state.tab, 1, "the chevron opens the next tab");
+}
+
+#[test]
+fn now_drops_its_button_labels_in_steps_as_room_runs_out() {
+    if !isolated("text_scale::now_drops_its_button_labels_in_steps_as_room_runs_out") {
+        return;
+    }
+    let dir = Dir::new("text-scale-now-steps");
+    let shown = |scale: f32, size: (f32, f32)| {
+        let mut rt = laid_out_in(scale, "now", &dir, size, None);
+        for _ in 0..3 {
+            rt.frame(DT);
+        }
+        let labelled = |starts: &str| rt.elements().into_iter().any(|e| !e.exiting && e.path.contains("now-trailing") && e.text.as_deref().is_some_and(|t| t.starts_with(starts)));
+        (labelled("Talk"), labelled("Three panes"), labelled("0 need you"), rect(&rt, "now-leading")[2] > 30.0)
+    };
+    assert_eq!(shown(1.0, SIZE), (true, true, true, true), "at 1.0 every label shows");
+    assert_eq!(shown(1.5, SIZE), (false, true, true, true), "at 1.5 Talk and New session go to icons first");
+    assert_eq!(shown(1.6, SMALLEST), (false, false, false, true), "in the smallest window everything is an icon and Now keeps its title");
+}

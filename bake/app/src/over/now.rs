@@ -24,8 +24,8 @@ pub fn since_note(s: &App, looked: Option<&str>) -> String {
     }
 }
 
-fn variant(brief: bool, tight: bool, k: &Kit) -> El {
-    if tight {
+fn variant(brief: bool, room: Room, k: &Kit) -> El {
+    if room == Room::Icons {
         let (glyph, to) = if brief { (&icons::CHECKLIST, "Show three panes") } else { (&icons::FILE_DOCUMENT, "Show the brief") };
         return rune_kit::IconButton::new(glyph)
             .variant(rune_kit::IconButtonVariant::Ghost)
@@ -41,15 +41,34 @@ fn variant(brief: bool, tight: bool, k: &Kit) -> El {
         .fit()
         .on_pick(|s: &mut App, i, _| s.ov.now_brief = i == 1)
         .build(k);
-    row().gap(6.0).items_center().child(seg).child(ui::ghost_keys(&["⌥⌘B"], k))
+    let r = row().gap(6.0).items_center().child(seg);
+    if room == Room::Labels { r.child(ui::ghost_keys(&["⌥⌘B"], k)) } else { r }
 }
 
 const BAR: &str = "now-bar";
 const BAR_EDGES: f32 = 48.0;
 
-fn tight(s: &App, full: &str, k: &Kit) -> bool {
-    let (Some(bar), Some(full)) = (ui::fit_width(s, BAR), ui::fit_width(s, full)) else { return false };
-    bar - BAR_EDGES < rune::text::advance("Now", k.text(BODY_MED)) + full
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Room {
+    Labels,
+    Fewer,
+    Icons,
+}
+
+fn trailing_key(room: Room, needs: usize, brief: bool, k: &Kit) -> String {
+    format!("now-trailing-{room:?}-{}-{needs}-{brief}", k.text_size(1.0).to_bits())
+}
+
+fn room(s: &App, needs: usize, brief: bool, k: &Kit) -> Room {
+    let Some(bar) = ui::fit_width(s, BAR) else { return Room::Labels };
+    let free = bar - BAR_EDGES - rune::text::advance("Now", k.text(BODY_MED));
+    for room in [Room::Labels, Room::Fewer] {
+        match ui::fit_width(s, &trailing_key(room, needs, brief, k)) {
+            Some(w) if w > free => continue,
+            _ => return room,
+        }
+    }
+    Room::Icons
 }
 
 fn line_part<'a>(s: &App, key: String, l: &'a Line, k: &'a Kit) -> Part<'a> {
@@ -249,13 +268,13 @@ fn toolbar<'a>(s: &'a App, strip: bool, k: &'a Kit) -> ui::Bar<'a> {
     let center = crate::ui::tabs::strip_part(s, k, false).map(|tabs| Part::group("now-tabs", crate::over::rows::version((), [&tabs]), move || row().max_w(560.0).child(tabs.el())));
     let needs = s.ov.needs.len();
     let brief = s.ov.now_brief;
-    let full = format!("now-trailing-{}-{needs}-{brief}", k.text_size(1.0).to_bits());
-    let tight = tight(s, &full, k);
-    let trailing = Part::row("now-trailing", (needs, brief, tight), move || {
+    let room = room(s, needs, brief, k);
+    let measure = trailing_key(room, needs, brief, k);
+    let trailing = Part::row("now-trailing", (needs, brief, room), move || {
         let r = row().gap(10.0).items_center();
-        let r = if tight { r.child(talk_icon(k)).child(ui::new_session_icon(None, k)) } else { r.child(talk_button(k)).child(ui::new_session_button(None, k)) };
-        let r = r.child(variant(brief, tight, k)).child(if tight { ui::needs_count_button(s, k) } else { ui::needs_button(s, k) });
-        if tight { r } else { ui::measured(r, full) }
+        let r = if room == Room::Labels { r.child(talk_button(k)).child(ui::new_session_button(None, k)) } else { r.child(talk_icon(k)).child(ui::new_session_icon(None, k)) };
+        let r = r.child(variant(brief, room, k)).child(if room == Room::Icons { ui::needs_count_button(s, k) } else { ui::needs_button(s, k) });
+        ui::measured(r, measure)
     });
     ui::Bar { leading, center, trailing }
 }
