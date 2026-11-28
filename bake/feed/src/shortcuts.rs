@@ -250,9 +250,13 @@ impl Shortcuts {
     }
 
     pub fn get(&self, id: &str) -> Option<Stored> {
+        self.get_on(id, MAC)
+    }
+
+    fn get_on(&self, id: &str, mac: bool) -> Option<Stored> {
         match self.overrides.get(id) {
             Some(chosen) => *chosen,
-            None => default_of(id).filter(|d| !self.chosen_elsewhere(*d, id)),
+            None => default_of(id).filter(|d| !self.chosen_elsewhere(*d, id, mac)),
         }
     }
 
@@ -261,8 +265,8 @@ impl Shortcuts {
         COMMANDS.iter().find(|c| self.get(c.id) == Some(shortcut)).map(|c| c.title)
     }
 
-    fn chosen_elsewhere(&self, shortcut: Stored, id: &str) -> bool {
-        self.overrides.iter().any(|(other, chosen)| other != id && *chosen == Some(shortcut)) || self.any_app.is_some_and(|a| a.in_app_twins(MAC).contains(&shortcut))
+    fn chosen_elsewhere(&self, shortcut: Stored, id: &str, mac: bool) -> bool {
+        self.overrides.iter().any(|(other, chosen)| other != id && *chosen == Some(shortcut)) || self.any_app.is_some_and(|a| a.in_app_twins(mac).contains(&shortcut))
     }
 
     pub fn spec(&self, id: &str) -> Option<String> {
@@ -310,7 +314,7 @@ impl Shortcuts {
     }
 
     fn owner_on(&self, shortcut: Stored, except: &str, mac: bool) -> Option<&'static str> {
-        if let Some(c) = COMMANDS.iter().find(|c| c.id != except && self.get(c.id) == Some(shortcut)) {
+        if let Some(c) = COMMANDS.iter().find(|c| c.id != except && self.get_on(c.id, mac) == Some(shortcut)) {
             return Some(c.title);
         }
         if except != ANY_APP_ID && self.any_app.is_some_and(|a| a.in_app_twins(mac).contains(&shortcut)) {
