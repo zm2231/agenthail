@@ -314,7 +314,7 @@ fn a_picture_with_clear_pixels_says_the_ground_shows_through() {
 }
 
 #[test]
-fn clear_pixels_are_left_out_of_a_pictures_brightest_and_darkest_parts() {
+fn clear_pixels_stay_clear_in_a_pictures_brightest_and_darkest_samples() {
     use image::{ImageEncoder, RgbaImage};
     let mut img = RgbaImage::new(8, 8);
     for (x, _, px) in img.enumerate_pixels_mut() {
@@ -324,11 +324,11 @@ fn clear_pixels_are_left_out_of_a_pictures_brightest_and_darkest_parts() {
     image::codecs::png::PngEncoder::new(&mut png).write_image(img.as_raw(), 8, 8, image::ExtendedColorType::Rgba8).unwrap();
     let d = decode(&png, 2560, 16).unwrap();
     assert!(d.see_through);
-    let brightest = worst(&d.brightest.2, d.brightest.0, true, 1);
-    let darkest = worst(&d.darkest.2, d.darkest.0, false, 1);
-    let grey = 60.0 / 255.0;
-    assert!((brightest[0] - grey).abs() < 1e-3, "the invisible white is not the picture's brightest part: {brightest:?}");
-    assert!((darkest[0] - grey).abs() < 1e-3, "nor does a clear cell count as its darkest: {darkest:?}");
+    for sample in [&d.brightest, &d.darkest] {
+        let cells: Vec<&[u8]> = sample.2.chunks(4).collect();
+        assert!(cells.iter().all(|c| *c == [0, 0, 0, 0] || *c == [60, 60, 60, 255]), "clear cells stay clear and the rest is the grey: {cells:?}");
+        assert!(cells.contains(&[0, 0, 0, 0].as_slice()));
+    }
 }
 
 #[test]

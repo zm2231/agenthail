@@ -242,9 +242,9 @@ pub fn extreme(rgba: &[u8], w: u32, h: u32, side: u32, bright: bool) -> (u32, u3
             }
         }
     }
-    let out = best.into_iter().flat_map(|b| {
-        let [r, g, bl] = b.map(|(_, c)| c).unwrap_or(if bright { [0; 3] } else { [255; 3] });
-        [r, g, bl, 255]
+    let out = best.into_iter().flat_map(|b| match b {
+        Some((_, [r, g, bl])) => [r, g, bl, 255],
+        None => [0; 4],
     });
     (cw as u32, ch as u32, out.collect())
 }

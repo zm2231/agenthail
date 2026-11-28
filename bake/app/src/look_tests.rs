@@ -221,3 +221,15 @@ fn bare_ground_beside_a_contained_or_see_through_picture_counts_as_backdrop() {
         assert_eq!(samples(&mut s, true, ground)[2], ground, "{fit:?}: ground shows through clear pixels");
     }
 }
+
+#[test]
+fn a_blurred_clear_patch_is_measured_as_the_ground_showing_through() {
+    let clear = [0u8, 0, 0, 0];
+    let white = [255u8, 255, 255, 255];
+    let sample: Vec<u8> = [white, clear, clear, clear].concat();
+    let mut p = picture(fl::Decoded { original: (2, 2), shown: (1, 1, vec![255; 4]), brightest: (2, 2, sample.clone()), darkest: (2, 2, sample), see_through: true });
+    let ground = [0.5, 0.5, 0.5];
+    let seen = p.worst(true, 2.0, (2.0, 2.0), ground);
+    let expected = (1.0 + 3.0 * quant(0.5) as f32 / 255.0) / 4.0;
+    assert!((seen[0] - expected).abs() < 1e-3, "white beside clear cells over mid grey averages with the grey: {seen:?} vs {expected}");
+}

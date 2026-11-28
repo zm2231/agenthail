@@ -28,7 +28,7 @@ struct Picture {
     original: (u32, u32),
     brightest: Raw,
     darkest: Raw,
-    worst: HashMap<(bool, usize), Rgb>,
+    worst: HashMap<(bool, usize, [u32; 3]), Rgb>,
     see_through: bool,
 }
 
@@ -276,12 +276,21 @@ impl Picture {
         (w * fit / scale.max(1.0), h * fit / scale.max(1.0))
     }
 
-    fn worst(&mut self, bright: bool, blur: f32, shown: (f32, f32)) -> Rgb {
+    fn worst(&mut self, bright: bool, blur: f32, shown: (f32, f32), ground: Rgb) -> Rgb {
         let sample = if bright { &self.brightest } else { &self.darkest };
         let per_point = (sample.0 as f32 / shown.0.max(1.0)).min(sample.1 as f32 / shown.1.max(1.0));
         let cell = (blur * per_point).round().max(1.0) as usize;
-        *self.worst.entry((bright, cell)).or_insert_with(|| fl::worst(&sample.2, sample.0, bright, cell))
+        let under = ground.map(quant);
+        *self.worst.entry((bright, cell, under)).or_insert_with(|| fl::worst(&on_ground(&sample.2, under), sample.0, bright, cell))
     }
+}
+
+fn on_ground(rgba: &[u8], ground: [u32; 3]) -> std::borrow::Cow<'_, [u8]> {
+    if rgba.chunks_exact(4).all(|p| p[3] == 255) {
+        return std::borrow::Cow::Borrowed(rgba);
+    }
+    let under = ground.map(|c| c.min(255) as u8);
+    std::borrow::Cow::Owned(rgba.chunks_exact(4).flat_map(|p| if p[3] == 0 { [under[0], under[1], under[2], 255] } else { [p[0], p[1], p[2], 255] }).collect())
 }
 
 pub fn release_text_scale() {
@@ -421,9 +430,9 @@ fn worst_of(s: &mut State, dark: bool, bright: bool) -> Option<Rgb> {
     match &w {
         Wallpaper::Image(path) => s.pictures.get_mut(path).and_then(|p| p.as_mut().ok()).map(|p| {
             let placed = fl::place(fit, position, p.size(scale, screen), area);
-            p.worst(bright, blur, (placed.rect[2], placed.rect[3]))
+            p.worst(bright, blur, (placed.rect[2], placed.rect[3]), ground_rgb(dark))
         }),
-        Wallpaper::Mesh { .. } => mesh_picture(s, &w).map(|p| p.worst(bright, blur, area)),
+        Wallpaper::Mesh { .. } => mesh_picture(s, &w).map(|p| p.worst(bright, blur, area, ground_rgb(dark))),
         Wallpaper::Linear { stops, .. } => {
             let key = |c: &Rgb| fl::luminance(*c);
             let colors = stops.iter().map(|(c, _)| *c);
