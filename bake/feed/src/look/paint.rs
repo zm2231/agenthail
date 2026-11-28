@@ -223,15 +223,16 @@ pub fn extreme(rgba: &[u8], w: u32, h: u32, side: u32, bright: bool) -> (u32, u3
     let cell = w.max(h).div_ceil(side.max(1)).max(1) as usize;
     let (w, h) = (w as usize, h as usize);
     let (cw, ch) = (w.div_ceil(cell), h.div_ceil(cell));
-    let mut best: Vec<Option<(f32, [u8; 3])>> = vec![None; cw * ch];
+    let mut best: Vec<Option<(f32, [u8; 4])>> = vec![None; cw * ch];
     for y in 0..h {
         for x in 0..w {
             let i = (y * w + x) * 4;
             if rgba[i + 3] == 0 {
                 continue;
             }
-            let c = [rgba[i], rgba[i + 1], rgba[i + 2]];
-            let l = luminance(c.map(|v| v as f32 / 255.0));
+            let c = [rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]];
+            let a = c[3] as f32 / 255.0;
+            let l = luminance([c[0], c[1], c[2]].map(|v| v as f32 / 255.0 * a + if bright { 0.0 } else { 1.0 - a }));
             let slot = &mut best[(y / cell) * cw + x / cell];
             let better = match slot {
                 None => true,
@@ -243,7 +244,7 @@ pub fn extreme(rgba: &[u8], w: u32, h: u32, side: u32, bright: bool) -> (u32, u3
         }
     }
     let out = best.into_iter().flat_map(|b| match b {
-        Some((_, [r, g, bl])) => [r, g, bl, 255],
+        Some((_, c)) => c,
         None => [0; 4],
     });
     (cw as u32, ch as u32, out.collect())

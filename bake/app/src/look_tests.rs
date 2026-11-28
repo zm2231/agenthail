@@ -233,3 +233,15 @@ fn a_blurred_clear_patch_is_measured_as_the_ground_showing_through() {
     let expected = (1.0 + 3.0 * quant(0.5) as f32 / 255.0) / 4.0;
     assert!((seen[0] - expected).abs() < 1e-3, "white beside clear cells over mid grey averages with the grey: {seen:?} vs {expected}");
 }
+
+#[test]
+fn faint_pixels_in_a_blurred_patch_are_measured_mostly_as_the_ground() {
+    let faint = [0u8, 0, 0, 10];
+    let white = [255u8, 255, 255, 255];
+    let sample: Vec<u8> = [white, faint, faint, faint].concat();
+    let mut p = picture(fl::Decoded { original: (2, 2), shown: (1, 1, vec![255; 4]), brightest: (2, 2, sample.clone()), darkest: (2, 2, sample), see_through: true });
+    let seen = p.worst(true, 2.0, (2.0, 2.0), [0.5, 0.5, 0.5]);
+    let grey = quant(0.5) as f32 * (1.0 - 10.0 / 255.0);
+    let expected = (255.0 + 3.0 * grey.round()) / 4.0 / 255.0;
+    assert!((seen[0] - expected).abs() < 2e-3, "a nearly clear black shows the grey under it: {seen:?} vs {expected}");
+}

@@ -346,3 +346,13 @@ fn text_size_steps_by_a_tenth_within_its_range_and_writes_for_this_computer() {
     assert!(!Change::set(&Scope::Everywhere, "glass.blur", "3", "Blur").touches("text.scale"));
     assert!(!Change::undo(None).touches("text.scale"));
 }
+
+#[test]
+fn a_pictures_samples_keep_each_pixels_alpha() {
+    let rgba = [255u8, 255, 255, 10, 30, 30, 30, 255];
+    let (_, _, bright) = extreme(&rgba, 2, 1, 1, true);
+    assert_eq!(bright, [30, 30, 30, 255], "a nearly clear white shows less than an opaque dark grey over a dark ground");
+    let rgba = [255u8, 255, 255, 200, 30, 30, 30, 255];
+    let (_, _, bright) = extreme(&rgba, 2, 1, 1, true);
+    assert_eq!(bright, [255, 255, 255, 200], "a mostly solid white is the bright part, alpha kept");
+}

@@ -289,8 +289,16 @@ fn on_ground(rgba: &[u8], ground: [u32; 3]) -> std::borrow::Cow<'_, [u8]> {
     if rgba.chunks_exact(4).all(|p| p[3] == 255) {
         return std::borrow::Cow::Borrowed(rgba);
     }
-    let under = ground.map(|c| c.min(255) as u8);
-    std::borrow::Cow::Owned(rgba.chunks_exact(4).flat_map(|p| if p[3] == 0 { [under[0], under[1], under[2], 255] } else { [p[0], p[1], p[2], 255] }).collect())
+    let under = ground.map(|c| c.min(255) as f32);
+    let mix = |c: u8, g: f32, a: f32| (g + (c as f32 - g) * a).round() as u8;
+    std::borrow::Cow::Owned(
+        rgba.chunks_exact(4)
+            .flat_map(|p| {
+                let a = p[3] as f32 / 255.0;
+                [mix(p[0], under[0], a), mix(p[1], under[1], a), mix(p[2], under[2], a), 255]
+            })
+            .collect(),
+    )
 }
 
 pub fn release_text_scale() {
