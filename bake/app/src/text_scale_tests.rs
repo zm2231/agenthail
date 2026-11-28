@@ -574,8 +574,8 @@ fn now_keeps_every_toolbar_button_clear_of_the_title_and_fade_at_every_width() {
             assert!(buttons[0] >= title[0] + title[2].max(floor) + fade - 0.5, "{scale} {screen} at {w}: the buttons {buttons:?} start clear of the title's room {title:?} and the fade");
             for _ in 0..4 {
                 rt.frame(DT);
+                assert_eq!(rect(&rt, "now-trailing"), buttons, "{scale} {screen} at {w}: the buttons hold still once laid out");
             }
-            assert_eq!(rect(&rt, "now-trailing"), buttons, "{scale} {screen} at {w}: the buttons hold still once laid out");
         }
     }
 }
