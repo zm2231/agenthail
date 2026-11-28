@@ -10,7 +10,7 @@ use crate::catalog::{Client, Session, parse_time};
 use crate::menu::Patch;
 use crate::derive::phase::Steps;
 use crate::derive::tails::{self, Tail, Tails};
-use crate::derive::world::{Actor, Host, Meter, Parts, ProjectRecord, Recorded, Rows, Work, World, prepared};
+use crate::derive::world::{Actor, Parts, Recorded, Rows, Work, World, prepared};
 use crate::shared::own;
 use crate::item::Item;
 
@@ -405,11 +405,6 @@ pub struct Overview {
 
 struct Shown {
     minute: Option<i64>,
-    projects: Vec<ProjectRecord>,
-    usage: Vec<Meter>,
-    hosts: Vec<Host>,
-    actors: HashMap<String, Actor>,
-    tile_order: Option<crate::projects::TileOrder>,
     sessions: Arc<Vec<Session>>,
     ledgers: HashMap<String, Vec<Arc<Work>>>,
     steps: HashMap<String, Steps>,
@@ -525,11 +520,6 @@ impl Overview {
     fn shown(&self) -> Shown {
         Shown {
             minute: minute(&self.base.updated_at),
-            projects: self.base.projects.clone(),
-            usage: self.base.usage.clone(),
-            hosts: self.base.hosts.clone(),
-            actors: self.base.actors.clone(),
-            tile_order: self.base.tile_order.clone(),
             sessions: self.sessions.clone(),
             ledgers: self.ledgers.clone(),
             steps: self.steps.clone(),
@@ -539,13 +529,7 @@ impl Overview {
     }
 
     fn moved_since(&self, b: &Shown) -> bool {
-        let base = &self.base;
-        minute(&base.updated_at) != b.minute
-            || base.projects != b.projects
-            || base.usage != b.usage
-            || base.hosts != b.hosts
-            || base.actors != b.actors
-            || base.tile_order != b.tile_order
+        minute(&self.base.updated_at) != b.minute
             || !(Arc::ptr_eq(&self.sessions, &b.sessions) || self.sessions == b.sessions)
             || !same_rows(&self.ledgers, &b.ledgers)
             || self.steps != b.steps
@@ -619,11 +603,11 @@ impl Overview {
 
     pub fn refresh(&mut self, fetched: Fetched) {
         let before = self.shown();
-        self.take(fetched);
-        self.stale |= self.moved_since(&before);
+        let moved = self.take(fetched);
+        self.stale |= moved || self.moved_since(&before);
     }
 
-    fn take(&mut self, fetched: Fetched) {
+    fn take(&mut self, fetched: Fetched) -> bool {
         let Fetched { mut recorded, sessions, ledgers, held, actors_at, moved, .. } = fetched;
         for id in &moved {
             self.ledgers.remove(id);
@@ -643,13 +627,13 @@ impl Overview {
         }
         let mut steps = std::mem::take(&mut recorded.steps);
         let actors = std::mem::replace(&mut recorded.actors, std::mem::take(&mut self.base.actors));
-        self.base = recorded;
+        let old = std::mem::replace(&mut self.base, recorded);
         self.rekey();
         if fresh {
             self.reconcile();
         }
         self.follow_archive();
-        self.take_actors(actors_at, actors);
+        let actors = self.take_actors(actors_at, actors);
         let opened: Vec<String> = self.covered.iter().filter(|k| self.ledgers.contains_key(*k)).cloned().collect();
         self.covered = ledgers.keys().cloned().chain(held).chain(opened).collect();
         for (key, (read_at, result)) in ledgers {
@@ -662,6 +646,8 @@ impl Overview {
         self.covered.retain(|k| listed.contains(k.as_str()));
         self.failed.retain(|k| listed.contains(k.as_str()));
         self.ledger_at.retain(|k, _| listed.contains(k.as_str()));
+        let base = &self.base;
+        actors || base.projects != old.projects || base.usage != old.usage || base.hosts != old.hosts || base.tile_order != old.tile_order
     }
 
     pub fn missing_ledgers(&self) -> BTreeSet<String> {
@@ -697,22 +683,26 @@ impl Overview {
         if result.is_ok() {
             self.covered.insert(project.to_string());
         }
+        let mut actors = false;
         let rows = result.map(|l| {
-            self.take_actors(l.actors_at, l.actors);
+            actors = self.take_actors(l.actors_at, l.actors);
             (l.rows, l.steps)
         });
         self.apply(project.to_string(), started, rows);
-        self.stale |= self.moved_since(&before);
+        self.stale |= actors || self.moved_since(&before);
     }
 
-    fn take_actors(&mut self, started: Instant, actors: HashMap<String, Actor>) {
+    fn take_actors(&mut self, started: Instant, actors: HashMap<String, Actor>) -> bool {
+        let mut moved = false;
         for (id, actor) in actors {
             if self.actor_at.get(&id).is_some_and(|at| *at > started) {
                 continue;
             }
             self.actor_at.insert(id.clone(), started);
+            moved |= self.base.actors.get(&id) != Some(&actor);
             self.base.actors.insert(id, actor);
         }
+        moved
     }
 
     fn apply(&mut self, key: String, started: Instant, result: Result<(Vec<Arc<Work>>, Steps), String>) {
