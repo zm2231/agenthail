@@ -4,6 +4,8 @@ use rune_kit::{Kit, TextRole, TextRoles, legible};
 
 use crate::theme::Paint;
 
+pub type Backdrops = [Color; 3];
+
 pub fn faint_floor(increased: bool) -> f32 {
     if increased { 4.5 } else { 3.0 }
 }
@@ -87,7 +89,7 @@ fn kit_surfaces(k: &Kit, behind: Color) -> [Color; 3] {
     [over(k.c.bg_base, deep), deep, over(k.c.layer_01, deep)]
 }
 
-pub fn hold_kit(mut k: Kit, behinds: [Color; 2]) -> Kit {
+pub fn hold_kit(mut k: Kit, behinds: Backdrops) -> Kit {
     let mut m = k.clone();
     [m.c.bg_base, m.c.bg_deep, m.c.layer_01] = kit_surfaces(&k, behinds[0]);
     let m = m.legible_text();

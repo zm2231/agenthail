@@ -49,7 +49,7 @@ fn kits_follow_the_system_increased_contrast_and_keep_colours_that_already_read(
     for paint in [Paint::dark(), Paint::light()] {
         let roles = Kit::neutral(paint.dark).roles;
         let behind = paint.card_deep;
-        let behinds = [behind; 2];
+        let behinds = [behind; 3];
         for translucent in [false, true] {
             let normal = KitEnv::new(paint.dark);
             let increased = normal.increased_contrast(true);
@@ -83,13 +83,13 @@ fn served_text_that_falls_short_is_lifted_to_body_contrast() {
         roles.meta = dim_text(dark);
         let behind = paint.card_deep;
         for (env, min) in [(KitEnv::new(dark), 4.5), (KitEnv::new(dark).increased_contrast(true), 7.0)] {
-            let main = main_kit(&env, &paint, roles, false, [behind; 2]);
+            let main = main_kit(&env, &paint, roles, false, [behind; 3]);
             let on = kit_surfaces(&main, behind);
             assert!(!reads(paint.muted, &on, min), "the served colour starts below {min}:1");
             assert!(reads(main.c.text_muted, &on, min), "muted text is lifted to {min}:1");
             assert!(reads(main.roles.meta, &on, min), "timestamps are lifted to {min}:1");
             assert_eq!(main.roles.link == roles.link, reads(roles.link, &on, min), "only a role that falls short moves");
-            let chrome = chrome_kit(&env, &paint, roles, false, true, [behind; 2]);
+            let chrome = chrome_kit(&env, &paint, roles, false, true, [behind; 3]);
             assert!(reads(chrome.c.text_weak, &kit_surfaces(&chrome, behind), min));
         }
     }
@@ -121,7 +121,7 @@ fn light_text_on_dark_glass_is_measured_on_what_shows_through() {
     let paint = Paint { pane: rune::oklch(0.16, 0.008, 275.0).alpha(0.5), ..Paint::dark() };
     let roles = Kit::neutral(true).roles;
     let behind = rune::oklch(0.2, 0.02, 250.0);
-    let main = main_kit(&KitEnv::new(true), &paint, roles, true, [behind; 2]);
+    let main = main_kit(&KitEnv::new(true), &paint, roles, true, [behind; 3]);
     assert_eq!(main.c.bg_base, WASH, "the kit keeps its translucent surfaces");
     assert_eq!((main.c.text_base, main.c.text_muted), (paint.text, paint.muted), "a faint white wash is not read as a white surface");
 }
@@ -139,8 +139,8 @@ fn kits_are_rebuilt_when_any_colour_they_draw_with_moves() {
     let paint = Paint::dark();
     let roles = Kit::neutral(true).roles;
     let behind = paint.card_deep;
-    let key = kit_key(&paint, &roles, true, true, [behind; 2]);
-    assert_eq!(key, kit_key(&paint, &roles, true, true, [behind; 2]));
+    let key = kit_key(&paint, &roles, true, true, [behind; 3]);
+    assert_eq!(key, kit_key(&paint, &roles, true, true, [behind; 3]));
     let nudged = |c: Color| c.mix(Color { r: 0.2, g: 0.2, b: 0.2, a: c.a }, 0.3);
     for moved in [
         Paint { accent: nudged(paint.accent), ..paint },
@@ -149,11 +149,11 @@ fn kits_are_rebuilt_when_any_colour_they_draw_with_moves() {
         Paint { border: Color::WHITE.alpha(0.2), ..paint },
         Paint { card_deep: nudged(paint.card_deep), ..paint },
     ] {
-        assert_ne!(kit_key(&moved, &roles, true, true, [behind; 2]), key, "a lifted accent, text or surface reaches the kit");
+        assert_ne!(kit_key(&moved, &roles, true, true, [behind; 3]), key, "a lifted accent, text or surface reaches the kit");
     }
-    assert_ne!(kit_key(&paint, &roles, true, true, [behind, nudged(behind)]), key, "what shows through the glass reaches the kit");
+    assert_ne!(kit_key(&paint, &roles, true, true, [behind, behind, nudged(behind)]), key, "what shows through the glass reaches the kit");
     let link = TextRoles { link: nudged(roles.link), ..roles };
-    assert_ne!(kit_key(&paint, &link, true, true, [behind; 2]), key);
+    assert_ne!(kit_key(&paint, &link, true, true, [behind; 3]), key);
 }
 
 #[test]
@@ -178,7 +178,7 @@ fn text_over_a_light_floor_and_dark_glass_stays_clear_of_everything_between() {
 fn kit_text_over_glass_on_a_light_and_a_dark_part_of_the_wallpaper_reads_on_both() {
     let paint = Paint { pane: rune::oklch(0.16, 0.008, 275.0).alpha(0.3), ..Paint::dark() };
     let roles = Kit::neutral(true).roles;
-    let behinds = [Color { r: 0.85, g: 0.85, b: 0.85, a: 1.0 }, Color { r: 0.004, g: 0.004, b: 0.005, a: 1.0 }];
+    let behinds = [Color { r: 0.85, g: 0.85, b: 0.85, a: 1.0 }, Color { r: 0.004, g: 0.004, b: 0.005, a: 1.0 }, Color { r: 0.85, g: 0.85, b: 0.85, a: 1.0 }];
     for (env, min) in [(KitEnv::new(true), 4.5), (KitEnv::new(true).increased_contrast(true), 7.0)] {
         for k in [main_kit(&env, &paint, roles, true, behinds), chrome_kit(&env, &paint, roles, true, true, behinds)] {
             let on: Vec<Color> = behinds.iter().flat_map(|&b| kit_surfaces(&k, b)).collect();
@@ -199,4 +199,17 @@ fn glass_is_measured_over_the_wallpapers_brightest_and_darkest_parts() {
     s.look.background = Wallpaper::Linear { angle: 90.0, stops: stops.clone() };
     assert_eq!(worst_of(&mut s, true, true), Some(stops[0].0));
     assert_eq!(worst_of(&mut s, true, false), Some(stops[2].0));
+}
+
+#[test]
+fn bare_ground_beside_a_contained_picture_counts_as_backdrop() {
+    let mut s = State { area: (1440.0, 900.0), scale: 1.0, screen: 2880, ..State::default() };
+    s.look.background = Wallpaper::Image("art/tall.png".into());
+    assert!(exposed(&s, true), "ground shows until the picture arrives");
+    let p = picture(fl::Decoded { original: (400, 900), shown: (1, 1, vec![255; 4]), brightest: (1, 1, vec![255; 4]), darkest: (1, 1, vec![255; 4]) });
+    s.pictures.insert("art/tall.png".into(), Ok(p));
+    for (fit, bare) in [(Fit::Contain, true), (Fit::Center, true), (Fit::Cover, false), (Fit::Tile, false)] {
+        s.look.fit = fit;
+        assert_eq!(exposed(&s, true), bare, "{fit:?}");
+    }
 }
