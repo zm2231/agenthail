@@ -73,7 +73,30 @@ fn cut_to(word: &str, style: TextStyle, width: f32) -> String {
     "…".into()
 }
 
+type FitKey = (String, u64, u32, usize);
+
+thread_local! {
+    static FITTED: std::cell::RefCell<std::collections::HashMap<FitKey, (TextStyle, String)>> = std::cell::RefCell::default();
+}
+
+const KEPT_FITS: usize = 2048;
+
 pub fn fit_lines(t: &str, style: TextStyle, width: f32, max: usize) -> String {
+    let key = (t.to_string(), crate::over::rows::hash(&style), width.to_bits(), max);
+    if let Some(fit) = FITTED.with_borrow(|f| f.get(&key).filter(|(s, _)| *s == style).map(|(_, fit)| fit.clone())) {
+        return fit;
+    }
+    let fit = fit_lines_now(t, style, width, max);
+    FITTED.with_borrow_mut(|f| {
+        if f.len() >= KEPT_FITS {
+            f.clear();
+        }
+        f.insert(key, (style, fit.clone()));
+    });
+    fit
+}
+
+fn fit_lines_now(t: &str, style: TextStyle, width: f32, max: usize) -> String {
     let fits = |x: &str| rune::text::advance(x, style) <= width;
     let mut lines: Vec<String> = Vec::new();
     let mut cur = String::new();
@@ -1013,3 +1036,7 @@ pub fn sessions_part<'a>(s: &App, compact: bool, k: &'a Kit) -> Part<'a> {
         if compact { c } else { card(c.padding(14.0), k) }
     })
 }
+
+#[cfg(test)]
+#[path = "fit_tests.rs"]
+mod fit_tests;
