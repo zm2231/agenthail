@@ -508,15 +508,37 @@ fn the_settings_tabs_show_which_side_has_more_when_larger_text_makes_them_scroll
     }
     crate::look::hold_text_scale(Some(1.6));
     let mut rt = settings_on(0, 0);
-    for _ in 0..3 {
+    let settle = |rt: &mut Runtime<crate::settings::Prefs>| {
+        for _ in 0..40 {
+            rt.frame(DT);
+        }
+        rt.settle_all();
         rt.frame(DT);
+    };
+    let press = |rt: &mut Runtime<crate::settings::Prefs>, key: &str| {
+        let (x, y) = rt.find(key).unwrap_or_else(|| panic!("{key} is shown"));
+        rt.pointer_move(x, y);
+        rt.pointer_down(x, y);
+        rt.pointer_up(x, y);
+    };
+    let first = |rt: &Runtime<crate::settings::Prefs>| rt.presented("settings-tabs/segment0").expect("Overview is laid out").0[0];
+    settle(&mut rt);
+    let start = first(&rt);
+    press(&mut rt, "settings-tabs-after");
+    settle(&mut rt);
+    assert!(first(&rt) < start - 50.0, "the right chevron scrolls toward the later tabs: {start} -> {}", first(&rt));
+    assert_eq!(rt.state.tab, 0, "and leaves the open tab alone");
+    for _ in 0..4 {
+        if rt.presented("settings-tabs-after").is_some() {
+            press(&mut rt, "settings-tabs-after");
+            settle(&mut rt);
+        }
     }
-    let (x, y) = rt.find("settings-tabs-after").expect("the right chevron is shown");
-    rt.pointer_move(x, y);
-    rt.pointer_down(x, y);
-    rt.pointer_up(x, y);
-    rt.frame(DT);
-    assert_eq!(rt.state.tab, 1, "the chevron opens the next tab");
+    assert!(rt.presented("settings-tabs-after").is_none(), "at the end the right chevron goes");
+    let end = first(&rt);
+    press(&mut rt, "settings-tabs-before");
+    settle(&mut rt);
+    assert!(first(&rt) > end + 50.0, "the left chevron scrolls back toward Overview while Overview stays open: {end} -> {}", first(&rt));
 }
 
 #[test]

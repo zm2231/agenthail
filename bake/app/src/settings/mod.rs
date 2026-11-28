@@ -722,7 +722,7 @@ fn general_pages(s: &Prefs, layer: &mut Vec<El>, k: &rune_kit::Kit) -> El {
     col().w_full().gap(14.0).child(rune::row().w_full().justify_center().child(pages.build(k).key("settings-general-page"))).child(page)
 }
 
-pub(crate) fn open_tab(s: &mut Prefs, i: usize) {
+fn open_tab(s: &mut Prefs, i: usize) {
     s.tab = i;
     s.open_select = None;
     devices::hide_link(s);
@@ -755,7 +755,7 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         .w_full()
         .h_full()
         .child(el().absolute(0.0, 0.0).w_full().h_full().fill(theme::card_deep()))
-        .child(tab_strip::strip(s, tabs.build(&k), &k))
+        .child(tab_strip::strip(tabs.build(&k), &k))
         .children(unfollowed(s, &k))
         .child(parts::scroll(page));
     rune_kit::root(body, layer).on_window_focus(|s: &mut Prefs, focused, _| {
