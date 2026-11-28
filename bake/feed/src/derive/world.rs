@@ -107,7 +107,7 @@ impl Work {
     }
 }
 
-#[derive(Deserialize, Clone, Default, Debug)]
+#[derive(Deserialize, Clone, Default, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Meter {
     #[serde(default)]
@@ -122,7 +122,7 @@ pub struct Meter {
     pub name: Option<String>,
 }
 
-#[derive(Deserialize, Clone, Default, Debug)]
+#[derive(Deserialize, Clone, Default, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Host {
     #[serde(default)]
@@ -133,7 +133,7 @@ pub struct Host {
     pub state: String,
 }
 
-#[derive(Deserialize, Clone, Default, Debug)]
+#[derive(Deserialize, Clone, Default, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Coordinator {
     #[serde(default)]
@@ -146,7 +146,7 @@ pub struct Coordinator {
     pub host: Option<crate::projects::Place>,
 }
 
-#[derive(Deserialize, Clone, Default, Debug)]
+#[derive(Deserialize, Clone, Default, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectRecord {
     pub id: String,
@@ -168,7 +168,7 @@ pub struct ProjectRecord {
     pub session_count: i64,
 }
 
-#[derive(Deserialize, Clone, Default, Debug)]
+#[derive(Deserialize, Clone, Default, Debug, PartialEq)]
 pub struct Actor {
     #[serde(default)]
     pub alias: Option<String>,

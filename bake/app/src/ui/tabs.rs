@@ -186,7 +186,7 @@ pub fn expire(s: &mut App) -> bool {
 }
 
 pub fn strip(s: &App, k: &Kit, sizes: bool) -> Option<El> {
-    strip_part(s, k, sizes).map(|p| p.el(k))
+    strip_part(s, k, sizes).map(|p| p.el())
 }
 
 #[derive(Hash)]

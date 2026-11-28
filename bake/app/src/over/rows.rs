@@ -1,17 +1,16 @@
 use std::hash::Hash;
 
 use rune::El;
-use rune_kit::Kit;
 
 use crate::over::Target;
 
-pub fn memo(id: impl Into<String>, shows: impl Hash, k: &Kit, build: impl FnOnce() -> El) -> El {
+pub fn memo(id: impl Into<String>, shows: impl Hash, build: impl FnOnce() -> El) -> El {
     let id = id.into();
     #[cfg(test)]
     let named = id.clone();
     #[cfg(all(test, feature = "frame-profile"))]
     built::called(&id);
-    let v = fx(&(shows, look(k)));
+    let v = fx(&(shows, crate::theme::paint_key()));
     rune::memo::memo_with_hash(id, v, move || {
         #[cfg(all(test, feature = "frame-profile"))]
         built::rebuilt(&named);
@@ -19,10 +18,6 @@ pub fn memo(id: impl Into<String>, shows: impl Hash, k: &Kit, build: impl FnOnce
         built::note(named);
         build()
     })
-}
-
-fn look(k: &Kit) -> u64 {
-    fx(&(crate::theme::paint_key(), k.dark, k.c, k.ty, k.radius, k.roles, k.text_scale.to_bits()))
 }
 
 pub struct Part<'a> {
@@ -49,7 +44,7 @@ impl<'a> Part<'a> {
         self.v.map(|v| fx(&(&self.id, v)))
     }
 
-    pub fn el(self, k: &Kit) -> El {
+    pub fn el(self) -> El {
         let Part { id, v, row, build } = self;
         let Some(v) = v else { return build() };
         #[cfg(all(test, feature = "frame-profile"))]
@@ -60,7 +55,7 @@ impl<'a> Part<'a> {
         let named = row.then(|| id.clone());
         #[cfg(not(test))]
         let _ = row;
-        rune::memo::memo_with_hash(id, fx(&(v, look(k))), move || {
+        rune::memo::memo_with_hash(id, fx(&(v, crate::theme::paint_key())), move || {
             #[cfg(all(test, feature = "frame-profile"))]
             built::rebuilt(&any);
             #[cfg(test)]

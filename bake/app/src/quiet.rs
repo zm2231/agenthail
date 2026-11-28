@@ -30,7 +30,7 @@ pub fn outside(s: &App) -> Outside {
 }
 
 pub fn wall(s: &App) -> OffsetDateTime {
-    if s.fixtures.is_some() { s.ov.d.now } else { OffsetDateTime::now_utc() }
+    if s.fixtures.is_some() { s.ov.live.read_at().unwrap_or(s.ov.d.now) } else { OffsetDateTime::now_utc() }
 }
 
 pub fn deadlines(s: &App) -> Vec<OffsetDateTime> {

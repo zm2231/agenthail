@@ -876,3 +876,55 @@ fn the_watcher_keeps_rows_only_for_projects_it_still_reads() {
     known.learn(&removed);
     assert_eq!(known.rows_held().into_iter().collect::<Vec<_>>(), ["p"], "so does one no longer listed at all");
 }
+
+#[test]
+fn a_read_that_finds_nothing_new_within_the_minute_asks_for_no_rebuild() {
+    let sessions = || vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")];
+    let rows = || vec![("p", Ok(vec![work("w1", "open")]))];
+    let mut ov = Overview::default();
+    ov.refresh(fetched("2026-11-24T12:00:00Z", sessions(), rows()));
+    ov.world(&[]);
+    ov.refresh(fetched("2026-11-24T12:00:10Z", sessions(), rows()));
+    assert!(!ov.stale(), "the same overview read again within the minute");
+    let ledger = |state: &str| Ledger { rows: vec![work("w1", state).into()], actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps: Default::default() };
+    ov.take_ledger("p", Instant::now(), Ok(ledger("open")));
+    assert!(!ov.stale(), "the same ledger read again");
+
+    let changes: Vec<(&str, Box<dyn Fn(&mut Fetched)>)> = vec![
+        ("a new minute", Box::new(|f| f.recorded.updated_at = "2026-11-24T12:01:00Z".into())),
+        ("a session's status", Box::new(|f| f.sessions = Arc::new(vec![session("a", "p", "2026-11-24T11:59:00Z", "busy")]))),
+        ("a work item's state", Box::new(|f| f.ledgers.insert("p".into(), (Instant::now(), Ok(vec![Arc::new(work("w1", "done"))]))).map(drop).unwrap_or(()))),
+        ("a failed ledger read", Box::new(|f| f.ledgers.insert("p".into(), (Instant::now(), Err("down".into()))).map(drop).unwrap_or(()))),
+        ("a project's name", Box::new(|f| f.recorded.projects[0].display_name = "Renamed".into())),
+        ("an actor", Box::new(|f| f.recorded.actors = HashMap::from([("x".to_string(), Actor { alias: Some("helper".into()), name: None, surface: None })]))),
+        ("usage", Box::new(|f| f.recorded.usage = vec![serde_json::from_value(json!({"provider": "claude", "label": "5h", "percent": 40.0})).unwrap()])),
+        ("a host", Box::new(|f| f.recorded.hosts = vec![serde_json::from_value(json!({"id": "h", "name": "mini", "state": "up"})).unwrap()])),
+        ("a moved project", Box::new(|f| {
+            f.moved = vec!["p".into()];
+            f.ledgers.clear();
+        })),
+    ];
+    for (i, (what, change)) in changes.iter().enumerate() {
+        let mut ov = Overview::default();
+        ov.refresh(fetched("2026-11-24T12:00:00Z", sessions(), rows()));
+        ov.world(&[]);
+        let mut next = fetched(&format!("2026-11-24T12:00:{:02}Z", 10 + i), sessions(), rows());
+        change(&mut next);
+        ov.refresh(next);
+        assert!(ov.stale(), "{what} asks for a rebuild");
+    }
+
+    let mut ov = Overview::default();
+    ov.refresh(fetched("2026-11-24T12:00:00Z", sessions(), rows()));
+    ov.world(&[]);
+    ov.take_ledger("p", Instant::now(), Ok(ledger("done")));
+    assert!(ov.stale(), "a ledger read with a changed row asks for a rebuild");
+    ov.world(&[]);
+    ov.take_ledger("p", Instant::now(), Err("down".into()));
+    assert!(ov.stale(), "a failed ledger read marks the rows stale");
+    ov.world(&[]);
+    assert!(ov.wants("old"));
+    ov.world(&[]);
+    ov.take_ledger("old", Instant::now(), Ok(Ledger { rows: vec![], actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps: Default::default() }));
+    assert!(ov.stale(), "a project that was loading shows its rows");
+}

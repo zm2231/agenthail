@@ -115,7 +115,7 @@ pub fn digest_block<'a>(s: &'a App, p: &'a Project, lines: &'a [Line], max: usiz
     Part::group(format!("digest-{}", p.key), crate::over::rows::version((), &parts), move || {
         let mut c = col().w_full().gap(2.0).padding(14.0);
         for part in parts {
-            c = c.child(part.el(k));
+            c = c.child(part.el());
         }
         ui::card(c, k)
     })
@@ -227,17 +227,17 @@ fn toolbar<'a>(s: &'a App, strip: bool, k: &'a Kit) -> ui::Bar<'a> {
     } else {
         Part::row("now-leading", (), move || ui::crumb(&[("Now", true)], k))
     };
-    let center = crate::ui::tabs::strip_part(s, k, false).map(|tabs| Part::group("now-tabs", crate::over::rows::version((), [&tabs]), move || row().max_w(560.0).child(tabs.el(k))));
+    let center = crate::ui::tabs::strip_part(s, k, false).map(|tabs| Part::group("now-tabs", crate::over::rows::version((), [&tabs]), move || row().max_w(560.0).child(tabs.el())));
     let needs = s.ov.needs.len();
     let brief = s.ov.now_brief;
     let trailing = Part::row("now-trailing", (needs, brief), move || row().gap(10.0).items_center().child(talk_button(k)).child(ui::new_session_button(None, k)).child(variant(brief, k)).child(ui::needs_button(s, k)));
     ui::Bar { leading, center, trailing }
 }
 
-fn toolbar_of(bar: ui::Bar, k: &Kit) -> Toolbar {
-    let mut t = Toolbar::new().leading(bar.leading.el(k)).trailing(bar.trailing.el(k));
+fn toolbar_of(bar: ui::Bar) -> Toolbar {
+    let mut t = Toolbar::new().leading(bar.leading.el()).trailing(bar.trailing.el());
     if let Some(c) = bar.center {
-        t = t.center(c.el(k));
+        t = t.center(c.el());
     }
     t
 }
@@ -285,10 +285,10 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
     let centre = Part::group("now-centre", v, move || {
         let mut c = col().w_full().max_w(860.0).gap(16.0).px(28.0).pt(20.0).pb(40.0);
         for (i, p) in centre.into_iter().enumerate() {
-            let el = p.el(k);
+            let el = p.el();
             c = c.child(if i == decisions_at { col().w_full().pt(14.0).child(el) } else { el });
         }
-        col().w_full().h_full().child(centre_head.el(k)).child(col().key("now-a").w_full().grow(1.0).min_h(0.0).items_center().scroll(ScrollSpec { stick_bottom: false }).child(c))
+        col().w_full().h_full().child(centre_head.el()).child(col().key("now-a").w_full().grow(1.0).min_h(0.0).items_center().scroll(ScrollSpec { stick_bottom: false }).child(c))
     });
 
     let wide = centre_c;
@@ -302,27 +302,27 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
     let rail_head = ui::pane_head_part(s, 2, crate::over::layout::PANES[2], k);
     let v = crate::over::rows::version((wide, none), hands.iter().chain(&moving).chain([&hands_head, &sessions, &moving_head, &rail_head]));
     let rail = Part::group("now-rail", v, move || {
-        let mut rail = col().w_full().max_w(if wide { 820.0 } else { 10000.0 }).gap(10.0).px(14.0).pt(16.0).pb(24.0).child(hands_head.el(k));
+        let mut rail = col().w_full().max_w(if wide { 820.0 } else { 10000.0 }).gap(10.0).px(14.0).pt(16.0).pb(24.0).child(hands_head.el());
         if wide {
             let mut grid = row().w_full().gap(10.0).flex_wrap().items_stretch();
             for h in hands {
-                grid = grid.child(col().w(300.0).grow(1.0).child(h.el(k)));
+                grid = grid.child(col().w(300.0).grow(1.0).child(h.el()));
             }
             rail = rail.child(grid);
         } else {
             for h in hands {
-                rail = rail.child(h.el(k));
+                rail = rail.child(h.el());
             }
         }
-        rail = rail.child(col().w_full().mt(14.0).child(sessions.el(k)));
-        rail = rail.child(col().w_full().mt(14.0).child(moving_head.el(k)));
+        rail = rail.child(col().w_full().mt(14.0).child(sessions.el()));
+        rail = rail.child(col().w_full().mt(14.0).child(moving_head.el()));
         if none {
             rail = rail.child(text("Nothing else is running.".to_string()).font(k.text(META)).color(weak(k)));
         }
         for m in moving {
-            rail = rail.child(m.el(k));
+            rail = rail.child(m.el());
         }
-        col().w_full().h_full().child(rail_head.el(k)).child(col().key("now-rail").w_full().grow(1.0).min_h(0.0).items_center().scroll(ScrollSpec { stick_bottom: false }).child(rail))
+        col().w_full().h_full().child(rail_head.el()).child(col().key("now-rail").w_full().grow(1.0).min_h(0.0).items_center().scroll(ScrollSpec { stick_bottom: false }).child(rail))
     });
 
     let (inspector, rail_in_main) = if rail_in_split { (Some(rail), None) } else { (None, (!rail_c).then_some(rail)) };
@@ -336,17 +336,17 @@ pub fn panes(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
         if side_c {
             main = main.child(strip_wrap(ui::pane_strip(0, &icons::SIDEBAR, Some((counts.0, ui::needs_color(k))), k)).pl(8.0));
         } else if let Some((head, body)) = side_in_main {
-            main = main.child(col().grow(1.0).w(1.0).h_full().items_center().child(col().w_full().max_w(560.0).h_full().child(head.el(k)).child(col().w_full().grow(1.0).min_h(0.0).px(10.0).pt(8.0).scroll(ScrollSpec { stick_bottom: false }).child(body.el(k)))));
+            main = main.child(col().grow(1.0).w(1.0).h_full().items_center().child(col().w_full().max_w(560.0).h_full().child(head.el()).child(col().w_full().grow(1.0).min_h(0.0).px(10.0).pt(8.0).scroll(ScrollSpec { stick_bottom: false }).child(body.el()))));
         }
         if let Some(c) = centre {
-            main = main.child(col().grow(1.0).w(1.0).h_full().child(c.el(k)));
+            main = main.child(col().grow(1.0).w(1.0).h_full().child(c.el()));
         } else {
             main = main.child(strip_wrap(ui::pane_strip(1, &icons::CHECKLIST, Some((counts.0, ui::needs_color(k))), k)));
         }
         if rail_c {
             main = main.child(strip_wrap(ui::pane_strip(2, &icons::BULLET_LIST, Some((counts.1, k.c.text_accent)), k)).pr(8.0));
         } else if let Some(r) = rail_in_main {
-            main = main.child(col().grow(1.0).w(1.0).h_full().child(r.el(k)));
+            main = main.child(col().grow(1.0).w(1.0).h_full().child(r.el()));
         }
         main
     });
@@ -379,14 +379,14 @@ pub fn brief(s: &App, cx: &mut Cx<App>, _layer: &mut Vec<El>, main_kit: &Kit) ->
         .child(col().w_full().mt(10.0).child(crate::over::decisions::section(s, &k, main_kit)))
         .child(ui::section_head("By project", None, Some(text("From the ledger and each session's last word".to_string()).font(k.text(META)).color(weak(&k))), &k).mt(10.0));
     for (p, lines) in digests.iter().take(6) {
-        c = c.child(digest_block(s, p, lines, 4, looked, true, &k).el(&k));
+        c = c.child(digest_block(s, p, lines, 4, looked, true, &k).el());
     }
     let mut mv = col().w_full().gap(2.0).padding(6.0);
     for x in moving.iter().take(6) {
-        mv = mv.child(moving_row(s, &x.id, &k).el(&k));
+        mv = mv.child(moving_row(s, &x.id, &k).el());
     }
     c = c.child(ui::section_head("What's moving", Some(moving.len()), None, &k).mt(10.0)).child(ui::card(mv, &k));
     let main = col().key("now-b").w_full().h_full().items_center().scroll(ScrollSpec { stick_bottom: false }).child(c);
-    let bar = toolbar_of(toolbar(s, true, &k), &k);
+    let bar = toolbar_of(toolbar(s, true, &k));
     ui::frame(cx, s, None, main, None, bar, main_kit)
 }

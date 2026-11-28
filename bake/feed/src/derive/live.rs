@@ -396,6 +396,7 @@ pub struct Overview {
     ledger_at: HashMap<String, Instant>,
     actor_at: HashMap<String, Instant>,
     stale: bool,
+    reads: u64,
     failed: HashSet<String>,
     covered: HashSet<String>,
     pending: HashSet<String>,
@@ -403,11 +404,28 @@ pub struct Overview {
     expected: Vec<Expected>,
 }
 
+struct Shown {
+    minute: Option<i64>,
+    sessions: Arc<Vec<Session>>,
+    ledgers: HashMap<String, Vec<Arc<Work>>>,
+    steps: HashMap<String, Steps>,
+    failed: HashSet<String>,
+    pending: HashSet<String>,
+}
+
+fn same_rows(a: &HashMap<String, Vec<Arc<Work>>>, b: &HashMap<String, Vec<Arc<Work>>>) -> bool {
+    a.len() == b.len() && a.iter().all(|(key, x)| b.get(key).is_some_and(|y| x.len() == y.len() && x.iter().zip(y).all(|(p, q)| Arc::ptr_eq(p, q) || p == q)))
+}
+
 struct Expected {
     id: String,
     patch: Patch,
     at: Instant,
     daemon: Session,
+}
+
+fn minute(at: &str) -> Option<i64> {
+    parse_time(at).map(|t| t.unix_timestamp().div_euclid(60))
 }
 
 fn newer(at: &str, than: &str) -> bool {
@@ -479,7 +497,6 @@ impl Overview {
         if !later(at, epoch, seq, &self.base, true) {
             return false;
         }
-        let minute = |at: &str| parse_time(at).map(|t| t.unix_timestamp().div_euclid(60));
         let ticked = minute(at) != minute(&self.base.updated_at);
         self.base.updated_at = at.to_string();
         self.base.host_epoch = epoch.to_string();
@@ -499,6 +516,34 @@ impl Overview {
             moved = true;
         }
         moved
+    }
+
+    fn shown(&self) -> Shown {
+        Shown {
+            minute: minute(&self.base.updated_at),
+            sessions: self.sessions.clone(),
+            ledgers: self.ledgers.clone(),
+            steps: self.steps.clone(),
+            failed: self.failed.clone(),
+            pending: self.pending.clone(),
+        }
+    }
+
+    fn moved_since(&self, b: &Shown) -> bool {
+        minute(&self.base.updated_at) != b.minute
+            || !(Arc::ptr_eq(&self.sessions, &b.sessions) || self.sessions == b.sessions)
+            || !same_rows(&self.ledgers, &b.ledgers)
+            || self.steps != b.steps
+            || self.failed != b.failed
+            || self.pending != b.pending
+    }
+
+    pub fn read_at(&self) -> Option<OffsetDateTime> {
+        parse_time(&self.base.updated_at)
+    }
+
+    pub fn reads(&self) -> u64 {
+        self.reads
     }
 
     pub fn stale(&self) -> bool {
@@ -566,6 +611,13 @@ impl Overview {
     }
 
     pub fn refresh(&mut self, fetched: Fetched) {
+        let before = self.shown();
+        self.reads += 1;
+        let moved = self.take(fetched);
+        self.stale |= moved || self.moved_since(&before);
+    }
+
+    fn take(&mut self, fetched: Fetched) -> bool {
         let Fetched { mut recorded, sessions, ledgers, held, actors_at, moved, .. } = fetched;
         for id in &moved {
             self.ledgers.remove(id);
@@ -585,14 +637,13 @@ impl Overview {
         }
         let mut steps = std::mem::take(&mut recorded.steps);
         let actors = std::mem::replace(&mut recorded.actors, std::mem::take(&mut self.base.actors));
-        self.base = recorded;
+        let old = std::mem::replace(&mut self.base, recorded);
         self.rekey();
         if fresh {
             self.reconcile();
         }
         self.follow_archive();
-        self.stale = true;
-        self.take_actors(actors_at, actors);
+        let actors = self.take_actors(actors_at, actors);
         let opened: Vec<String> = self.covered.iter().filter(|k| self.ledgers.contains_key(*k)).cloned().collect();
         self.covered = ledgers.keys().cloned().chain(held).chain(opened).collect();
         for (key, (read_at, result)) in ledgers {
@@ -605,6 +656,8 @@ impl Overview {
         self.covered.retain(|k| listed.contains(k.as_str()));
         self.failed.retain(|k| listed.contains(k.as_str()));
         self.ledger_at.retain(|k, _| listed.contains(k.as_str()));
+        let base = &self.base;
+        actors || base.projects != old.projects || base.usage != old.usage || base.hosts != old.hosts || base.tile_order != old.tile_order
     }
 
     pub fn missing_ledgers(&self) -> BTreeSet<String> {
@@ -635,26 +688,31 @@ impl Overview {
     }
 
     pub fn take_ledger(&mut self, project: &str, started: Instant, result: Result<Ledger, String>) {
+        let before = self.shown();
         self.pending.remove(project);
         if result.is_ok() {
             self.covered.insert(project.to_string());
         }
-        self.stale = true;
+        let mut actors = false;
         let rows = result.map(|l| {
-            self.take_actors(l.actors_at, l.actors);
+            actors = self.take_actors(l.actors_at, l.actors);
             (l.rows, l.steps)
         });
         self.apply(project.to_string(), started, rows);
+        self.stale |= actors || self.moved_since(&before);
     }
 
-    fn take_actors(&mut self, started: Instant, actors: HashMap<String, Actor>) {
+    fn take_actors(&mut self, started: Instant, actors: HashMap<String, Actor>) -> bool {
+        let mut moved = false;
         for (id, actor) in actors {
             if self.actor_at.get(&id).is_some_and(|at| *at > started) {
                 continue;
             }
             self.actor_at.insert(id.clone(), started);
+            moved |= self.base.actors.get(&id) != Some(&actor);
             self.base.actors.insert(id, actor);
         }
+        moved
     }
 
     fn apply(&mut self, key: String, started: Instant, result: Result<(Vec<Arc<Work>>, Steps), String>) {

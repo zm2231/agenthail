@@ -267,7 +267,7 @@ pub fn view(s: &App, layer: &mut Vec<El>, k: &Kit) {
         i += 1;
         let key = hit_key(pick);
         let shows = (active, &h.title, &h.status, &h.badge, look, format!("{pick:?}"));
-        list = list.child(crate::over::rows::memo(key.clone(), shows, k, || {
+        list = list.child(crate::over::rows::memo(key.clone(), shows, || {
             let mut body = col().grow(1.0).shrink().min_w(0.0).gap(2.0).child(text(h.title.clone()).font(k.text(BODY_MED)).color(strong(k)).truncate());
             if !h.status.is_empty() {
                 body = body.child(text(h.status.clone()).font(k.text(META)).color(weak(k)).truncate());

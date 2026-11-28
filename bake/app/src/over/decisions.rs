@@ -283,7 +283,7 @@ pub fn note_dialog(s: &App, layer: &mut Vec<El>, k: &Kit) {
 }
 
 pub fn section(s: &App, k: &Kit, main_kit: &Kit) -> El {
-    section_part(s, k, main_kit).el(k)
+    section_part(s, k, main_kit).el()
 }
 
 pub fn section_part<'a>(s: &'a App, k: &'a Kit, main_kit: &'a Kit) -> Part<'a> {
@@ -293,7 +293,7 @@ pub fn section_part<'a>(s: &'a App, k: &'a Kit, main_kit: &'a Kit) -> Part<'a> {
     let Some(found) = &st.inbox else {
         st.drawn.borrow_mut().keep(|_| false);
         let note = if s.client.is_some() { "Looking for decisions…" } else { "Decisions show when the app is connected to the daemon." };
-        return Part::group("decisions", crate::over::rows::version(note, [&head]), move || col().w_full().gap(6.0).child(head.el(k)).child(text(note.to_string()).font(k.text(META)).color(weak(k))));
+        return Part::group("decisions", crate::over::rows::version(note, [&head]), move || col().w_full().gap(6.0).child(head.el()).child(text(note.to_string()).font(k.text(META)).color(weak(k))));
     };
     let notes = found.notes.clone();
     let mut list: Vec<Part<'a>> = Vec::new();
@@ -367,19 +367,19 @@ pub fn section_part<'a>(s: &'a App, k: &'a Kit, main_kit: &'a Kit) -> Part<'a> {
     }
     let v = crate::over::rows::version((&notes, crate::over::rows::version((), &history)), list.iter().chain(&history).chain([&head]));
     Part::group("decisions", v, move || {
-        let mut c = col().w_full().gap(6.0).child(head.el(k));
+        let mut c = col().w_full().gap(6.0).child(head.el());
         for n in notes {
             c = c.child(row().gap(6.0).items_center().child(icon(&icons::INFO, k.text_size(13.0)).color(weak(k))).child(text(n).font(k.text(META)).color(weak(k)).wrap()));
         }
         let mut l = col().w_full().gap(2.0).padding(4.0);
         for p in list {
-            l = l.child(p.el(k));
+            l = l.child(p.el());
         }
         c = c.child(ui::card(l, k));
         if !history.is_empty() {
             let mut h = col().w_full().gap(2.0).padding(4.0).child(text("Handled here".to_string()).font(k.text(META_MED)).color(weak(k)).px(14.0).pt(6.0).pb(2.0));
             for p in history {
-                h = h.child(p.el(k));
+                h = h.child(p.el());
             }
             c = c.child(ui::card(h, k));
         }

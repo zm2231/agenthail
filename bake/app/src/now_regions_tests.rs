@@ -313,3 +313,46 @@ fn a_clock_set_back_turns_the_minute_and_marks_looks_by_the_wall() {
     let looked = feed::catalog::parse_time(rt.state.ov.looked_now.as_deref().expect("leaving Now records a look")).unwrap();
     assert!(looked < rt.state.ov.d.now, "the look is the wall clock, not a world from a clock since set back");
 }
+
+#[test]
+fn a_theme_or_text_size_change_rebuilds_every_row_and_nothing_else_does() {
+    if !isolated("now_regions::a_theme_or_text_size_change_rebuilds_every_row_and_nothing_else_does") {
+        return;
+    }
+    let dir = Dir::new("now-theme");
+    let mut rt = world(&dir);
+    now(&mut rt, false);
+    quiet(&mut rt);
+    matches_fresh(&mut rt, "the first build");
+    let rows = || {
+        let mut seen = crate::over::rows::built::take();
+        seen.sort();
+        seen.dedup();
+        seen
+    };
+    rows();
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(rows(), Vec::<String>::new(), "a view with the same theme builds no rows");
+
+    let shown = drawn(&rt);
+    rt.set_system_dark(false);
+    settle(&mut rt);
+    let light = rows();
+    assert_ne!(drawn(&rt), shown, "the light appearance changes what Now shows");
+    matches_fresh(&mut rt, "the light appearance");
+    crate::over::rows::built::take();
+
+    let shown = drawn(&rt);
+    crate::look::hold_text_scale(Some(1.2));
+    settle(&mut rt);
+    let larger = rows();
+    assert_ne!(drawn(&rt), shown, "larger text changes what Now shows");
+    matches_fresh(&mut rt, "larger text");
+    crate::over::rows::built::take();
+
+    rt.invalidate();
+    settle(&mut rt);
+    assert_eq!(rows(), Vec::<String>::new(), "a view after the change builds no rows");
+    assert!(!light.is_empty() && light == larger, "both changes rebuild the same rows: {light:?} and {larger:?}");
+}

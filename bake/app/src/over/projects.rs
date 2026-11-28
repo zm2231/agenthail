@@ -126,7 +126,7 @@ pub struct State {
     saving: bool,
     error: Option<String>,
     confirm: Option<(Confirm, Job, Option<u64>)>,
-    seen_at: Option<time::OffsetDateTime>,
+    seen_reads: Option<u64>,
     pub lead_drafts: HashMap<String, TextEdit>,
     sending_to: HashSet<String>,
     more_menu: Option<Vec<String>>,
@@ -151,7 +151,7 @@ impl Default for State {
             saving: false,
             error: None,
             confirm: None,
-            seen_at: None,
+            seen_reads: None,
             lead_drafts: HashMap::new(),
             sending_to: HashSet::new(),
             more_menu: None,
@@ -474,8 +474,9 @@ pub fn drain(s: &mut App) -> bool {
         changed = true;
     }
     let remote = s.ov.d.tile_order.clone().or_else(|| s.client.is_none().then(TileOrder::default));
-    let fresh = s.ov.projects.seen_at != Some(s.ov.d.now);
-    s.ov.projects.seen_at = Some(s.ov.d.now);
+    let reads = s.ov.live.reads();
+    let fresh = s.ov.projects.seen_reads != Some(reads);
+    s.ov.projects.seen_reads = Some(reads);
     if let Some(order) = s.ov.projects.tiles.poll(remote.as_ref(), fresh) {
         send_tiles(s, order);
         changed = true;
@@ -900,7 +901,7 @@ fn merged_row(s: &App, x: &feed::catalog::Session, w: &Worktree, k: &Kit) -> El 
     let ago = s.ov.d.ago(&x.last_active);
     let kept = s.ov.projects.kept.get(&id).cloned();
     let shows = (&id, cleaning, &title, &ago, &kept, format!("{w:?}"));
-    crate::over::rows::memo(format!("merged-{id}"), shows, k, || merged_card(id.clone(), cleaning, &title, &ago, kept.as_deref(), w, k))
+    crate::over::rows::memo(format!("merged-{id}"), shows, || merged_card(id.clone(), cleaning, &title, &ago, kept.as_deref(), w, k))
 }
 
 fn merged_card(id: String, cleaning: bool, title: &str, ago: &str, kept: Option<&str>, w: &Worktree, k: &Kit) -> El {

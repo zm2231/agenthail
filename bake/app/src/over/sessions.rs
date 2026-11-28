@@ -84,7 +84,7 @@ pub fn session_row(s: &App, x: &Session, depth: u8, selected: bool, k: &Kit) -> 
     let headline = feed::derive::needs::headline(x).filter(|_| need_of(s, x).is_some() || busy(x)).map(|(h, _)| ui::short_title(&crate::over::plain(&h), 60));
     let dot = state_color(s, x, k);
     let shows = (&x.id, depth, selected, &place, &line, color, live, &trailing, &title, marks, &headline, dot);
-    crate::over::rows::memo(format!("srow-{}", x.id), shows, k, || {
+    crate::over::rows::memo(format!("srow-{}", x.id), shows, || {
         let id = x.id.clone();
         let menu_id = x.id.clone();
         let trailing = match &trailing {
