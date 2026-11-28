@@ -564,13 +564,18 @@ fn now_keeps_every_toolbar_button_clear_of_the_title_and_fade_at_every_width() {
     for scale in [1.0, 1.5, 1.6] {
         let k = rune_kit::Kit::neutral(true).with_text_scale(scale);
         let (floor, fade) = (k.text_size(96.0), k.text_size(16.0).max(16.0));
-        for w in (1100..=1440).step_by(20) {
-            let mut rt = laid_out_in(scale, "now", &dir, (w as f32, 900.0), None);
+        for (screen, w) in ["now", "brief"].into_iter().flat_map(|screen| (1100..=1440).step_by(20).map(move |w| (screen, w))) {
+            let mut rt = laid_out_in(scale, screen, &dir, (w as f32, 900.0), None);
+            rt.update(|s, _| s.ov.hands_on = vec!["a".into(), "b".into(), "q".into()]);
             for _ in 0..4 {
                 rt.frame(DT);
             }
             let (title, buttons) = (rect(&rt, "now-leading"), rect(&rt, "now-trailing"));
-            assert!(buttons[0] >= title[0] + title[2].max(floor) + fade - 0.5, "{scale} at {w}: the buttons {buttons:?} start clear of the title's room {title:?} and the fade");
+            assert!(buttons[0] >= title[0] + title[2].max(floor) + fade - 0.5, "{scale} {screen} at {w}: the buttons {buttons:?} start clear of the title's room {title:?} and the fade");
+            for _ in 0..4 {
+                rt.frame(DT);
+            }
+            assert_eq!(rect(&rt, "now-trailing"), buttons, "{scale} {screen} at {w}: the buttons hold still once laid out");
         }
     }
 }

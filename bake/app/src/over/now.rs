@@ -271,7 +271,7 @@ fn focus_card<'a>(s: &'a App, k: &'a Kit) -> Part<'a> {
 fn toolbar<'a>(s: &'a App, strip: bool, k: &'a Kit) -> ui::Bar<'a> {
     let start = |e: El| e.on_layout(|s: &mut App, r: [f32; 4]| keep(s, LEADING_START, r[0]));
     let leading = if strip {
-        Part::always("now-leading", move || start(row().gap(12.0).items_center().shrink().min_w(0.0).child(text("Now".to_string()).font(k.text(BODY_MED)).color(strong(k)).truncate().shrink().min_w(0.0)).child(ui::strip(s, None, k))))
+        Part::always("now-leading", move || start(row().key("now-leading").gap(12.0).items_center().shrink().min_w(0.0).child(text("Now".to_string()).font(k.text(BODY_MED)).color(strong(k)).truncate().shrink().min_w(0.0)).child(ui::strip(s, None, k))))
     } else {
         Part::row("now-leading", (), move || start(ui::crumb(&[("Now", true)], k)))
     };
