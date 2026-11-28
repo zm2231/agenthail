@@ -452,6 +452,19 @@ pub fn page_host(page: &str) -> Option<String> {
     url::Url::parse(page).ok()?.host_str().map(|h| h.trim_start_matches('[').trim_end_matches(']').to_string())
 }
 
+pub fn page_cookie(session: &WebSession, page: &str) -> Option<cookie::Cookie<'static>> {
+    let host = page_host(page)?;
+    let path = if session.path.is_empty() { "/".to_string() } else { session.path.clone() };
+    let mut cookie = cookie::Cookie::build((session.name.clone(), session.value.clone())).domain(host).path(path).http_only(true).same_site(cookie::SameSite::Strict);
+    if page.starts_with("https://") {
+        cookie = cookie.secure(true);
+    }
+    if let Ok(at) = time::OffsetDateTime::parse(&session.expires_at, &time::format_description::well_known::Rfc3339) {
+        cookie = cookie.expires(at);
+    }
+    Some(cookie.build())
+}
+
 pub fn session_known(page: &str, session: &WebSession) -> std::result::Result<bool, String> {
     let mut url = url::Url::parse(page).map_err(|e| e.to_string())?;
     url.set_path("/_agenthail/signin.js");
