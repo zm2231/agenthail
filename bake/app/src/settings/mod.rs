@@ -741,7 +741,7 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
 fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     let k = cx.kit();
     let mut layer = Vec::new();
-    let tabs = SegmentedControl::new(&TABS, Some(s.tab)).label("Settings").as_tabs().fit().on_pick(|s: &mut Prefs, i, _| open_tab(s, i));
+    let tabs = SegmentedControl::new(&TABS, Some(s.tab)).label("Settings").as_tabs().fit().scrolls(false).on_pick(|s: &mut Prefs, i, _| open_tab(s, i));
     let page = match s.tab {
         overview::TAB => overview::page(s, &k),
         CLAUDE_TAB => claude::page(s, &mut layer, &k),
