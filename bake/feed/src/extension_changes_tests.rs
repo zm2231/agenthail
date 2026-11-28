@@ -4,7 +4,7 @@ use super::*;
 use crate::mock::{daemon, replies};
 
 fn change(value: serde_json::Value) -> Change {
-    crate::reply::parse(value).unwrap()
+    serde_json::from_value(value).unwrap()
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn the_client_lists_shows_undoes_and_builds() {
 #[test]
 fn a_reply_without_a_session_starts_nothing_to_open() {
     assert_eq!(Started::default().session_id(), None);
-    assert_eq!(crate::reply::parse::<Started>(json!({"session": {"id": " "}})).unwrap().session_id(), None);
+    assert_eq!(serde_json::from_value::<Started>(json!({"session": {"id": " "}})).unwrap().session_id(), None);
 }
 
 #[test]

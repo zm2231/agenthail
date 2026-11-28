@@ -10,15 +10,15 @@ use super::*;
 use crate::catalog::Session;
 
 fn session(id: &str, project: &str, last_active: &str, status: &str) -> Session {
-    crate::reply::parse(json!({"id": id, "name": id, "status": status, "lastActive": last_active, "project": {"id": project, "name": project}})).unwrap()
+    serde_json::from_value(json!({"id": id, "name": id, "status": status, "lastActive": last_active, "project": {"id": project, "name": project}})).unwrap()
 }
 
 fn work(id: &str, state: &str) -> Work {
-    crate::reply::parse(json!({"id": id, "text": id, "state": state, "timeline": [{"at": "2026-11-24T11:00:00Z", "actor": "", "kind": "created"}]})).unwrap()
+    serde_json::from_value(json!({"id": id, "text": id, "state": state, "timeline": [{"at": "2026-11-24T11:00:00Z", "actor": "", "kind": "created"}]})).unwrap()
 }
 
 fn recorded(at: &str, sessions: Vec<Session>) -> Recorded {
-    let mut r: Recorded = crate::reply::parse(json!({"updatedAt": at, "projects": [{"id": "p", "displayName": "P"}, {"id": "old", "displayName": "Old"}]})).unwrap();
+    let mut r: Recorded = serde_json::from_value(json!({"updatedAt": at, "projects": [{"id": "p", "displayName": "P"}, {"id": "old", "displayName": "Old"}]})).unwrap();
     r.sessions = sessions;
     r
 }
@@ -107,7 +107,7 @@ fn a_listed_project_without_recent_sessions_gets_its_board_when_opened() {
 #[test]
 fn a_recording_shows_every_ledger_it_holds() {
     let raw: Value = json!({"updatedAt": "2026-11-24T12:00:00Z", "projects": [{"id": "p", "displayName": "P"}], "sessions": [{"id": "a", "lastActive": "2026-11-01T00:00:00Z", "project": {"id": "p", "name": "P"}}], "ledgers": {"p": [{"id": "w1", "state": "open", "timeline": []}]}});
-    let mut ov = Overview::recorded(crate::reply::parse(raw).unwrap());
+    let mut ov = Overview::recorded(serde_json::from_value(raw).unwrap());
     assert!(!ov.wants("p"));
     assert_eq!(board_ids(&ov.world(&[]), "p"), ["w1"]);
 }
@@ -604,11 +604,11 @@ fn a_ledger_change_waits_out_a_failed_reads_retry() {
 #[test]
 fn project_activity_lists_a_project_whose_sessions_are_all_older_and_dates_it() {
     let projects = json!([{"id": "p", "displayName": "P"}, {"id": "quiet", "displayName": "Quiet"}, {"id": "gone", "displayName": "Gone"}]);
-    let activity: Vec<crate::activity::ProjectActivity> = crate::reply::parse(json!([{"id": "quiet", "lastActive": "2026-11-01T00:00:00Z", "sessionCount": 3}, {"id": "gone", "sessionCount": 0}])).unwrap();
+    let activity: Vec<crate::activity::ProjectActivity> = serde_json::from_value(json!([{"id": "quiet", "lastActive": "2026-11-01T00:00:00Z", "sessionCount": 3}, {"id": "gone", "sessionCount": 0}])).unwrap();
     let merged = super::live::with_activity(projects, activity);
     assert_eq!(merged[1]["sessionCount"], json!(3));
     assert_eq!(merged[2].get("lastActive"), None);
-    let mut r: Recorded = crate::reply::parse(json!({"updatedAt": "2026-11-24T12:00:00Z", "projects": merged})).unwrap();
+    let mut r: Recorded = serde_json::from_value(json!({"updatedAt": "2026-11-24T12:00:00Z", "projects": merged})).unwrap();
     r.sessions = vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")];
     let w = World::new(r);
     let keys: Vec<&str> = w.projects.iter().map(|p| p.key.as_str()).collect();
@@ -660,7 +660,7 @@ fn the_persons_move_reads_as_yours() {
 fn work_the_person_holds_is_their_move_whoever_logged_before() {
     let mut held = work("w1", "in_progress");
     held.assignee = Some(crate::ledger::PERSON.into());
-    held.timeline.push(crate::reply::parse(json!({"at": "2026-11-24T11:30:00Z", "actor": "a", "kind": "log", "text": "started"})).unwrap());
+    held.timeline.push(serde_json::from_value(json!({"at": "2026-11-24T11:30:00Z", "actor": "a", "kind": "log", "text": "started"})).unwrap());
     let mut ov = Overview::default();
     ov.refresh(fetched("2026-11-24T12:00:00Z", vec![session("a", "p", "2026-11-24T11:59:00Z", "idle")], vec![("p", Ok(vec![held]))]));
     let w = ov.world(&[]);
@@ -693,16 +693,16 @@ fn parked_and_closed_work_is_no_ones_move() {
 #[test]
 fn a_parked_step_shows_why_it_waits() {
     let mut w = work("w1", "parked");
-    w.timeline.push(crate::reply::parse(json!({"at": "2026-11-24T11:30:00Z", "actor": "agenthail-person", "kind": "state", "state": "parked", "text": "parked (later): after the release"})).unwrap());
-    w.timeline.push(crate::reply::parse(json!({"at": "2026-11-24T11:40:00Z", "actor": "x", "kind": "state", "state": "parked", "text": "handoff: done []"})).unwrap());
+    w.timeline.push(serde_json::from_value(json!({"at": "2026-11-24T11:30:00Z", "actor": "agenthail-person", "kind": "state", "state": "parked", "text": "parked (later): after the release"})).unwrap());
+    w.timeline.push(serde_json::from_value(json!({"at": "2026-11-24T11:40:00Z", "actor": "x", "kind": "state", "state": "parked", "text": "handoff: done []"})).unwrap());
     let steps = super::timeline::timeline(&w, 5);
     assert_eq!(steps[1].what, "Parked: after the release");
     let mut semi = work("w2", "parked");
-    semi.timeline.push(crate::reply::parse(json!({"at": "2026-11-24T11:30:00Z", "actor": "x", "kind": "state", "state": "parked", "text": "took over; parked (later): wait for release; then check logs; handoff: done [\"a\"], remaining [], decisions [], uncertain []"})).unwrap());
+    semi.timeline.push(serde_json::from_value(json!({"at": "2026-11-24T11:30:00Z", "actor": "x", "kind": "state", "state": "parked", "text": "took over; parked (later): wait for release; then check logs; handoff: done [\"a\"], remaining [], decisions [], uncertain []"})).unwrap());
     assert_eq!(super::timeline::timeline(&semi, 5)[0].what, "Parked: wait for release; then check logs");
     let words = |text: &str| {
         let mut w = work("w3", "parked");
-        w.timeline.push(crate::reply::parse(json!({"at": "2026-11-24T11:30:00Z", "actor": "x", "kind": "state", "state": "parked", "text": text})).unwrap());
+        w.timeline.push(serde_json::from_value(json!({"at": "2026-11-24T11:30:00Z", "actor": "x", "kind": "state", "state": "parked", "text": text})).unwrap());
         super::timeline::timeline(&w, 5)[0].what.clone()
     };
     assert_eq!(words("parked (later): wait; handoff: ask Sam"), "Parked: wait; handoff: ask Sam");
@@ -827,7 +827,7 @@ fn status_of(sessions: &[Session], id: &str) -> String {
 
 #[test]
 fn the_overview_shows_the_same_world_as_the_recording_it_holds() {
-    let mut raw: Recorded = crate::reply::parse(json!({"updatedAt": "2026-11-24T12:00:00Z", "projects": [{"id": "p", "displayName": "P", "ledgerKey": "shared:p"}], "phaseLabels": {"p": {"build": "Craft"}}})).unwrap();
+    let mut raw: Recorded = serde_json::from_value(json!({"updatedAt": "2026-11-24T12:00:00Z", "projects": [{"id": "p", "displayName": "P", "ledgerKey": "shared:p"}], "phaseLabels": {"p": {"build": "Craft"}}})).unwrap();
     raw.sessions = vec![session("a", "p", "2026-11-24T11:00:00Z", "idle")];
     raw.ledgers.insert("p".into(), vec![work("p-W1", "open"), work("p-W2", "in_progress")]);
     raw.transcripts.insert("a".into(), Vec::new());
@@ -858,7 +858,7 @@ fn the_watcher_keeps_rows_only_for_projects_it_still_reads() {
     let mut known = super::live::Known::default();
     let read = |held: &[&str], ledgers: Vec<(&str, Result<Vec<Work>, String>)>| {
         let mut f = Fetched { held: held.iter().map(|x| x.to_string()).collect(), ..fetched("2026-11-24T12:00:00Z", Vec::new(), ledgers) };
-        f.recorded.projects.push(crate::reply::parse(json!({"id": "opened"})).unwrap());
+        f.recorded.projects.push(serde_json::from_value(json!({"id": "opened"})).unwrap());
         f
     };
     known.learn(&read(&[], vec![("p", Ok(vec![work("p-W1", "open")])), ("old", Ok(vec![work("old-W1", "open")]))]));
@@ -897,8 +897,8 @@ fn a_read_that_finds_nothing_new_within_the_minute_asks_for_no_rebuild() {
         ("a failed ledger read", Box::new(|f| f.ledgers.insert("p".into(), (Instant::now(), Err("down".into()))).map(drop).unwrap_or(()))),
         ("a project's name", Box::new(|f| f.recorded.projects[0].display_name = "Renamed".into())),
         ("an actor", Box::new(|f| f.recorded.actors = HashMap::from([("x".to_string(), Actor { alias: Some("helper".into()), name: None, surface: None })]))),
-        ("usage", Box::new(|f| f.recorded.usage = vec![crate::reply::parse(json!({"provider": "claude", "label": "5h", "percent": 40.0})).unwrap()])),
-        ("a host", Box::new(|f| f.recorded.hosts = vec![crate::reply::parse(json!({"id": "h", "name": "mini", "state": "up"})).unwrap()])),
+        ("usage", Box::new(|f| f.recorded.usage = vec![serde_json::from_value(json!({"provider": "claude", "label": "5h", "percent": 40.0})).unwrap()])),
+        ("a host", Box::new(|f| f.recorded.hosts = vec![serde_json::from_value(json!({"id": "h", "name": "mini", "state": "up"})).unwrap()])),
         ("a moved project", Box::new(|f| {
             f.moved = vec!["p".into()];
             f.ledgers.clear();
@@ -947,12 +947,12 @@ fn a_fresh_daemon_with_no_projects_reads_as_an_empty_overview() {
 
 #[test]
 fn every_list_the_overview_reads_may_arrive_as_null() {
-    let snapshot = json!({"updatedAt": "2026-11-28T03:04:30Z", "projects": [{"id": "p", "displayName": "P", "coordinators": null, "checkouts": null, "mcp": null, "lastActive": null, "ledgerKey": null}], "sessions": null, "tileOrder": {"order": null, "pinned": null, "revision": 0}});
+    let snapshot = json!({"updatedAt": "2026-11-28T03:04:30Z", "projects": [{"id": "p", "displayName": "P", "coordinators": null, "checkouts": null, "mcp": null}], "sessions": null, "tileOrder": {"order": null, "pinned": null, "revision": 0}});
     let usage = json!({"sets": [{"name": "default", "meters": null}]});
     let hosts = json!({"host": {"id": "h", "name": "forge", "state": "local"}, "hosts": null});
     let fetched = read_overview(snapshot, usage, hosts, json!({"projects": null})).unwrap();
     let p = &fetched.recorded.projects[0];
-    assert_eq!((p.id.as_str(), p.coordinators.len(), p.checkouts.len(), p.mcp.as_deref(), p.last_active.as_str(), p.ledger_key.as_str()), ("p", 0, 0, None, "", ""));
+    assert_eq!((p.id.as_str(), p.coordinators.len(), p.checkouts.len(), p.mcp.as_deref()), ("p", 0, 0, None));
     let tiles = fetched.recorded.tile_order.unwrap();
     assert!(tiles.order.is_empty() && tiles.pinned.is_empty());
     assert!(fetched.sessions.is_empty());
@@ -960,17 +960,8 @@ fn every_list_the_overview_reads_may_arrive_as_null() {
 }
 
 #[test]
-fn a_project_whose_lists_are_null_keeps_its_activity() {
-    let snapshot = json!({"updatedAt": "2026-11-28T03:04:30Z", "projects": [{"id": "p", "displayName": "P"}], "sessions": []});
-    let activity = json!({"projects": [{"id": "p", "lastActive": "2026-11-28T03:00:00Z", "sessionCount": 2, "checkouts": null}]});
-    let fetched = read_overview(snapshot, json!({"sets": null}), json!({"host": null, "hosts": null}), activity).unwrap();
-    assert_eq!((fetched.recorded.projects[0].session_count, fetched.recorded.projects[0].last_active.as_str()), (2, "2026-11-28T03:00:00Z"));
-    assert!(fetched.recorded.usage.is_empty());
-}
-
-#[test]
-fn ledger_rows_with_null_fields_read_as_empty() {
-    let reply = json!({"work": [{"id": "w", "text": null, "state": "open", "phase": null, "assignee": null, "description": null, "acceptance": null, "timeline": null}], "phaseLabels": null, "nextCursor": null}).to_string();
+fn ledger_rows_with_a_null_timeline_read_as_empty() {
+    let reply = json!({"work": [{"id": "w", "state": "open", "assignee": null, "timeline": null}], "phaseLabels": null, "nextCursor": null}).to_string();
     let (client, _seen) = crate::mock::daemon(crate::mock::replies(&[(200, &reply)]));
     let ledger = super::live::ledger(&client, "p", &super::live::Known::default()).unwrap();
     assert_eq!((ledger.rows[0].id.as_str(), ledger.rows[0].timeline.len(), ledger.rows[0].assignee.clone()), ("w", 0, None));

@@ -6,7 +6,7 @@ use crate::mock::{daemon, replies};
 const ORIGIN: &str = "http://127.0.0.1:7412";
 
 fn sample() -> List {
-    crate::reply::parse(json!({
+    serde_json::from_value(json!({
         "host": "running",
         "extensions": [
             {
@@ -112,9 +112,9 @@ fn an_entry_waiting_with_no_ask_names_the_command() {
 
 #[test]
 fn a_stopped_host_is_reported() {
-    let off: List = crate::reply::parse(json!({"host": "off", "extensions": []})).unwrap();
+    let off: List = serde_json::from_value(json!({"host": "off", "extensions": []})).unwrap();
     assert_eq!(off.host_problem("forge").as_deref(), Some("Extensions are off on forge."));
-    let down: List = crate::reply::parse(json!({"host": "unavailable", "hostError": "node exited", "extensions": []})).unwrap();
+    let down: List = serde_json::from_value(json!({"host": "unavailable", "hostError": "node exited", "extensions": []})).unwrap();
     assert_eq!(down.host_problem("forge").as_deref(), Some("node exited"));
     assert_eq!(sample().host_problem("forge"), None);
 }

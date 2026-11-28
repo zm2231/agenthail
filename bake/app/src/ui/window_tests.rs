@@ -146,7 +146,7 @@ fn turn_with(s: &mut App, rt: &mut rune::Runtime<App>, key: &str, f: impl FnOnce
 
 fn two_windows() -> (App, rune::Runtime<App>, rune::Runtime<App>, Id) {
     let mut s = app();
-    s.sessions = ["a", "b"].iter().map(|id| feed::reply::parse(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true})).unwrap()).collect::<Vec<_>>().into();
+    s.sessions = ["a", "b"].iter().map(|id| serde_json::from_value(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true})).unwrap()).collect::<Vec<_>>().into();
     crate::select(&mut s, "a");
     let w = show(&mut s, "b");
     let env = rune::Env { system_dark: true, scale: 1.0 };
@@ -176,7 +176,7 @@ fn a_session_window_opens_with_its_inspector_hidden_and_its_toolbar_shows_it() {
 #[test]
 fn two_windows_take_turns_over_one_app() {
     let mut s = app();
-    s.sessions = ["a", "b"].iter().map(|id| feed::reply::parse(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true})).unwrap()).collect::<Vec<_>>().into();
+    s.sessions = ["a", "b"].iter().map(|id| serde_json::from_value(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true})).unwrap()).collect::<Vec<_>>().into();
     crate::select(&mut s, "a");
     let w = show(&mut s, "b");
     let env = rune::Env { system_dark: true, scale: 1.0 };
@@ -203,7 +203,7 @@ fn two_windows_take_turns_over_one_app() {
 #[test]
 fn a_session_window_draws_the_conversation_without_the_sidebar() {
     let mut s = app();
-    s.sessions = ["a", "b"].iter().map(|id| feed::reply::parse(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true})).unwrap()).collect::<Vec<_>>().into();
+    s.sessions = ["a", "b"].iter().map(|id| serde_json::from_value(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true})).unwrap()).collect::<Vec<_>>().into();
     crate::select(&mut s, "a");
     let w = open(&mut s, "b");
     enter(&mut s, w);
@@ -435,7 +435,7 @@ fn a_session_list_rebuilds_the_overview_once_with_a_session_window_open() {
     let env = rune::Env { system_dark: true, scale: 1.0 };
     let main = rune::AppSpec::<App> { poll: Some(crate::poll), ..rune::AppSpec::new("Agenthail", (1440.0, 900.0), crate::placeholder, crate::ui::view) };
     let mut main = rune::App::new(main).init(crate::placeholder).headless_runtime((1440.0, 900.0), env);
-    let rows = |ids: &[&str]| ids.iter().map(|id| feed::reply::parse(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true, "lastActive": "2026-11-27T09:00:00Z"})).unwrap()).collect::<Vec<feed::catalog::Session>>();
+    let rows = |ids: &[&str]| ids.iter().map(|id| serde_json::from_value(serde_json::json!({"id": id, "surface": "claude", "name": id, "status": "idle", "open": true, "lastActive": "2026-11-27T09:00:00Z"})).unwrap()).collect::<Vec<feed::catalog::Session>>();
     let both = |s: &mut App, main: &mut rune::Runtime<App>, win: &mut rune::Runtime<App>| {
         for _ in 0..2 {
             turn(s, main, "main");
@@ -458,7 +458,7 @@ fn a_session_list_rebuilds_the_overview_once_with_a_session_window_open() {
 fn beside(queued: bool) -> (App, Id) {
     let mut s = app();
     s.client = Some(feed::catalog::Client::new("http://127.0.0.1:9", "t"));
-    let row = |id: &str, count: i64| feed::reply::parse(serde_json::json!({"id": id, "surface": "codex", "name": id, "status": "idle", "open": true, "queueCount": count})).unwrap();
+    let row = |id: &str, count: i64| serde_json::from_value(serde_json::json!({"id": id, "surface": "codex", "name": id, "status": "idle", "open": true, "queueCount": count})).unwrap();
     s.sessions = vec![row("a", 0), row("b", if queued { 1 } else { 0 })].into();
     crate::select(&mut s, "a");
     let w = open(&mut s, "b");
@@ -492,7 +492,7 @@ fn a_session_window_on_changes_follows_new_edits() {
     let main = rune::AppSpec::<App> { poll: Some(crate::poll), ..rune::AppSpec::new("Agenthail", (1440.0, 900.0), crate::placeholder, crate::ui::view) };
     let mut main = rune::App::new(main).init(crate::placeholder).headless_runtime((1440.0, 900.0), env);
     let edit = |n: usize| {
-        let item: feed::Item = feed::reply::parse(serde_json::json!({"id": format!("e{n}"), "kind": "toolCall", "title": "Write", "text": serde_json::json!({"file_path": format!("/w/f{n}.txt"), "content": "hi"}).to_string()})).unwrap();
+        let item: feed::Item = serde_json::from_value(serde_json::json!({"id": format!("e{n}"), "kind": "toolCall", "title": "Write", "text": serde_json::json!({"file_path": format!("/w/f{n}.txt"), "content": "hi"}).to_string()})).unwrap();
         feed::wire::Event::Upsert(item)
     };
     let key = |s: &mut App| {
@@ -709,7 +709,7 @@ fn a_rekey_carries_the_inspector_to_the_new_id() {
 fn a_rekey_keeps_the_streamed_context_and_lands_late_reads_on_the_new_id() {
     let (mut s, _) = beside(false);
     s.screen = Screen::Session;
-    let usage: feed::settings::ContextUsage = feed::reply::parse(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
+    let usage: feed::settings::ContextUsage = serde_json::from_value(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
     crate::ui::inspect::streamed(&mut s, "a", feed::wire::Streamed::Context(Some(usage)));
     let ticket = crate::ui::inspect::ticket(&mut s);
     crate::follow_rekeys(&mut s, HashMap::from([("a".to_string(), "a2".to_string())]));
@@ -742,7 +742,7 @@ fn a_context_read_that_failed_for_a_shown_session_is_tried_again() {
 fn a_read_without_context_leaves_a_missed_context_to_catch_up() {
     let (mut s, _) = beside(false);
     s.screen = Screen::Now;
-    let usage: feed::settings::ContextUsage = feed::reply::parse(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
+    let usage: feed::settings::ContextUsage = serde_json::from_value(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
     crate::ui::inspect::streamed(&mut s, "a", feed::wire::Streamed::Context(Some(usage.clone())));
     assert!(crate::ui::inspect::missed(&s, "a"));
     let ticket = crate::ui::inspect::ticket(&mut s);
@@ -826,7 +826,7 @@ fn after_a_rekey_onto_a_shown_session_the_old_id_s_late_read_and_actions_leave_i
     let read = feed::inspect::Metadata { goal: Some(feed::inspect::Goal { objective: "a's read".into(), ..Default::default() }), ..Default::default() };
     crate::ui::inspect::read(&mut s, "a", late, Ok(read));
     assert_eq!(crate::ui::inspect::goal_of(&s, "b").as_deref(), Some("b's goal"), "a read asked under a before the rekey doesn't replace b's goal");
-    let usage: feed::settings::ContextUsage = feed::reply::parse(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
+    let usage: feed::settings::ContextUsage = serde_json::from_value(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
     crate::ui::session_menu::settle(&mut s, crate::ui::session_menu::Done::Context("a".into(), 50, Ok(Some(usage)), late, Ok(Default::default())));
     assert!(!s.menus.context.contains_key("b"), "nor its context");
     assert!(crate::ui::inspect::missed(&s, "b"), "b is read again after the rekey");
@@ -866,7 +866,7 @@ fn a_released_session_s_late_read_doesn_t_land_on_the_shown_session_it_rekeys_on
 fn a_rekey_onto_a_shown_session_without_values_doesn_t_show_the_old_id_s() {
     let (mut s, _) = beside(false);
     s.screen = Screen::Session;
-    let usage: feed::settings::ContextUsage = feed::reply::parse(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
+    let usage: feed::settings::ContextUsage = serde_json::from_value(serde_json::json!({"usedTokens": 10, "contextWindow": 100})).unwrap();
     crate::ui::inspect::streamed(&mut s, "a", goal("a's goal"));
     crate::ui::inspect::streamed(&mut s, "a", feed::wire::Streamed::Context(Some(usage.clone())));
     crate::ui::inspect::streamed(&mut s, "b", feed::wire::Streamed::Context(None));

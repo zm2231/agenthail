@@ -307,7 +307,12 @@ pub fn fetch(client: &Client, known: &Known, settled: Option<Instant>) -> Result
     let activity = client.project_activity().ok();
     let activity_missing = activity.is_none();
     let projects = with_activity(snap["projects"].clone(), activity.unwrap_or_default());
-    let raw = json!({"updatedAt": snap["updatedAt"], "hostEpoch": snap["hostEpoch"], "catalogSeq": snap["catalogSeq"], "projects": projects, "usage": usage, "hosts": hosts, "tileOrder": snap["tileOrder"]});
+    let mut raw = json!({"projects": projects, "usage": usage, "hosts": hosts});
+    for key in ["updatedAt", "hostEpoch", "catalogSeq", "tileOrder"] {
+        if let Some(value) = snap.get(key) {
+            raw[key] = value.clone();
+        }
+    }
     let mut recorded: Recorded = crate::reply::parse(raw)?;
     let pool: BTreeSet<String> = ledgers.values().filter_map(|(_, r)| r.as_ref().ok()).flatten().flat_map(|w| &w.timeline).map(|t| t.actor.clone()).chain(known.candidates.iter().cloned()).collect();
     let actors_at = Instant::now();

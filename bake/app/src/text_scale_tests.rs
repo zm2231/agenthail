@@ -11,7 +11,7 @@ fn laid_out(scale: f32, screen: &str, dir: &Dir) -> Runtime<App> {
         "session" => {
             crate::over::open_session(s, "a");
             crate::load_pane(s, "a");
-            let items: Vec<feed::Item> = feed::reply::parse(json!([
+            let items: Vec<feed::Item> = serde_json::from_value(json!([
                 {"id": "u1", "kind": "message", "role": "user", "text": "Make the sidebar rows hold larger text."},
                 {"id": "a1", "kind": "message", "role": "assistant", "text": "Done. The row height now follows the text size, see [the change](https://example.com) and `look.rs`.\n\n- Rows grow\n- Layout stays"},
                 {"id": "h1", "kind": "message", "role": "assistant", "text": "## Next steps"},
@@ -26,7 +26,7 @@ fn laid_out(scale: f32, screen: &str, dir: &Dir) -> Runtime<App> {
         }
         "sessions" => {
             crate::over::go(s, Screen::Sessions);
-            let view = feed::reply::parse(json!({
+            let view = serde_json::from_value(json!({
                 "projects": [{"id": "p1", "name": "Alpha", "counts": {"families": 3, "sessions": 3}, "collapsedFamilyIds": ["a", "b", "q"]}],
                 "families": [{"id": "a", "rootId": "a", "projectId": "p1", "members": [{"id": "a"}]}, {"id": "b", "rootId": "b", "projectId": "p1", "members": [{"id": "b"}]}, {"id": "q", "rootId": "q", "projectId": "p1", "members": [{"id": "q"}]}],
             }))
@@ -134,7 +134,7 @@ fn a_new_link_colour_reaches_the_transcript_rows_already_shown() {
     let mut rt = laid_out(1.0, "session", &dir);
     let mut screen = Capture::new();
     assert_eq!(red(&screen.pixels(&mut rt)), 0, "nothing is red before the link colour changes");
-    let view: feed::look::View = feed::reply::parse(json!({"colors": {"link": {"dark": "#ff2020", "light": "#ff2020"}}})).unwrap();
+    let view: feed::look::View = serde_json::from_value(json!({"colors": {"link": {"dark": "#ff2020", "light": "#ff2020"}}})).unwrap();
     crate::look::take_view(crate::look::ticket(), view);
     rt.frame(DT);
     rt.settle_all();
@@ -180,7 +180,7 @@ fn roles_shown() -> Runtime<crate::settings::Prefs> {
     let agents = crate::settings::TABS.iter().position(|t| *t == "Agents").expect("an Agents tab");
     let mut rt = settings_on(agents, 0);
     rt.update(|s, _| {
-        let roles = feed::reply::parse(json!({"roles": [
+        let roles = serde_json::from_value(json!({"roles": [
             {"name": "lead", "builtIn": true},
             {"name": LONG_ROLE, "edited": true, "description": "Runs the weekly release train."},
             {"name": "reviewer", "builtIn": true},

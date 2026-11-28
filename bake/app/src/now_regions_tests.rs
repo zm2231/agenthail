@@ -56,8 +56,8 @@ fn every_region_on_now_shows_each_change_as_a_fresh_build_would() {
     let lead = |item: &str| LeadHandled { session_id: "b".into(), held_by: "a".into(), reason: "Checking it first".into(), work_item: item.into(), ledger_key: "p1".into(), ..Default::default() };
     rt.update(|s, _| {
         s.ov.inbox.inbox = Some(Inbox { decisions: vec![review("W1")], lead_handling: vec![lead("W3")], ..Default::default() });
-        s.ov.d.usage = vec![feed::reply::parse(json!({"provider": "claude", "label": "5h", "percent": 40.0})).unwrap()];
-        s.ov.d.hosts = vec![feed::reply::parse(json!({"id": "h1", "name": "studio", "state": "local"})).unwrap()];
+        s.ov.d.usage = vec![serde_json::from_value(json!({"provider": "claude", "label": "5h", "percent": 40.0})).unwrap()];
+        s.ov.d.hosts = vec![serde_json::from_value(json!({"id": "h1", "name": "studio", "state": "local"})).unwrap()];
     });
     now(&mut rt, false);
     let need = |s: &App, title: &str| crate::over::Need {
@@ -151,7 +151,7 @@ fn a_row_opens_what_it_is_about_after_that_changes_out_of_sight() {
 }
 
 fn overview(updated: &str, sessions: Vec<Session>, sent: &mut std::sync::Arc<Vec<Session>>, activity_missing: bool) -> Bg {
-    let mut recorded: Recorded = feed::reply::parse(json!({
+    let mut recorded: Recorded = serde_json::from_value(json!({
         "updatedAt": updated,
         "hostEpoch": EPOCH,
         "catalogSeq": 1,
@@ -212,7 +212,7 @@ fn a_session_crossing_into_idle_within_the_minute_shows_as_a_fresh_build_would()
     rt.frame(DT);
     rt.update(|s, _| {
         crate::over::go(s, Screen::Sessions);
-        let view = feed::reply::parse(json!({
+        let view = serde_json::from_value(json!({
             "projects": [{"id": "p1", "name": "Alpha", "counts": {"families": 1, "sessions": 1}, "collapsedFamilyIds": ["a"]}],
             "families": [{"id": "a", "rootId": "a", "projectId": "p1", "members": [{"id": "a"}]}],
         }))

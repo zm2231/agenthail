@@ -9,7 +9,7 @@ fn raw(path: &str, later: i64, without: Option<&str>) -> Recorded {
     if let Some(id) = without {
         v["sessions"].as_array_mut().unwrap().retain(|x| x["id"] != json!(id));
     }
-    feed::reply::parse(v).unwrap()
+    serde_json::from_value(v).unwrap()
 }
 
 fn poll(path: &str, later: i64, without: Option<&str>, sent: &mut Sent) -> Bg {

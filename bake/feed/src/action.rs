@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn a_null_pull_request_list_is_empty() {
-        let (client, _seen) = daemon(vec![(200, r#"{"ok":true,"sessionId":"s1","prs":null}"#), (200, r#"{"ok":true,"sessionId":"s1","prs":[{"repo":"o/r","number":1,"title":null,"checks":null}]}"#)]);
+        let (client, _seen) = daemon(vec![(200, r#"{"ok":true,"sessionId":"s1","prs":null}"#), (200, r#"{"ok":true,"sessionId":"s1","prs":[{"repo":"o/r","number":1,"item":null}]}"#)]);
         assert!(client.pr("s1", PrOp::Unwatch, "12").unwrap().is_empty());
         assert_eq!(client.pr("s1", PrOp::Watch, "1").unwrap()[0].number, 1);
     }

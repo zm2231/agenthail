@@ -12,7 +12,7 @@ use crate::worksearch::{Found, Search};
 const RENAMED: &str = r#"{"scope":"Scope","build":"Make","review":"Review","verify":"Verify","check":"Sign-off","ship":"Ship"}"#;
 
 fn recorded(ledgers: serde_json::Value, labels: serde_json::Value) -> Recorded {
-    crate::reply::parse(json!({
+    serde_json::from_value(json!({
         "updatedAt": "2026-11-27T12:00:00Z",
         "projects": [{"id": "p-1", "displayName": "Atlas", "ledgerKey": "project:p-1"}, {"id": "p-2", "displayName": "Birch", "ledgerKey": "project:p-2"}],
         "ledgers": ledgers,
@@ -62,7 +62,7 @@ fn a_renamed_project_with_no_work_shown_still_names_its_steps_in_search() {
 
 #[test]
 fn a_reread_ledger_replaces_its_step_names_and_an_older_read_does_not() {
-    let row = |id: &str| -> std::sync::Arc<Work> { std::sync::Arc::new(crate::reply::parse(json!({"id": id, "text": "t", "state": "in_progress", "phase": "build"})).unwrap()) };
+    let row = |id: &str| -> std::sync::Arc<Work> { std::sync::Arc::new(serde_json::from_value(json!({"id": id, "text": "t", "state": "in_progress", "phase": "build"})).unwrap()) };
     let ledger = |steps: Steps| Ok(Ledger { rows: vec![row("p-1-W1")], actors: HashMap::new(), asked: Vec::new(), actors_at: Instant::now(), steps });
     let mut ov = Overview::recorded(recorded(json!({}), json!({})));
     let (older, newer) = (Instant::now(), Instant::now() + Duration::from_millis(5));
@@ -121,7 +121,7 @@ fn a_work_item_read_carries_its_projects_step_names() {
 
 #[test]
 fn an_overview_ledger_read_that_started_after_a_single_read_wins_whichever_lands_first() {
-    let row = |id: &str| -> std::sync::Arc<Work> { std::sync::Arc::new(crate::reply::parse(json!({"id": id, "text": "t", "state": "in_progress", "phase": "build"})).unwrap()) };
+    let row = |id: &str| -> std::sync::Arc<Work> { std::sync::Arc::new(serde_json::from_value(json!({"id": id, "text": "t", "state": "in_progress", "phase": "build"})).unwrap()) };
     let snapshot = Instant::now();
     let (single_at, overview_at) = (snapshot + Duration::from_millis(1), snapshot + Duration::from_millis(2));
     let single = || Ok(Ledger { rows: vec![row("p-1-W1")], actors: HashMap::new(), asked: Vec::new(), actors_at: single_at, steps: renamed() });

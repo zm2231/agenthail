@@ -115,7 +115,7 @@ fn a_session_change_rebuilds_only_its_row_in_the_sessions_list() {
     let mut rt = runtime(app(three(), &dir), SIZE);
     rt.update(|s, _| {
         crate::over::go(s, Screen::Sessions);
-        let view = feed::reply::parse(json!({
+        let view = serde_json::from_value(json!({
             "projects": [{"id": "p1", "name": "Alpha", "counts": {"families": 3, "sessions": 3}, "collapsedFamilyIds": ["a", "b", "c"]}],
             "families": [{"id": "a", "rootId": "a", "projectId": "p1", "members": [{"id": "a"}]}, {"id": "b", "rootId": "b", "projectId": "p1", "members": [{"id": "b"}]}, {"id": "c", "rootId": "c", "projectId": "p1", "members": [{"id": "c"}]}],
         }))
@@ -225,7 +225,7 @@ fn board(dir: &Dir) -> Runtime<App> {
     let mut raw = recorded(1, three());
     raw.ledgers.insert(
         "p1".into(),
-        feed::reply::parse(json!([
+        serde_json::from_value(json!([
             {"id": "W1", "text": "Wire the export", "state": "in_progress", "phase": "build", "priority": "P2", "type": "task"},
             {"id": "W2", "text": "Check the import", "state": "in_progress", "phase": "build", "priority": "P1", "type": "task"},
             {"id": "W3", "text": "Fix the menu", "state": "open", "priority": "P3", "type": "bug"},

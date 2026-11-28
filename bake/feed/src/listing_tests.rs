@@ -3,7 +3,7 @@ use crate::mock::{daemon, replies};
 use serde_json::{Value, json};
 
 fn session(id: &str, path: &str, branch: Option<&str>, dirty: bool) -> Session {
-    crate::reply::parse(json!({"id": id, "checkout": {"path": path, "branch": branch, "dirty": dirty}, "host": {"id": "h1", "name": "mini", "state": "local"}})).unwrap()
+    serde_json::from_value(json!({"id": id, "checkout": {"path": path, "branch": branch, "dirty": dirty}, "host": {"id": "h1", "name": "mini", "state": "local"}})).unwrap()
 }
 
 fn family(id: &str, project: &str, checkout: &str, members: &[(&str, u8)]) -> Value {
@@ -11,7 +11,7 @@ fn family(id: &str, project: &str, checkout: &str, members: &[(&str, u8)]) -> Va
 }
 
 fn view(projects: Value, families: Vec<Value>) -> View {
-    crate::reply::parse(json!({"counts": {"all": {"families": 9, "sessions": 12}, "running": {"families": 2, "sessions": 2}}, "projects": projects, "families": families})).unwrap()
+    serde_json::from_value(json!({"counts": {"all": {"families": 9, "sessions": 12}, "running": {"families": 2, "sessions": 2}}, "projects": projects, "families": families})).unwrap()
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn checkouts_without_a_branch_take_the_shortest_distinct_path() {
 #[test]
 fn a_remote_root_names_its_host_and_keeps_its_own_checkout() {
     let mut far: Session = session("far", "/r/app", Some("main"), false);
-    far.host = crate::reply::parse(json!({"id": "h2", "name": "forge", "state": "connected"})).unwrap();
+    far.host = serde_json::from_value(json!({"id": "h2", "name": "forge", "state": "connected"})).unwrap();
     let near = session("near", "/r/app", Some("main"), false);
     let rows: HashMap<String, Session> = [far, near].into_iter().map(|x| (x.id.clone(), x)).collect();
     let v = view(json!([{"id": "p", "name": "p", "counts": {"families": 2, "sessions": 2}, "collapsedFamilyIds": ["far", "near"]}]), vec![family("far", "p", "", &[("far", 0)]), family("near", "p", "", &[("near", 0)])]);
@@ -154,7 +154,7 @@ fn status_labels_read_like_the_mac_app() {
 
 #[test]
 fn working_chips_count_by_project_and_merge_names_in_count_order() {
-    let busy = |id: &str, project: &str, name: &str| -> Session { crate::reply::parse(json!({"id": id, "status": "busy", "project": {"id": project, "name": name}})).unwrap() };
+    let busy = |id: &str, project: &str, name: &str| -> Session { serde_json::from_value(json!({"id": id, "status": "busy", "project": {"id": project, "name": name}})).unwrap() };
     let list = vec![busy("1", "a1", "A"), busy("2", "a1", "A"), busy("3", "a1", "A"), busy("4", "b", "B"), busy("5", "b", "B"), busy("6", "b", "B"), busy("7", "b", "B"), busy("8", "a2", "A"), busy("9", "a2", "A"), busy("10", "a2", "A")];
     let by_project = crate::derive::sessions::busy_by_project(&list);
     assert_eq!(by_project.iter().map(|b| (b.0.as_str(), b.2)).collect::<Vec<_>>(), vec![("b", 4), ("a1", 3), ("a2", 3)]);

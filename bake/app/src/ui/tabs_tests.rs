@@ -15,7 +15,7 @@ fn app() -> App {
 }
 
 fn row(id: &str, archived: bool) -> Session {
-    feed::reply::parse(json!({"id": id, "surface": "claude", "name": format!("Work on {id}"), "alias": id, "status": "idle", "open": true, "archived": archived})).unwrap()
+    serde_json::from_value(json!({"id": id, "surface": "claude", "name": format!("Work on {id}"), "alias": id, "status": "idle", "open": true, "archived": archived})).unwrap()
 }
 
 fn ids(s: &App) -> Vec<&str> {

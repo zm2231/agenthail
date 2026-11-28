@@ -4,7 +4,7 @@ use super::*;
 use crate::mock::{daemon, replies};
 
 fn record(v: Value) -> ProjectRecord {
-    crate::reply::parse(v).unwrap()
+    serde_json::from_value(v).unwrap()
 }
 
 fn here(id: &str, added: bool) -> Value {
@@ -208,7 +208,7 @@ fn a_failed_write_keeps_the_change_and_says_so() {
 
 #[test]
 fn merged_worktrees_offer_remove_check_or_delete_the_ignored_files() {
-    let w = |v: Value| crate::reply::parse::<Worktree>(v).unwrap();
+    let w = |v: Value| serde_json::from_value::<Worktree>(v).unwrap();
     let merged = w(json!({"path": "/w/.worktrees/x", "branch": "x", "state": "settled", "settledReason": "merged"}));
     assert!(merged.merged());
     assert_eq!(merged.offer(), Offer::Remove);
@@ -299,7 +299,7 @@ fn a_snapshot_project_reads_its_checkouts_tools_and_lead() {
     assert_eq!((p.name(), p.checkouts.len(), p.tools_off()), ("app", 2, Some(false)));
     assert_eq!(p.coordinators[0].surface, "claude");
     assert_eq!(p.coordinators[0].host.as_ref().map(|h| h.local()), Some(true));
-    let tiles: TileOrder = crate::reply::parse(v["tileOrder"].clone()).unwrap();
+    let tiles: TileOrder = serde_json::from_value(v["tileOrder"].clone()).unwrap();
     assert_eq!(tiles.revision, 3);
 }
 
@@ -337,7 +337,7 @@ fn a_remote_lead_is_found_under_its_hosts_session_id_and_a_new_one_waits_for_its
     assert_eq!(world.project("p1").unwrap().lead_pending, None);
     assert_eq!(world.project("p2").unwrap().lead_pending, Some(("Claude".to_string(), "starts with the first message sent to it")));
     assert_eq!(world.project("p3").unwrap().lead_pending, Some(("Claude".to_string(), "not running · the next message picks it up")));
-    let here = |id: &str, host: Option<Value>| crate::reply::parse::<crate::derive::world::Coordinator>(json!({"sessionId": id, "host": host})).unwrap();
+    let here = |id: &str, host: Option<Value>| serde_json::from_value::<crate::derive::world::Coordinator>(json!({"sessionId": id, "host": host})).unwrap();
     assert_eq!(lead_session_id(&here("s1", None)).as_deref(), Some("s1"));
     assert_eq!(lead_session_id(&here("s1", Some(json!({"id": "h1", "state": "local"})))).as_deref(), Some("s1"));
     assert_eq!(lead_session_id(&here("h2::s1", Some(json!({"id": "h2", "state": "connected"})))).as_deref(), Some("h2::s1"));
@@ -352,7 +352,7 @@ fn a_saved_order_survives_a_restart_and_an_unsent_change_goes_out_first() {
     tiles.answered(TileReply::Failed("offline".into()));
     let saved = tiles.saved();
     assert!(saved.unsent);
-    let mut again = Tiles::restore(crate::reply::parse(serde_json::to_value(&saved).unwrap()).unwrap());
+    let mut again = Tiles::restore(serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap());
     assert!(again.arrangement.pinned.contains("b"));
     assert_eq!(again.adopt(Some(&order(&["a", "b"], &[], 2))), Some(order(&["a", "b"], &["b"], 2)));
     let mut first = Tiles::restore(Saved { order: ids(&["x"]), pinned: vec![], revision: 0, unsent: false });

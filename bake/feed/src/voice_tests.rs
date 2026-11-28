@@ -6,7 +6,7 @@ use crate::mock::{daemon, replies};
 fn state(value: Value) -> State {
     let mut value = value;
     value["protocol"] = json!(1);
-    crate::reply::parse(value).unwrap()
+    serde_json::from_value(value).unwrap()
 }
 
 fn jobs(effects: &[Effect]) -> Vec<Job> {

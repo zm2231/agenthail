@@ -9,7 +9,7 @@ fn many_projects(dir: &Dir) -> Runtime<App> {
     let names: Vec<String> = (1..=12).map(|i| format!("p{i}")).collect();
     let mut projects: Vec<serde_json::Value> = names.iter().map(|id| json!({"id": id, "displayName": format!("Project {id}"), "lastActive": at(1)})).collect();
     projects.push(json!({"id": "old", "displayName": "Old", "archived": true, "lastActive": at(1)}));
-    let mut raw: Recorded = feed::reply::parse(json!({"updatedAt": at(1), "hostEpoch": super::EPOCH, "catalogSeq": 1, "projects": projects})).unwrap();
+    let mut raw: Recorded = serde_json::from_value(json!({"updatedAt": at(1), "hostEpoch": super::EPOCH, "catalogSeq": 1, "projects": projects})).unwrap();
     raw.sessions = names.iter().enumerate().map(|(i, id)| session(&format!("s-{id}"), i as u64, json!({"project": {"id": id, "name": format!("Project {id}")}}))).collect();
     let mut app = crate::empty(Overview::recorded(raw), false);
     app.sessions = app.ov.d.sessions.clone();

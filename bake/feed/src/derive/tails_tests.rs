@@ -12,7 +12,7 @@ use crate::Item;
 use crate::catalog::{Client, Session, parse_time};
 
 fn session(id: &str, last_active: &str) -> Session {
-    crate::reply::parse(json!({"id": id, "name": id, "lastActive": last_active, "project": {"id": "p", "name": "P"}})).unwrap()
+    serde_json::from_value(json!({"id": id, "name": id, "lastActive": last_active, "project": {"id": "p", "name": "P"}})).unwrap()
 }
 
 fn said_row(id: &str, at: &str, text: &str) -> Value {
@@ -24,7 +24,7 @@ fn reply_row(id: &str) -> Value {
 }
 
 fn said(id: &str, at: &str, text: &str) -> Item {
-    crate::reply::parse(said_row(id, at, text)).unwrap()
+    serde_json::from_value(said_row(id, at, text)).unwrap()
 }
 
 fn frame(v: serde_json::Value) -> Vec<String> {
@@ -51,7 +51,7 @@ fn tail(items: Vec<Item>) -> Tail {
 }
 
 fn overview_with(sessions: Vec<Session>) -> Overview {
-    let recorded: Recorded = crate::reply::parse(json!({"updatedAt": "2026-11-24T12:00:00Z", "projects": [{"id": "p", "displayName": "P"}]})).unwrap();
+    let recorded: Recorded = serde_json::from_value(json!({"updatedAt": "2026-11-24T12:00:00Z", "projects": [{"id": "p", "displayName": "P"}]})).unwrap();
     let mut ov = Overview::default();
     ov.refresh(Fetched { recorded, sessions: std::sync::Arc::new(sessions), ledgers: Default::default(), held: Vec::new(), asked: Vec::new(), actors_at: Instant::now(), usage: None, moved: Vec::new() });
     ov
@@ -155,7 +155,7 @@ fn hands_on_comes_from_fetched_tails_and_loaded_panes() {
 fn a_long_conversation_steered_once_recently_is_hands_on() {
     let mut ov = overview_with(vec![session("fetched", "2026-11-24T11:58:00Z"), session("paned", "2026-11-24T11:59:00Z"), session("quiet", "2026-11-24T11:57:00Z")]);
     let rows = long_conversation_steered_at("2026-11-24T11:50:00Z");
-    let conversation: Vec<Item> = rows.iter().map(|r| crate::reply::parse(r.clone()).unwrap()).collect();
+    let conversation: Vec<Item> = rows.iter().map(|r| serde_json::from_value(r.clone()).unwrap()).collect();
     let mut v = Vec::new();
     for (seq, row) in rows.into_iter().enumerate() {
         v.extend(upsert(seq as u64 + 1, row));
