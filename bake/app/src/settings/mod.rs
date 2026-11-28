@@ -9,6 +9,7 @@ mod notify;
 mod overview;
 mod parts;
 mod signin;
+mod tab_strip;
 
 use rune_kit::Kit;
 use std::cell::{Cell, OnceCell};
@@ -721,6 +722,18 @@ fn general_pages(s: &Prefs, layer: &mut Vec<El>, k: &rune_kit::Kit) -> El {
     col().w_full().gap(14.0).child(rune::row().w_full().justify_center().child(pages.build(k).key("settings-general-page"))).child(page)
 }
 
+fn open_tab(s: &mut Prefs, i: usize) {
+    s.tab = i;
+    s.open_select = None;
+    devices::hide_link(s);
+    handoffs::changed(s);
+    appearance::opened(s);
+    overview::opened(s);
+    signin::opened(s);
+    agents::opened(s);
+    keyboard::opened(s);
+}
+
 pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     crate::look::frame(cx, false, false, |cx, _| window(s, cx))
 }
@@ -728,17 +741,7 @@ pub fn view(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
 fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
     let k = cx.kit();
     let mut layer = Vec::new();
-    let tabs = SegmentedControl::new(&TABS, Some(s.tab)).label("Settings").as_tabs().fit().on_pick(|s: &mut Prefs, i, _| {
-        s.tab = i;
-        s.open_select = None;
-        devices::hide_link(s);
-        handoffs::changed(s);
-        appearance::opened(s);
-        overview::opened(s);
-        signin::opened(s);
-        agents::opened(s);
-        keyboard::opened(s);
-    });
+    let tabs = SegmentedControl::new(&TABS, Some(s.tab)).label("Settings").as_tabs().fit().on_pick(|s: &mut Prefs, i, _| open_tab(s, i));
     let page = match s.tab {
         overview::TAB => overview::page(s, &k),
         CLAUDE_TAB => claude::page(s, &mut layer, &k),
@@ -752,7 +755,7 @@ fn window(s: &Prefs, cx: &mut Cx<Prefs>) -> El {
         .w_full()
         .h_full()
         .child(el().absolute(0.0, 0.0).w_full().h_full().fill(theme::card_deep()))
-        .child(col().key("settings-tabs").w_full().scroll_x().scroll_edge_fade(24.0).child(col().w_full().items_center().pt(14.0).pb(10.0).child(tabs.build(&k))))
+        .child(tab_strip::strip(tabs.build(&k), &k))
         .children(unfollowed(s, &k))
         .child(parts::scroll(page));
     rune_kit::root(body, layer).on_window_focus(|s: &mut Prefs, focused, _| {

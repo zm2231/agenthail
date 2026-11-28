@@ -33,7 +33,7 @@ pub struct Binding {
     pub menu: Option<(&'static str, &'static str)>,
 }
 
-pub const APP: [Binding; 17] = [
+pub const APP: [Binding; 18] = [
     Binding { act: Act::NewSession, id: "newSession", menu: Some(("File", "New Session")) },
     Binding { act: Act::GoToSession, id: "goToSession", menu: Some(("Session", "Go to Session…")) },
     Binding { act: Act::Stop, id: "stop", menu: Some(("Session", "Stop")) },
@@ -46,6 +46,7 @@ pub const APP: [Binding; 17] = [
     Binding { act: Act::ToggleInspector, id: "toggleInspector", menu: Some(("View", "Show Inspector")) },
     Binding { act: Act::TextBigger, id: "textBigger", menu: Some(("View", "Make Text Bigger")) },
     Binding { act: Act::TextSmaller, id: "textSmaller", menu: Some(("View", "Make Text Smaller")) },
+    Binding { act: Act::TextActual, id: "textActual", menu: Some(("View", "Actual Text Size")) },
     Binding { act: Act::NewTab, id: "newTab", menu: Some(("File", "New Tab")) },
     Binding { act: Act::CloseTab, id: "closeTab", menu: None },
     Binding { act: Act::OpenInNewWindow, id: "openInNewWindow", menu: Some(("Session", "Open in New Window")) },
@@ -196,10 +197,7 @@ pub fn menu_items(state: MenuState) -> Vec<MenuItem<App>> {
                 None => item,
             })
         })
-        .chain([
-            MenuItem::with_action("Actual Text Size", |s: &mut App, tx| run(s, Act::TextActual, tx)).id("key-TextActual").menu("View"),
-            MenuItem::with_action("Focus", |s: &mut App, _| crate::transcript::set_focus(s, !crate::transcript::focused())).id("key-Focus").menu("View").checked(state.focus),
-        ])
+        .chain([MenuItem::with_action("Focus", |s: &mut App, _| crate::transcript::set_focus(s, !crate::transcript::focused())).id("key-Focus").menu("View").checked(state.focus)])
         .collect()
 }
 
@@ -229,6 +227,7 @@ mod tests {
         assert_eq!(press(Key::Command('t'), Mods { alt: true, ..CMD }), Some(Act::Talk));
         assert_eq!(press(Key::Command('='), CMD), Some(Act::TextBigger));
         assert_eq!(press(Key::Command('-'), CMD), Some(Act::TextSmaller));
+        assert_eq!(press(Key::Command('0'), CMD), Some(Act::TextActual), "⌘0 is Actual Text Size, as in the Mac app's View menu");
     }
 
     #[test]
@@ -238,7 +237,7 @@ mod tests {
         assert_eq!(press(Key::Up, Mods::default()), None);
         assert_eq!(press(Key::Text(".".into()), Mods::default()), None);
         assert_eq!(press(Key::Command('s'), Mods { shift: true, ..CMD }), None, "⇧⌘S stays the Sessions screen's");
-        assert_eq!(press(Key::Command('0'), CMD), None, "⌘0 stays Now");
+        assert_eq!(press(Key::Command('n'), Mods { shift: true, ..CMD }), None, "⇧⌘N stays Now");
         assert_eq!(press(Key::Command('j'), CMD), None, "⌘J stays next need");
         assert_eq!(press(Key::Command('t'), CMD), Some(Act::NewTab), "⌘T opens a new tab, as the Mac app does");
         assert_eq!(press(Key::Command('b'), Mods { alt: true, ..CMD }), None, "⌥⌘B stays the brief toggle");
@@ -259,7 +258,7 @@ mod tests {
             }
         }
         let menus: Vec<_> = APP.iter().filter_map(|b| b.menu).collect();
-        assert_eq!(menus, vec![("File", "New Session"), ("Session", "Go to Session…"), ("Session", "Stop"), ("View", "Refresh"), ("Session", "Talk to Orchestrator…"), ("View", "Show Inspector"), ("View", "Make Text Bigger"), ("View", "Make Text Smaller"), ("File", "New Tab"), ("Session", "Open in New Window"), ("Session", "Next Tab"), ("Session", "Previous Tab")]);
+        assert_eq!(menus, vec![("File", "New Session"), ("Session", "Go to Session…"), ("Session", "Stop"), ("View", "Refresh"), ("Session", "Talk to Orchestrator…"), ("View", "Show Inspector"), ("View", "Make Text Bigger"), ("View", "Make Text Smaller"), ("View", "Actual Text Size"), ("File", "New Tab"), ("Session", "Open in New Window"), ("Session", "Next Tab"), ("Session", "Previous Tab")]);
     }
 
     #[test]

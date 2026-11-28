@@ -168,6 +168,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("refresh", "Refresh", "mod+r", Group::View),
     cmd("textBigger", "Make text bigger", "mod+equal", Group::View),
     cmd("textSmaller", "Make text smaller", "mod+minus", Group::View),
+    cmd("textActual", "Actual text size", "mod+0", Group::View),
     cmd("stop", "Stop", "mod+period", Group::Composer),
     cmd("composerSendNow", "Send now, steering a running turn", "ctrl+enter", Group::Composer),
     cmd("composerInterrupt", "Stop the running turn (twice clears the draft)", "escape", Group::Composer),
@@ -180,10 +181,12 @@ pub const COMMANDS: &[Command] = &[
     cmd("composerPaste", "Paste (also ⌘V)", "ctrl+v", Group::Composer),
 ];
 
+pub const NOW: &str = "shift+mod+n";
+
 pub const FIXED: &[(&str, &str)] = &[
     ("mod+comma", "Settings"),
     ("shift+mod+s", "Sessions"),
-    ("mod+0", "Now"),
+    (NOW, "Now"),
     ("mod+j", "Next session that needs you"),
     ("mod+1", "Hands-on session 1"),
     ("mod+2", "Hands-on session 2"),
@@ -247,10 +250,23 @@ impl Shortcuts {
     }
 
     pub fn get(&self, id: &str) -> Option<Stored> {
+        self.get_on(id, MAC)
+    }
+
+    fn get_on(&self, id: &str, mac: bool) -> Option<Stored> {
         match self.overrides.get(id) {
             Some(chosen) => *chosen,
-            None => default_of(id),
+            None => default_of(id).filter(|d| !self.chosen_elsewhere(*d, id, mac)),
         }
+    }
+
+    pub fn command_on(&self, spec: &str) -> Option<&'static str> {
+        let shortcut = Stored::parse(spec)?;
+        COMMANDS.iter().find(|c| self.get(c.id) == Some(shortcut)).map(|c| c.title)
+    }
+
+    fn chosen_elsewhere(&self, shortcut: Stored, id: &str, mac: bool) -> bool {
+        self.overrides.iter().any(|(other, chosen)| other != id && *chosen == Some(shortcut)) || self.any_app.is_some_and(|a| a.in_app_twins(mac).contains(&shortcut))
     }
 
     pub fn spec(&self, id: &str) -> Option<String> {
@@ -298,7 +314,7 @@ impl Shortcuts {
     }
 
     fn owner_on(&self, shortcut: Stored, except: &str, mac: bool) -> Option<&'static str> {
-        if let Some(c) = COMMANDS.iter().find(|c| c.id != except && self.get(c.id) == Some(shortcut)) {
+        if let Some(c) = COMMANDS.iter().find(|c| c.id != except && self.get_on(c.id, mac) == Some(shortcut)) {
             return Some(c.title);
         }
         if except != ANY_APP_ID && self.any_app.is_some_and(|a| a.in_app_twins(mac).contains(&shortcut)) {
@@ -448,6 +464,21 @@ mod tests {
         assert_eq!(saved["jumpToLatest"], serde_json::Value::Null);
         assert_eq!(Shortcuts::load(Some(b"not json"), Some("false")), Shortcuts::default());
         assert_eq!(Shortcuts::default().data(), None, "no overrides removes the key");
+    }
+
+    #[test]
+    fn a_default_yields_to_a_shortcut_chosen_for_another_command() {
+        let sc = Shortcuts::load(Some(br#"{"newTab":{"carbonKeyCode":29,"carbonModifiers":256},"refresh":{"carbonKeyCode":45,"carbonModifiers":768}}"#), None);
+        assert_eq!(sc.spec("newTab").as_deref(), Some("mod+0"));
+        assert_eq!(sc.get("textActual"), None, "the Mac app's saved ⌘0 keeps it");
+        assert_eq!(sc.default_blocker("textActual"), Some("New tab"));
+        assert_eq!(sc.spec("refresh").as_deref(), Some("shift+mod+n"));
+        assert_eq!(sc.command_on(NOW), Some("Refresh"), "the Mac app's saved ⇧⌘N takes Now's keys");
+        assert_eq!(Shortcuts::default().command_on(NOW), None);
+        assert_eq!(sc.spec("textBigger").as_deref(), Some("mod+equal"), "untaken defaults stay");
+        let mut freed = sc.clone();
+        freed.set("newTab", None).unwrap();
+        assert_eq!(freed.spec("textActual").as_deref(), Some("mod+0"), "freeing ⌘0 gives the default back");
     }
 
     #[test]

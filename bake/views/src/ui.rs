@@ -445,7 +445,7 @@ pub fn strip(s: &App, current: Option<&str>, k: &Kit) -> El {
 pub use feed::derive::text::short_title;
 
 pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k: &Kit) -> El {
-    let home = SidebarRow::new("Now").icon(&icons::DOT_GRID).detail("⌘0").height(32.0).selected(matches!(s.screen, Screen::Now)).on_select(|s: &mut App, _| go(s, Screen::Now)).build(k).key("home");
+    let home = SidebarRow::new("Now").icon(&icons::DOT_GRID).detail("⌘⇧N").height(32.0).selected(matches!(s.screen, Screen::Now)).on_select(|s: &mut App, _| go(s, Screen::Now)).build(k).key("home");
     let search = SidebarRow::new("Jump to").icon(&icons::MAGNIFYING_GLASS).detail("⌘K").height(32.0).on_select(|s: &mut App, _| crate::open_jump(s, "")).build(k).key("jump");
     let all = SidebarRow::new("Sessions")
         .icon(&icons::BULLET_LIST)

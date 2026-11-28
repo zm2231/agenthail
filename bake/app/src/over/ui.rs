@@ -148,16 +148,19 @@ pub fn fit_width(s: &App, key: &str) -> Option<f32> {
 }
 
 pub fn fitted(key: &str, t: &str, width: Option<f32>, style: TextStyle, color: Color, lines: usize, k: &Kit) -> El {
-    let id = key.to_string();
     let body = match width {
         Some(w) if w > 8.0 => text(fit_lines(t, k.text(style), w - 1.0, lines)).font(k.text(style)).color(color),
         _ => text(t.to_string()).font(k.text(style)).color(color).wrap_anywhere().max_lines(lines),
     };
-    col().key(format!("fit-{key}")).w_full().min_w(0.0).shrink().on_layout(move |s: &mut App, r: [f32; 4]| {
-        if s.ov.widths.get(&id).is_none_or(|w| (w - r[2]).abs() > 0.5) {
-            s.ov.widths.insert(id.clone(), r[2]);
+    measured(col().key(format!("fit-{key}")).w_full().min_w(0.0).shrink(), key.to_string()).child(body)
+}
+
+pub fn measured(e: El, key: String) -> El {
+    e.on_layout(move |s: &mut App, r: [f32; 4]| {
+        if s.ov.widths.get(&key).is_none_or(|w| (w - r[2]).abs() > 0.5) {
+            s.ov.widths.insert(key.clone(), r[2]);
         }
-    }).child(body)
+    })
 }
 
 pub fn spacer() -> El {
@@ -317,7 +320,7 @@ pub fn mini_phase(phase: Option<usize>, label: &str, k: &Kit) -> El {
 }
 
 pub fn section_head(title: &str, count: Option<usize>, trailing: Option<El>, k: &Kit) -> El {
-    let mut r = row().w_full().items_center().gap(8.0).child(text(title.to_string()).font(k.text(HEAD)).color(strong(k)));
+    let mut r = row().w_full().items_center().gap(8.0).flex_wrap().child(text(title.to_string()).font(k.text(HEAD)).color(strong(k)));
     if let Some(n) = count {
         r = r.child(Badge::new(n.to_string()).variant(BadgeVariant::Subtle).build(k));
     }
@@ -328,25 +331,44 @@ pub fn section_head(title: &str, count: Option<usize>, trailing: Option<El>, k: 
     r
 }
 
+pub fn section_note(note: impl Into<String>, k: &Kit) -> El {
+    text(note.into()).font(k.text(META)).color(weak(k)).wrap().shrink().min_w(0.0)
+}
+
 pub fn card(content: El, k: &Kit) -> El {
     col().w_full().radius(12.0).fill(k.c.surface_base).border(1.0, edge()).child(content)
 }
 
-pub fn new_session_button(project: Option<&str>, k: &Kit) -> El {
+fn start_session(project: Option<&str>) -> impl Fn(&mut App, &mut rune::Tx) + 'static {
     let project = project.map(str::to_string);
+    move |s: &mut App, tx: &mut rune::Tx| {
+        let prefill = match &project {
+            Some(key) => crate::ui::new_session::project_prefill(s, key),
+            None => crate::ui::new_session::Prefill::default(),
+        };
+        crate::ui::new_session::open(s, prefill, tx);
+    }
+}
+
+pub fn new_session_button(project: Option<&str>, k: &Kit) -> El {
     Button::new("New session")
         .variant(ButtonVariant::Ghost)
         .control_size(ControlSize::Small)
         .icon(&icons::PLUS)
         .shortcut("⌘N")
-        .on_press_tx(move |s: &mut App, tx: &mut rune::Tx| {
-            let prefill = match &project {
-                Some(key) => crate::ui::new_session::project_prefill(s, key),
-                None => crate::ui::new_session::Prefill::default(),
-            };
-            crate::ui::new_session::open(s, prefill, tx);
-        })
+        .on_press_tx(start_session(project))
         .build(k)
+}
+
+pub fn new_session_icon(project: Option<&str>, k: &Kit) -> El {
+    rune_kit::IconButton::new(&icons::PLUS)
+        .variant(rune_kit::IconButtonVariant::Ghost)
+        .control_size(ControlSize::Small)
+        .label("New session")
+        .shortcut("⌘N")
+        .on_press_tx(start_session(project))
+        .build(k)
+        .key("new-session")
 }
 
 pub fn notice(message: &str, k: &Kit) -> El {
@@ -452,8 +474,15 @@ pub fn needs_part<'a>(s: &'a App, k: &'a Kit) -> Part<'a> {
 }
 
 pub fn needs_button(s: &App, k: &Kit) -> El {
-    let n = s.ov.needs.len();
-    Button::new(format!("{n} need you"))
+    needs_labelled(format!("{} need you", s.ov.needs.len()), k)
+}
+
+pub fn needs_count_button(s: &App, k: &Kit) -> El {
+    needs_labelled(s.ov.needs.len().to_string(), k)
+}
+
+fn needs_labelled(label: String, k: &Kit) -> El {
+    Button::new(label)
         .variant(ButtonVariant::Ghost)
         .icon(&icons::NOTIFICATIONS)
         .shortcut("⌘J")
@@ -574,8 +603,12 @@ pub fn sidebar(s: &App, current_project: Option<&str>, selected: Option<&str>, k
     sidebar_part(s, current_project, selected, k).el()
 }
 
+fn now_keys() -> Option<&'static str> {
+    crate::ui::bindings::read(|sc| sc.command_on(feed::shortcuts::NOW)).is_none().then_some("⌘⇧N")
+}
+
 fn nav_row<'a>(id: &'static str, label: &'static str, glyph: &'static Icon, detail: Option<&'static str>, on: bool, k: &'a Kit, pick: fn(&mut App, &mut rune::Tx)) -> Part<'a> {
-    Part::row(id, on, move || {
+    Part::row(id, (on, detail), move || {
         let mut r = SidebarRow::new(label).icon(glyph).height(k.text_size(32.0)).selected(on).on_select(move |s: &mut App, tx: &mut rune::Tx| pick(s, tx));
         if let Some(d) = detail {
             r = r.detail(d);
@@ -614,7 +647,7 @@ impl<'a> Section<'a> {
 
 pub fn sidebar_part<'a>(s: &'a App, current_project: Option<&str>, selected: Option<&str>, k: &'a Kit) -> Part<'a> {
     let mut heads = vec![
-        nav_row("home", "Now", &icons::DOT_GRID, Some("⌘0"), matches!(s.screen, Screen::Now), k, |s, _| go(s, Screen::Now)),
+        nav_row("home", "Now", &icons::DOT_GRID, now_keys(), matches!(s.screen, Screen::Now), k, |s, _| go(s, Screen::Now)),
         nav_row("jump", "Jump to", &icons::MAGNIFYING_GLASS, Some("⌘K"), false, k, |s, tx| crate::over::open_jump(s, tx)),
         nav_row("sessions", "Sessions", &icons::BULLET_LIST, Some("⌘⇧S"), matches!(s.screen, Screen::Sessions), k, |s, _| go(s, Screen::Sessions)),
         nav_row("apps", "Apps", &icons::EXTENSIONS, None, matches!(s.screen, Screen::Extensions | Screen::Extension(_)), k, |s, _| go(s, Screen::Extensions)),
@@ -873,7 +906,7 @@ pub fn pane_head_part<'a>(s: &App, i: usize, title: &'a str, k: &'a Kit) -> Part
 }
 
 pub fn head_part<'a>(id: &str, title: &'a str, count: Option<usize>, note: Option<String>, k: &'a Kit) -> Part<'a> {
-    Part::row(id.to_string(), crate::over::rows::hash(&(title, count, &note)), move || section_head(title, count, note.map(|n| text(n).font(k.text(META)).color(weak(k))), k))
+    Part::row(id.to_string(), crate::over::rows::hash(&(title, count, &note)), move || section_head(title, count, note.map(|n| section_note(n, k)), k))
 }
 
 fn until(s: &App, at: &str) -> String {
@@ -1027,9 +1060,10 @@ pub fn sessions_part<'a>(s: &App, compact: bool, k: &'a Kit) -> Part<'a> {
         let head = row()
             .w_full()
             .gap(8.0)
+            .flex_wrap()
             .items_center()
             .child(text("Sessions".to_string()).font(k.text(HEAD)).color(strong(k)))
-            .child(text(format!("{total} working of {listed}")).font(k.text(META)).color(weak(k)).truncate().shrink().min_w(0.0))
+            .child(text(format!("{total} working of {listed}")).font(k.text(META)).color(weak(k)).key("sessions-count"))
             .child(spacer())
             .child(open);
         let c = col().w_full().gap(8.0).child(head).child(row_);

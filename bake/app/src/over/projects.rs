@@ -953,7 +953,7 @@ pub fn merged(s: &App, key: &str, k: &Kit) -> Option<El> {
     if rows.is_empty() {
         return None;
     }
-    let mut c = col().w_full().gap(8.0).child(ui::section_head("Merged", Some(rows.len()), Some(text("worktrees left behind".to_string()).font(k.text(META)).color(weak(k))), k));
+    let mut c = col().w_full().gap(8.0).child(ui::section_head("Merged", Some(rows.len()), Some(ui::section_note("worktrees left behind", k)), k));
     for (x, w) in rows {
         c = c.child(merged_row(s, x, w, k));
     }

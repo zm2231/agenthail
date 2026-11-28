@@ -177,7 +177,9 @@ fn command_row(s: &Prefs, id: &'static str, title: &str, k: &Kit) -> El {
         recorder = recorder.allow_unmodified();
     }
     let mut controls = row().gap(8.0).items_center();
-    if bindings::read(|sc| sc.customized(id)) {
+    let customized = bindings::read(|sc| sc.customized(id));
+    let taken = if customized { None } else { bindings::read(|sc| sc.default_blocker(id)).map(|owner| format!("Its default is used by {owner}.")) };
+    if customized {
         let blocker = bindings::read(|sc| sc.default_blocker(id));
         let help = blocker.map_or_else(|| "Use the default shortcut.".to_string(), |owner| format!("The default is used by {owner}."));
         let reset = Button::new("Reset")
@@ -190,7 +192,7 @@ fn command_row(s: &Prefs, id: &'static str, title: &str, k: &Kit) -> El {
             .key(format!("settings-shortcut-reset-{id}"));
         controls = controls.child(reset);
     }
-    line(title, None, controls.child(recorder.build(k)), k)
+    line(title, taken, controls.child(recorder.build(k)), k)
 }
 
 pub fn page(s: &Prefs, k: &Kit) -> El {
