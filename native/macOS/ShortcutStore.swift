@@ -129,11 +129,13 @@ enum AppCommand: String, CaseIterable, Identifiable {
 enum ShortcutOwner: Equatable {
     case command(AppCommand)
     case anyApp
+    case sharedApp(String)
 
     var title: String {
         switch self {
         case .command(let command): command.title
         case .anyApp: "Open sessions from any app"
+        case .sharedApp(let title): title
         }
     }
 }
@@ -175,7 +177,21 @@ final class ShortcutStore: ObservableObject {
         if let command = AppCommand.allCases.first(where: { .command($0) != excluded && self.shortcut(for: $0) == shortcut }) {
             return .command(command)
         }
-        return excluded != .anyApp && anyApp.current() == shortcut ? .anyApp : nil
+        if excluded != .anyApp && anyApp.current() == shortcut { return .anyApp }
+        if let other = SharedAppShortcuts.commands.first(where: { sharedShortcut(for: $0) == shortcut }) {
+            return .sharedApp(other.title)
+        }
+        if case .command(let command) = excluded, SharedAppShortcuts.thisAppOnly.contains(command) { return nil }
+        return SharedAppShortcuts.fixed.first { $0.0 == shortcut }.map { .sharedApp($0.1) }
+    }
+
+    var anyCustomized: Bool {
+        AppCommand.allCases.contains(where: isCustomized)
+    }
+
+    private func sharedShortcut(for command: SharedAppShortcuts.Command) -> StoredShortcut? {
+        if let chosen = overrides[command.id] { return chosen }
+        return command.defaultShortcut
     }
 
     @discardableResult
@@ -204,7 +220,13 @@ final class ShortcutStore: ObservableObject {
 
     func resetAll() {
         anyApp.clear()
-        overrides = [:]
+        let before = overrides
+        for command in AppCommand.allCases { overrides.removeValue(forKey: command.rawValue) }
+        while true {
+            let blocked = AppCommand.allCases.filter { !isCustomized($0) && before[$0.rawValue] != nil && defaultBlocker($0) != nil }
+            if blocked.isEmpty { break }
+            for command in blocked { overrides[command.rawValue] = before[command.rawValue] }
+        }
         save()
     }
 

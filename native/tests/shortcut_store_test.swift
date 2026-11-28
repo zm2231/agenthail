@@ -54,6 +54,49 @@ struct ShortcutStoreTest {
         check(withAnyApp.owner(of: commandJ, except: .anyApp) == .command(.newSession), "the any-app recorder sees command shortcuts")
         withAnyApp.resetAll()
         check(anyAppShortcut == nil && withAnyApp.shortcut(for: .newSession) == commandN, "restore defaults also clears the any-app shortcut so no key has two owners")
+
+        sharedApp()
+    }
+
+    @MainActor
+    static func sharedApp() {
+        let suite = "agenthail.shortcut-store-test.shared.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let commandEqual = StoredShortcut(carbonKeyCode: kVK_ANSI_Equal, carbonModifiers: cmdKey)
+        let commandG = StoredShortcut(carbonKeyCode: kVK_ANSI_G, carbonModifiers: cmdKey)
+        let commandJ = StoredShortcut(carbonKeyCode: kVK_ANSI_J, carbonModifiers: cmdKey)
+        let commandR = AppCommand.refresh.defaultShortcut!
+
+        let store = ShortcutStore(defaults: defaults)
+        check(store.set(commandEqual, for: .refresh) == .taken(.sharedApp("Make text bigger")), "the other app's default ⌘= is refused with its title")
+        check(store.set(commandEqual, for: .showRunning) == .taken(.sharedApp("Make text bigger")), "a command only this app has is refused too")
+        check(store.shortcut(for: .refresh) == commandR && defaults.data(forKey: ShortcutStore.defaultsKey) == nil, "a refused change saves nothing")
+        check(store.set(commandJ, for: .refresh) == .taken(.sharedApp("Next session that needs you")), "a shared command cannot take the other app's fixed keys")
+        check(store.set(commandJ, for: .showRunning) == .saved, "a command only this app has can use the other app's fixed keys")
+        check(store.owner(of: commandJ, except: .anyApp) == .command(.showRunning), "the any-app recorder names this app's owner first")
+        check(store.owner(of: StoredShortcut(carbonKeyCode: kVK_ANSI_B, carbonModifiers: cmdKey | optionKey), except: .anyApp) == .sharedApp("Show or hide the brief"), "the any-app shortcut cannot take the other app's fixed keys")
+
+        defaults.set(Data(#"{"textBigger":{"carbonKeyCode":5,"carbonModifiers":256},"futureCommand":null}"#.utf8), forKey: ShortcutStore.defaultsKey)
+        let moved = ShortcutStore(defaults: defaults)
+        check(moved.set(commandEqual, for: .refresh) == .saved, "⌘= is free once the other app moves Make text bigger off it")
+        check(moved.set(commandG, for: .stop) == .taken(.sharedApp("Make text bigger")), "the other app's saved shortcut is taken")
+        defaults.set(Data(#"{"textBigger":{"carbonKeyCode":40,"carbonModifiers":256},"goToSession":null,"futureCommand":null}"#.utf8), forKey: ShortcutStore.defaultsKey)
+        let blocked = ShortcutStore(defaults: defaults)
+        check(blocked.defaultBlocker(.goToSession) == .sharedApp("Make text bigger"), "the other app holding a default blocks its reset")
+        check(blocked.reset(.goToSession) == .taken(.sharedApp("Make text bigger")), "reset is refused with the other app's title")
+        check(blocked.anyCustomized, "a cleared command counts as customized")
+
+        blocked.resetAll()
+        let kept = defaults.data(forKey: ShortcutStore.defaultsKey).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        check(Set(kept.keys) == ["textBigger", "futureCommand", "goToSession"], "restore defaults keeps the other app's saved keys and the command they block")
+        check(blocked.shortcut(for: .goToSession) == nil, "a blocked command keeps its saved shortcut through restore defaults")
+
+        defaults.set(Data(#"{"textBigger":{"carbonKeyCode":5,"carbonModifiers":256},"refresh":{"carbonKeyCode":24,"carbonModifiers":256}}"#.utf8), forKey: ShortcutStore.defaultsKey)
+        let free = ShortcutStore(defaults: defaults)
+        free.resetAll()
+        check(free.overrides.keys.sorted() == ["textBigger"] && !free.anyCustomized, "restore defaults resets this app's commands when nothing blocks them")
     }
 
     static func check(_ condition: Bool, _ message: String) {
