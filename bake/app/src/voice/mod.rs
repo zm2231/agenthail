@@ -341,7 +341,7 @@ pub fn open(target: &str, name: &str) {
         .chrome(CHROME)
         .options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })
         .srgb_blend(true)
-        .map_app(|app| app.on_close(closed));
+        .map_app(|app| app.on_close(closed).ambient_fps(crate::AMBIENT_FPS));
     reset_shared();
     crate::wake::connect(&crate::wake::VOICE, window.app.handle());
     let handle = rune::open_window(window);
@@ -360,7 +360,7 @@ fn spec() -> AppSpec<Win> {
 }
 
 pub fn run_alone() {
-    let app = rune::App::new(spec());
+    let app = rune::App::new(spec()).ambient_fps(crate::AMBIENT_FPS);
     crate::wake::connect(&crate::wake::VOICE, app.handle());
     app.chrome(CHROME)
         .window_options(WindowOptions { transparent: true, resizable: true, visible: true, ..Default::default() })

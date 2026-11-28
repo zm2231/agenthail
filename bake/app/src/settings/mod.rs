@@ -161,6 +161,7 @@ pub fn spec() -> rune::WindowSpec<Prefs> {
         },
     )
     .srgb_blend(true)
+    .map_app(|app| app.ambient_fps(crate::AMBIENT_FPS))
 }
 
 pub fn keep(handle: AppHandle<Prefs>, window: WindowHandle) {
