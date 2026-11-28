@@ -538,7 +538,19 @@ fn the_settings_tabs_show_which_side_has_more_when_larger_text_makes_them_scroll
     let end = first(&rt);
     press(&mut rt, "settings-tabs-before");
     settle(&mut rt);
-    assert!(first(&rt) > end + 50.0, "the left chevron scrolls back toward Overview while Overview stays open: {end} -> {}", first(&rt));
+    assert!(first(&rt) > end + 50.0, "the left chevron scrolls back toward Overview: {end} -> {}", first(&rt));
+    assert_eq!(rt.state.tab, 0, "while Overview stays open");
+
+    rt.update(|_, tx| tx.scroll_to_x("settings-tabs", 0.0));
+    settle(&mut rt);
+    assert!(rt.presented("settings-tabs-before").is_none(), "back at the start the left chevron goes");
+    rt.update(|_, tx| tx.scroll_to_x("settings-tabs", 10_000.0));
+    settle(&mut rt);
+    let scrolled = first(&rt);
+    assert!(rt.presented("settings-tabs-after").is_none() && rt.presented("settings-tabs-before").is_some(), "scrolled by hand to the end, only the left chevron shows");
+    press(&mut rt, "settings-tabs-before");
+    settle(&mut rt);
+    assert!(first(&rt) > scrolled + 50.0 && rt.state.tab == 0, "after a scroll by hand the left chevron still moves the strip: {scrolled} -> {}", first(&rt));
 }
 
 #[test]
