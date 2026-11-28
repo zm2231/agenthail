@@ -57,7 +57,10 @@ impl Search {
 }
 
 pub fn read(value: &Value) -> Result<Search, String> {
-    let rows = value["items"].as_array().ok_or("Work search returned no items list")?;
+    let rows = match &value["items"] {
+        Value::Null if value.get("items").is_some() => &[][..],
+        v => v.as_array().ok_or("Work search returned no items list")?.as_slice(),
+    };
     let items = rows.iter().map(|r| crate::reply::parse(r.clone()).map_err(|e| format!("Work search returned an item Agenthail can't read: {e}"))).collect::<Result<_, _>>()?;
     Ok(Search { items, truncated: value["truncated"].as_bool().unwrap_or(false) })
 }
@@ -145,6 +148,12 @@ mod tests {
 
     use super::*;
     use crate::mock::{daemon, replies};
+
+    #[test]
+    fn a_null_items_list_reads_as_no_matches_and_a_missing_one_is_refused() {
+        assert!(read(&json!({"items": null, "truncated": false})).is_ok_and(|s| s.items.is_empty()));
+        assert!(read(&json!({"truncated": false})).is_err());
+    }
 
     fn world() -> World {
         let v = json!({

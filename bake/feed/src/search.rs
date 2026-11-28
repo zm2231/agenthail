@@ -43,7 +43,10 @@ impl Codex {
 }
 
 pub fn read_codex(value: &Value) -> Result<Codex, String> {
-    let rows = value["results"].as_array().ok_or("Codex history search returned no results list")?;
+    let rows = match &value["results"] {
+        Value::Null if value.get("results").is_some() => &[][..],
+        v => v.as_array().ok_or("Codex history search returned no results list")?.as_slice(),
+    };
     let mut hits = Vec::new();
     for row in rows {
         let mut session: Session = crate::reply::parse(row["session"].clone()).map_err(|e| format!("Codex history search returned a session Agenthail can't read: {e}"))?;
@@ -371,6 +374,12 @@ pub fn commands_lead(query: &str, rows: &[CommandRow]) -> bool {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_null_results_list_reads_as_no_hits_and_a_missing_one_is_refused() {
+        assert!(read_codex(&json!({"results": null})).is_ok());
+        assert!(read_codex(&json!({})).is_err());
+    }
 
     #[test]
     fn codex_search_waits_for_three_characters() {
