@@ -165,10 +165,11 @@ fn text_over_a_light_floor_and_dark_glass_stays_clear_of_everything_between() {
         let held = legible::held(grey, &surfaces, 4.5);
         assert!(as_well_as_any(held, &surfaces, 4.5), "{held:?} sits lighter or darker than every part of {surfaces:?}, as far from them as any colour can");
     }
-    let readable = Color { r: 0.004, g: 0.004, b: 0.004, a: 1.0 };
-    let pale = [Color::WHITE, Color { r: 0.5, g: 0.5, b: 0.5, a: 1.0 }];
+    let half = Color { r: 0.5, g: 0.5, b: 0.5, a: 1.0 };
+    let pale = [Color::WHITE, half];
     let held = legible::held(grey, &pale, 4.5);
-    assert!(legible::fits(held, &pale, 4.5) && held.luminance() > readable.luminance(), "text darkens only as far as it must: {held:?}");
+    assert!(legible::fits(held, &pale, 4.5), "{held:?} reads on white and mid grey");
+    assert!(contrast(held, half) < 4.5 * 1.02, "text darkens only as far as it must: {}:1 on the darker surface", contrast(held, half));
     let mid = Color { r: 0.18, g: 0.18, b: 0.18, a: 1.0 };
     assert!(!legible::fits(mid, &[Color::WHITE, Color::BLACK], 4.5), "a grey between the brightest and darkest parts can vanish over the middle of the wallpaper");
 }

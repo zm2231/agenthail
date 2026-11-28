@@ -1,6 +1,6 @@
 use feed::look as fl;
 use rune::Color;
-use rune_kit::{Kit, TextRole, TextRoles};
+use rune_kit::{Kit, TextRole, TextRoles, legible};
 
 use crate::theme::Paint;
 
@@ -45,23 +45,26 @@ pub fn held(color: Color, surfaces: &[Color], min: f32) -> Color {
         let to = end.to_oklab();
         Color::from_oklab(std::array::from_fn(|i| from[i] + (to[i] - from[i]) * t))
     };
-    let goal = min * 1.01;
     let reach = |end: Color| {
-        if !fits(end, surfaces, goal) {
+        if !fits(end, surfaces, min) {
             return None;
         }
         let (mut low, mut high) = (0.0f32, 1.0f32);
         for _ in 0..24 {
             let mid = (low + high) * 0.5;
-            if fits(toward(end, mid), surfaces, goal) { high = mid } else { low = mid }
+            if fits(toward(end, mid), surfaces, min) { high = mid } else { low = mid }
         }
-        Some((high, toward(end, high)))
+        Some(toward(end, high))
     };
-    match [reach(Color::BLACK), reach(Color::WHITE)] {
-        [Some(a), Some(b)] => if a.0 <= b.0 { a.1 } else { b.1 },
-        [Some((_, c)), None] | [None, Some((_, c))] => c,
-        [None, None] => if least(Color::BLACK, surfaces) >= least(Color::WHITE, surfaces) { Color::BLACK } else { Color::WHITE },
-    }
+    let by_luminance = |a: &&Color, b: &&Color| a.luminance().total_cmp(&b.luminance());
+    let edges = [surfaces.iter().min_by(by_luminance), surfaces.iter().max_by(by_luminance)];
+    let moved = |c: Color| {
+        let [l, a, b, _] = c.to_oklab();
+        (l - from[0]).powi(2) + (a - from[1]).powi(2) + (b - from[2]).powi(2)
+    };
+    let kit = edges.into_iter().flatten().map(|&s| legible(color, s, min)).filter(|&c| fits(c, surfaces, min));
+    let searched = [reach(Color::BLACK), reach(Color::WHITE)].into_iter().flatten();
+    kit.chain(searched).min_by(|&a, &b| moved(a).total_cmp(&moved(b))).unwrap_or(if least(Color::BLACK, surfaces) >= least(Color::WHITE, surfaces) { Color::BLACK } else { Color::WHITE })
 }
 
 pub fn surfaces(paint: &Paint, floors: &[Color]) -> Vec<Color> {
