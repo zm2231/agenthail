@@ -684,3 +684,83 @@ fn within(rgba: &[u8], r: [f32; 4]) -> Vec<u8> {
     let (y0, y1) = (r[1].max(0.0) as usize, ((r[1] + r[3]) as usize).min(SIZE.1 as usize));
     (y0..y1).flat_map(|y| rgba[(y * width + x0) * 4..(y * width + x1) * 4].iter().copied()).collect()
 }
+
+#[test]
+fn now_keeps_its_session_tabs_clear_of_the_toolbar_buttons_at_every_width() {
+    if !isolated("text_scale::now_keeps_its_session_tabs_clear_of_the_toolbar_buttons_at_every_width") {
+        return;
+    }
+    let dir = Dir::new("text-scale-now-tabs");
+    let cases: [(&[&str], bool); 4] = [(&["a"], false), (&["a", "b", "q"], false), (&["a", "b", "q"], true), (&[], true)];
+    for scale in [1.0, 1.6] {
+        let least = rune_kit::Kit::neutral(true).with_text_scale(scale).text_size(160.0);
+        for screen in ["now", "brief"] {
+            for (open, notice) in cases {
+                for w in (1100..=1700).step_by(40) {
+                    let mut rt = laid_out_in(scale, screen, &dir, (w as f32, 900.0), None);
+                    rt.update(|s, _| {
+                        s.ov.hands_on = vec!["a".into(), "b".into(), "q".into()];
+                        for id in open {
+                            crate::over::open_session(s, id);
+                        }
+                        crate::over::go(s, Screen::Now);
+                        if notice {
+                            s.tabs.closed = Some(("z".into(), "An older session".into(), s.clock + 600.0));
+                        }
+                    });
+                    for _ in 0..4 {
+                        rt.frame(DT);
+                        rt.settle_all();
+                    }
+                    let at = format!("{scale} {screen} {} tabs{} at {w}", open.len(), if notice { " and a notice" } else { "" });
+                    let (title, buttons) = (rect(&rt, "now-leading"), rect(&rt, "now-trailing"));
+                    let shown = if open.is_empty() { "tab-reopen" } else { "session-tabs" };
+                    let tabs = rect(&rt, shown);
+                    assert!(tabs[0] >= title[0] + title[2] - 0.5, "{at}: {shown} {tabs:?} starts after the title {title:?}");
+                    let end = if notice { rect(&rt, "tab-reopen") } else { tabs };
+                    assert!(end[0] + end[2] <= buttons[0] + 0.5, "{at}: {end:?} ends before the buttons {buttons:?}");
+                    if notice && !open.is_empty() {
+                        let (reopen, word) = (rect(&rt, "tab-reopen"), rt.elements().into_iter().find(|e| !e.exiting && e.path.contains("tab-reopen") && e.text.as_deref() == Some("Reopen")).map(|e| e.rect));
+                        assert!(word.is_some_and(|r| r[0] + r[2] <= reopen[0] + reopen[2] + 0.5), "{at}: the notice keeps Reopen in view {word:?} within {reopen:?}");
+                    }
+                    let icons = !rt.elements().into_iter().any(|e| !e.exiting && e.path.contains("now-trailing") && e.text.as_deref() == Some("Three panes"));
+                    if !open.is_empty() && !icons {
+                        assert!(tabs[2] >= least.min(224.0 * scale) - 0.5, "{at}: the buttons go to icons before the tabs have less than {least}, not {tabs:?}");
+                    }
+                    for _ in 0..4 {
+                        rt.frame(DT);
+                        rt.settle_all();
+                        assert_eq!((rect(&rt, shown), rect(&rt, "now-trailing")), (tabs, buttons), "{at}: the tabs and buttons hold still once laid out");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn now_keeps_its_session_tabs_clear_of_the_toolbar_buttons_while_the_window_resizes() {
+    if !isolated("text_scale::now_keeps_its_session_tabs_clear_of_the_toolbar_buttons_while_the_window_resizes") {
+        return;
+    }
+    let dir = Dir::new("text-scale-now-tabs-resize");
+    for screen in ["now", "brief"] {
+        let mut rt = laid_out_in(1.0, screen, &dir, (1700.0, 900.0), None);
+        rt.update(|s, _| {
+            s.ov.hands_on = vec!["a".into(), "b".into(), "q".into()];
+            for id in ["a", "b", "q"] {
+                crate::over::open_session(s, id);
+            }
+            crate::over::go(s, Screen::Now);
+        });
+        for w in (1100..=1700).rev().step_by(20).chain((1100..=1700).step_by(20)) {
+            rt.set_viewport((w as f32, 900.0), 1.0);
+            for _ in 0..3 {
+                rt.frame(DT);
+                rt.settle_all();
+            }
+            let (tabs, buttons) = (rect(&rt, "session-tabs"), rect(&rt, "now-trailing"));
+            assert!(tabs[0] + tabs[2] <= buttons[0] + 0.5, "{screen} resized to {w}: the tabs {tabs:?} end before the buttons {buttons:?}");
+        }
+    }
+}

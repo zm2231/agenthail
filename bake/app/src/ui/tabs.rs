@@ -257,7 +257,7 @@ pub fn strip_part<'a>(s: &'a App, k: &'a Kit, sizes: bool) -> Option<Part<'a>> {
             .grow(1.0)
             .min_w(0.0);
         let strip = if sizes { strip.on_layout(|s: &mut App, r: [f32; 4]| set_width(s, r[2])) } else { strip };
-        let mut bar = row().w_full().items_center().gap(8.0).child(strip);
+        let mut bar = row().w_full().items_center().gap(BAR_GAP).child(strip);
         if let Some(n) = notice(s, k) {
             bar = bar.child(n);
         }
@@ -265,38 +265,54 @@ pub fn strip_part<'a>(s: &'a App, k: &'a Kit, sizes: bool) -> Option<Part<'a>> {
     }))
 }
 
-fn notice(s: &App, k: &Kit) -> Option<El> {
+const BAR_GAP: f32 = 8.0;
+const NOTICE_PAD: f32 = 8.0;
+const NOTICE_GAP: f32 = 4.0;
+
+fn notice_words(s: &App) -> Option<(String, &'static str)> {
     if let Some((_, t, _)) = &s.tabs.closed {
-        return Some(
-            row()
-                .key("tab-reopen")
-                .gap(4.0)
-                .px(8.0)
-                .py(3.0)
-                .radius(10.0)
-                .fill(k.c.surface_raised)
-                .child(text(format!("Closed {t} ·")).font(k.text(META)).color(muted()).truncate())
-                .child(text("Reopen".to_string()).font(k.text(META)).color(accent()))
-                .help("Agenthail closed the least recently used tab to make room")
-                .on_press(|s: &mut App| reopen(s)),
-        );
+        return Some((format!("Closed {t} ·"), "Reopen"));
     }
     let a = s.tabs.archived.as_ref()?;
-    let (said, action) = match (stuck(s, a), a.unarchiving) {
+    Some(match (stuck(s, a), a.unarchiving) {
         (true, _) => (format!("{} is still archived ·", a.title), "Try Again"),
         (false, true) => (format!("Unarchiving {}…", a.title), ""),
         (false, false) => (format!("{} was archived ·", a.title), "Unarchive"),
-    };
-    let mut n = row().key("tab-archived").gap(4.0).px(8.0).py(3.0).radius(10.0).fill(k.c.surface_raised).child(text(said).font(k.text(META)).color(muted()).truncate());
-    if !action.is_empty() {
-        n = n.child(text(action.to_string()).font(k.text(META)).color(accent())).on_press(|s: &mut App| {
-            if let Some(a) = s.tabs.archived.as_mut() {
-                a.unarchiving = false;
-            }
-            unarchive(s);
-        });
+    })
+}
+
+pub fn notice_room(s: &App, k: &Kit) -> f32 {
+    let Some((said, action)) = notice_words(s) else { return 0.0 };
+    let width = |t: &str| rune::text::advance(t, k.text(META));
+    let action = if action.is_empty() { 0.0 } else { NOTICE_GAP + width(action) };
+    let beside = if s.tabs.tabs.tabs().is_empty() { 0.0 } else { BAR_GAP };
+    beside + 2.0 * NOTICE_PAD + width(&said) + action
+}
+
+fn notice(s: &App, k: &Kit) -> Option<El> {
+    let (said, action) = notice_words(s)?;
+    let n = row()
+        .key(if s.tabs.closed.is_some() { "tab-reopen" } else { "tab-archived" })
+        .shrink()
+        .min_w(0.0)
+        .gap(NOTICE_GAP)
+        .px(NOTICE_PAD)
+        .py(3.0)
+        .radius(10.0)
+        .fill(k.c.surface_raised)
+        .child(text(said).font(k.text(META)).color(muted()).truncate().shrink().min_w(0.0));
+    if s.tabs.closed.is_some() {
+        return Some(n.child(text(action.to_string()).font(k.text(META)).color(accent())).help("Agenthail closed the least recently used tab to make room").on_press(|s: &mut App| reopen(s)));
     }
-    Some(n)
+    if action.is_empty() {
+        return Some(n);
+    }
+    Some(n.child(text(action.to_string()).font(k.text(META)).color(accent())).on_press(|s: &mut App| {
+        if let Some(a) = s.tabs.archived.as_mut() {
+            a.unarchiving = false;
+        }
+        unarchive(s);
+    }))
 }
 
 pub fn overlays(s: &App, layer: &mut Vec<El>, k: &Kit) {

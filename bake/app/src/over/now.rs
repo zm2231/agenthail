@@ -46,9 +46,13 @@ fn variant(brief: bool, room: Room, k: &Kit) -> El {
 }
 
 const LEADING_START: &str = "now-leading-start";
+const LEADING_WIDTH: &str = "now-leading-width";
 const TRAILING_END: &str = "now-trailing-end";
 const TOOLBAR_TITLE_MIN: f32 = 96.0;
 const TOOLBAR_FADE: f32 = 16.0;
+const TOOLBAR_TABS_MIN: f32 = 160.0;
+const TOOLBAR_GAP: f32 = 12.0;
+const TITLE_SHRINK: f32 = 1e-3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Room {
@@ -61,10 +65,16 @@ fn trailing_key(room: Room, needs: usize, brief: bool, k: &Kit) -> String {
     format!("now-trailing-{room:?}-{}-{needs}-{brief}", k.text_size(1.0).to_bits())
 }
 
-fn room(s: &App, needs: usize, brief: bool, k: &Kit) -> Room {
+fn room(s: &App, needs: usize, brief: bool, tabs: bool, k: &Kit) -> Room {
     let (Some(start), Some(end)) = (ui::fit_width(s, LEADING_START), ui::fit_width(s, TRAILING_END)) else { return Room::Labels };
-    let title = k.text_size(TOOLBAR_TITLE_MIN).max(rune::text::advance("Now", k.text(BODY_MED)));
-    let free = end - start - title - k.text_size(TOOLBAR_FADE).max(TOOLBAR_FADE);
+    let title = rune::text::advance("Now", k.text(BODY_MED));
+    let lead = if tabs {
+        let strip = if s.tabs.tabs.tabs().is_empty() { 0.0 } else { k.text_size(TOOLBAR_TABS_MIN) };
+        ui::fit_width(s, LEADING_WIDTH).unwrap_or(title) + TOOLBAR_GAP + strip + crate::ui::tabs::notice_room(s, k)
+    } else {
+        title
+    };
+    let free = end - start - lead.max(k.text_size(TOOLBAR_TITLE_MIN)) - k.text_size(TOOLBAR_FADE).max(TOOLBAR_FADE);
     for room in [Room::Labels, Room::Fewer] {
         match ui::fit_width(s, &trailing_key(room, needs, brief, k)) {
             Some(w) if w > free => continue,
@@ -269,16 +279,28 @@ fn focus_card<'a>(s: &'a App, k: &'a Kit) -> Part<'a> {
 }
 
 fn toolbar<'a>(s: &'a App, strip: bool, k: &'a Kit) -> ui::Bar<'a> {
-    let start = |e: El| e.on_layout(|s: &mut App, r: [f32; 4]| keep(s, LEADING_START, r[0]));
+    let start = |e: El| {
+        e.on_layout(|s: &mut App, r: [f32; 4]| {
+            keep(s, LEADING_START, r[0]);
+            keep(s, LEADING_WIDTH, r[2]);
+        })
+    };
     let leading = if strip {
         Part::always("now-leading", move || start(row().key("now-leading").gap(12.0).items_center().shrink().min_w(0.0).child(text("Now".to_string()).font(k.text(BODY_MED)).color(strong(k)).truncate().shrink().min_w(0.0)).child(ui::strip(s, None, k))))
     } else {
         Part::row("now-leading", (), move || start(ui::crumb(&[("Now", true)], k)))
     };
-    let center = crate::ui::tabs::strip_part(s, k, false).map(|tabs| Part::group("now-tabs", crate::over::rows::version((), [&tabs]), move || row().max_w(560.0).child(tabs.el())));
+    let tabs = crate::ui::tabs::strip_part(s, k, false);
     let needs = s.ov.needs.len();
     let brief = s.ov.now_brief;
-    let room = room(s, needs, brief, k);
+    let room = room(s, needs, brief, tabs.is_some(), k);
+    let leading = match tabs {
+        None => leading,
+        Some(tabs) => Part::group("now-leading-tabs", crate::over::rows::version((), [&leading, &tabs]), move || {
+            let title = row().shrink_by(TITLE_SHRINK).child(leading.el());
+            row().key("now-leading-tabs").w_full().gap(TOOLBAR_GAP).items_center().child(title).child(row().grow(1.0).shrink().min_w(0.0).child(tabs.el()))
+        }),
+    };
     let measure = trailing_key(room, needs, brief, k);
     let trailing = Part::row("now-trailing", (needs, brief, room), move || {
         let r = row().gap(10.0).items_center();
@@ -289,7 +311,7 @@ fn toolbar<'a>(s: &'a App, strip: bool, k: &'a Kit) -> ui::Bar<'a> {
             keep(s, TRAILING_END, b[0] + b[2]);
         })
     });
-    ui::Bar { leading, center, trailing }
+    ui::Bar { leading, center: None, trailing }
 }
 
 fn toolbar_of(bar: ui::Bar) -> Toolbar {
