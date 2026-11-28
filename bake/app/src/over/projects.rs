@@ -474,8 +474,9 @@ pub fn drain(s: &mut App) -> bool {
         changed = true;
     }
     let remote = s.ov.d.tile_order.clone().or_else(|| s.client.is_none().then(TileOrder::default));
-    let fresh = s.ov.projects.seen_at != Some(s.ov.d.now);
-    s.ov.projects.seen_at = Some(s.ov.d.now);
+    let read_at = s.ov.live.read_at();
+    let fresh = s.ov.projects.seen_at != read_at;
+    s.ov.projects.seen_at = read_at;
     if let Some(order) = s.ov.projects.tiles.poll(remote.as_ref(), fresh) {
         send_tiles(s, order);
         changed = true;

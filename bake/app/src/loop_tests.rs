@@ -222,6 +222,37 @@ fn a_reread_that_finds_the_same_sessions_does_not_rebuild_the_overview() {
 }
 
 #[test]
+fn a_failed_project_order_is_sent_again_on_the_next_read_within_the_same_minute() {
+    if !isolated("a_failed_project_order_is_sent_again_on_the_next_read_within_the_same_minute") {
+        return;
+    }
+    let dir = Dir::new("tiles-retry");
+    let mut rt = runtime(app(sessions(&["a"]), &dir), (1440.0, 900.0));
+    let read = |at: &str| {
+        let mut raw = recorded(2, sessions(&["a"]));
+        raw.updated_at = at.into();
+        raw.projects.push(serde_json::from_value(json!({"id": "p2", "displayName": "Beta"})).unwrap());
+        raw.tile_order = Some(feed::projects::TileOrder { order: vec!["p1".into(), "p2".into()], pinned: Vec::new(), revision: 1 });
+        Bg::Overview(Box::new(fetched(raw)))
+    };
+    send(&rt, read("2026-11-27T10:02:10Z"));
+    rt.frame(DT);
+    rt.update(|s, _| {
+        let tiles = &mut s.ov.projects.tiles;
+        assert!(tiles.change(&feed::projects::TileChange::Step("p2".into(), -1), &["p1".into(), "p2".into()]).is_some());
+        tiles.answered(feed::projects::TileReply::Failed("timed out".into()));
+        assert!(tiles.unsent());
+    });
+    rt.frame(DT);
+    assert!(rt.state.ov.projects.tiles.unsent(), "nothing is sent again before a new read");
+    let rebuilds = rt.state.rebuilds;
+    send(&rt, read("2026-11-27T10:02:40Z"));
+    rt.frame(DT);
+    assert_eq!(rt.state.rebuilds, rebuilds, "the read changed nothing shown");
+    assert!(!rt.state.ov.projects.tiles.unsent(), "the next read sends the order again");
+}
+
+#[test]
 fn a_session_list_that_brings_a_quiet_project_back_reads_its_work_at_once() {
     if !isolated("a_session_list_that_brings_a_quiet_project_back_reads_its_work_at_once") {
         return;

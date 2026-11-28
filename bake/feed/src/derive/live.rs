@@ -537,6 +537,10 @@ impl Overview {
             || self.pending != b.pending
     }
 
+    pub fn read_at(&self) -> Option<OffsetDateTime> {
+        parse_time(&self.base.updated_at)
+    }
+
     pub fn stale(&self) -> bool {
         self.stale
     }
