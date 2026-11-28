@@ -168,6 +168,7 @@ pub const COMMANDS: &[Command] = &[
     cmd("refresh", "Refresh", "mod+r", Group::View),
     cmd("textBigger", "Make text bigger", "mod+equal", Group::View),
     cmd("textSmaller", "Make text smaller", "mod+minus", Group::View),
+    cmd("textActual", "Actual text size", "mod+0", Group::View),
     cmd("stop", "Stop", "mod+period", Group::Composer),
     cmd("composerSendNow", "Send now, steering a running turn", "ctrl+enter", Group::Composer),
     cmd("composerInterrupt", "Stop the running turn (twice clears the draft)", "escape", Group::Composer),
@@ -183,7 +184,7 @@ pub const COMMANDS: &[Command] = &[
 pub const FIXED: &[(&str, &str)] = &[
     ("mod+comma", "Settings"),
     ("shift+mod+s", "Sessions"),
-    ("mod+0", "Now"),
+    ("shift+mod+n", "Now"),
     ("mod+j", "Next session that needs you"),
     ("mod+1", "Hands-on session 1"),
     ("mod+2", "Hands-on session 2"),

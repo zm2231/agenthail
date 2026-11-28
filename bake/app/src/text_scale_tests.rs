@@ -237,3 +237,26 @@ fn the_open_settings_tab_stays_in_view_when_larger_text_makes_the_tabs_scroll() 
     let [sx, _, sw, _] = rt.presented(&format!("settings-tabs/segment{agents}")).expect("the Agents tab is laid out").0;
     assert!(sx >= x - 0.5 && sx + sw <= x + w + 0.5, "the Agents tab {:?} shows inside the strip {:?}", (sx, sw), (x, w));
 }
+
+#[test]
+fn command_zero_resets_the_text_size_and_shift_command_n_opens_now() {
+    if !isolated("text_scale::command_zero_resets_the_text_size_and_shift_command_n_opens_now") {
+        return;
+    }
+    let dir = Dir::new("text-scale-keys");
+    let mut rt = laid_out(1.6, "session", &dir);
+    crate::look::take_view(crate::look::ticket(), feed::look::View::default());
+    rt.frame(DT);
+    crate::look::hold_text_scale(Some(1.6));
+    assert_eq!(crate::look::text_scale(), Some(1.6));
+    let press = |key: rune::Key, shift: bool| rune::KeyEvent { key, mods: rune::Mods { cmd: true, shift, ..rune::Mods::default() } };
+
+    rt.key(press(rune::Key::Command('0'), false));
+    rt.frame(DT);
+    assert_eq!(crate::look::text_scale(), Some(1.0), "⌘0 puts the text back to its actual size");
+    assert!(rt.state.screen != Screen::Now, "⌘0 leaves the session open");
+
+    rt.key(press(rune::Key::Command('n'), true));
+    rt.frame(DT);
+    assert!(rt.state.screen == Screen::Now, "⇧⌘N opens Now");
+}

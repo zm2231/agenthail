@@ -614,7 +614,7 @@ impl<'a> Section<'a> {
 
 pub fn sidebar_part<'a>(s: &'a App, current_project: Option<&str>, selected: Option<&str>, k: &'a Kit) -> Part<'a> {
     let mut heads = vec![
-        nav_row("home", "Now", &icons::DOT_GRID, Some("⌘0"), matches!(s.screen, Screen::Now), k, |s, _| go(s, Screen::Now)),
+        nav_row("home", "Now", &icons::DOT_GRID, Some("⌘⇧N"), matches!(s.screen, Screen::Now), k, |s, _| go(s, Screen::Now)),
         nav_row("jump", "Jump to", &icons::MAGNIFYING_GLASS, Some("⌘K"), false, k, |s, tx| crate::over::open_jump(s, tx)),
         nav_row("sessions", "Sessions", &icons::BULLET_LIST, Some("⌘⇧S"), matches!(s.screen, Screen::Sessions), k, |s, _| go(s, Screen::Sessions)),
         nav_row("apps", "Apps", &icons::EXTENSIONS, None, matches!(s.screen, Screen::Extensions | Screen::Extension(_)), k, |s, _| go(s, Screen::Extensions)),
