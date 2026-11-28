@@ -91,13 +91,14 @@ fn text_on_the_apps_own_cards_and_glass_is_held_to_body_contrast() {
             let mut paint = if dark { Paint::dark() } else { Paint::light() };
             paint.muted = dim_text(dark);
             paint.failed = dim_text(dark);
+            paint.accent = if dark { rune::oklch(0.38, 0.12, 268.0) } else { rune::oklch(0.8, 0.1, 268.0) };
             let text = paint.text;
             let mut roles = Kit::neutral(dark).roles;
             roles.meta = dim_text(dark);
             let floor = paint.card_deep;
             hold_paint(&mut paint, &mut roles, floor, min, increased);
             let on = legible::surfaces(&paint, floor);
-            assert!(reads(paint.muted, &on, min) && reads(paint.failed, &on, min) && reads(roles.meta, &on, min), "served text reads at {min}:1 on cards, raised rows and glass");
+            assert!(reads(paint.muted, &on, min) && reads(paint.failed, &on, min) && reads(paint.accent, &on, min) && reads(roles.meta, &on, min), "served text reads at {min}:1 on cards, raised rows and glass");
             assert!(reads(paint.faint, &on, legible::faint_floor(increased)));
             assert_eq!(paint.text, text, "body text that reads is unchanged");
         }
@@ -112,4 +113,12 @@ fn light_text_on_dark_glass_is_measured_on_what_shows_through() {
     let main = main_kit(&KitEnv::new(true), &paint, roles, true, behind);
     assert_eq!(main.c.bg_base, Color::WHITE.alpha(0.025), "the kit keeps its translucent surfaces");
     assert_eq!((main.c.text_base, main.c.text_muted), (paint.text, paint.muted), "a faint white wash is not read as a white surface");
+}
+
+#[test]
+fn a_translucent_surface_is_measured_as_the_window_blends_it() {
+    let half = over(Color::WHITE.alpha(0.5), Color::BLACK);
+    assert!((half.r - 0.214).abs() < 0.002 && half.a == 1.0, "half white over black is sRGB 0.5, not linear 0.5: {half:?}");
+    let pane = Color { r: 0.02, g: 0.03, b: 0.05, a: 1.0 };
+    assert_eq!(over(pane, Color::WHITE), pane, "an opaque surface is itself");
 }

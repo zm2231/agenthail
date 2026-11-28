@@ -1,3 +1,4 @@
+use feed::look as fl;
 use rune::Color;
 use rune_kit::{Kit, TextRole, TextRoles, legible};
 
@@ -11,7 +12,9 @@ pub fn over(surface: Color, under: Color) -> Color {
     if surface.a >= 1.0 {
         return surface;
     }
-    Color { a: 1.0, ..under.mix(surface.alpha(1.0), surface.a) }
+    let encoded = |c: Color| [fl::gamma(c.r), fl::gamma(c.g), fl::gamma(c.b)];
+    let [r, g, b] = fl::blend(encoded(under), encoded(surface), surface.a.clamp(0.0, 1.0)).map(fl::linear);
+    Color { r, g, b, a: 1.0 }
 }
 
 pub fn held(color: Color, surfaces: &[Color], min: f32) -> Color {
@@ -27,7 +30,7 @@ pub fn surfaces(paint: &Paint, floor: Color) -> [Color; 5] {
 
 pub fn hold_paint(paint: &mut Paint, roles: &mut TextRoles, floor: Color, body: f32, increased: bool) {
     let on = surfaces(paint, floor);
-    for c in [&mut paint.text, &mut paint.muted, &mut paint.attention, &mut paint.done, &mut paint.failed] {
+    for c in [&mut paint.text, &mut paint.muted, &mut paint.accent, &mut paint.attention, &mut paint.done, &mut paint.failed] {
         *c = held(*c, &on, body);
     }
     paint.faint = held(paint.faint, &on, faint_floor(increased));

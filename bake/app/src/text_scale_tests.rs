@@ -778,6 +778,8 @@ fn legible_shot() {
         "faint": {"dark": "#45464b", "light": "#c2c3c7"},
         "meta": {"dark": "#45464b", "light": "#c2c3c7"},
         "error": {"dark": "#7a2a2a", "light": "#f0a0a0"},
+        "link": {"dark": "#3a3f7a", "light": "#b8bdf0"},
+        "accent": {"dark": "#3a3f7a", "light": "#b8bdf0"},
     }});
     for (look, view) in [("live", json!({})), ("dim", dim)] {
         let view: feed::look::View = serde_json::from_value(view).unwrap();
