@@ -250,8 +250,12 @@ impl Shortcuts {
     pub fn get(&self, id: &str) -> Option<Stored> {
         match self.overrides.get(id) {
             Some(chosen) => *chosen,
-            None => default_of(id),
+            None => default_of(id).filter(|d| !self.chosen_elsewhere(*d, id)),
         }
+    }
+
+    fn chosen_elsewhere(&self, shortcut: Stored, id: &str) -> bool {
+        self.overrides.iter().any(|(other, chosen)| other != id && *chosen == Some(shortcut)) || self.any_app.is_some_and(|a| a.in_app_twins(MAC).contains(&shortcut))
     }
 
     pub fn spec(&self, id: &str) -> Option<String> {
@@ -449,6 +453,19 @@ mod tests {
         assert_eq!(saved["jumpToLatest"], serde_json::Value::Null);
         assert_eq!(Shortcuts::load(Some(b"not json"), Some("false")), Shortcuts::default());
         assert_eq!(Shortcuts::default().data(), None, "no overrides removes the key");
+    }
+
+    #[test]
+    fn a_default_yields_to_a_shortcut_chosen_for_another_command() {
+        let sc = Shortcuts::load(Some(br#"{"newTab":{"carbonKeyCode":29,"carbonModifiers":256},"refresh":{"carbonKeyCode":45,"carbonModifiers":768}}"#), None);
+        assert_eq!(sc.spec("newTab").as_deref(), Some("mod+0"));
+        assert_eq!(sc.get("textActual"), None, "the Mac app's saved ⌘0 keeps it");
+        assert_eq!(sc.default_blocker("textActual"), Some("New tab"));
+        assert_eq!(sc.spec("refresh").as_deref(), Some("shift+mod+n"));
+        assert_eq!(sc.spec("textBigger").as_deref(), Some("mod+equal"), "untaken defaults stay");
+        let mut freed = sc.clone();
+        freed.set("newTab", None).unwrap();
+        assert_eq!(freed.spec("textActual").as_deref(), Some("mod+0"), "freeing ⌘0 gives the default back");
     }
 
     #[test]
