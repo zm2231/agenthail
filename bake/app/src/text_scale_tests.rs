@@ -411,10 +411,12 @@ fn a_session_at_larger_text_in_the_smallest_window_keeps_its_controls_and_messag
     assert!(switch[0] + switch[2] <= pane[0] + pane[2] + 0.5, "Focus and Show work {switch:?} stay inside the conversation {pane:?}");
     let field = rect(&rt, "composer");
     let k = rune_kit::Kit::neutral(true).with_text_scale(1.6);
-    let x = rt.state.ov.d.session("a").expect("a is listed").clone();
-    let shown = crate::ui::session::placeholder(&rt.state, &x, &k);
-    assert!(shown.starts_with("Message Fix") && shown.ends_with('…'), "the placeholder is cut to fit: {shown}");
-    assert!(rune::text::advance(&shown, k.text(crate::theme::BODY)) <= field[2] + 0.5, "{shown} fits on the message box's one line {field:?}");
+    let hint = format!("Message {LONG_TITLE}");
+    assert!(rune::text::advance(&hint, k.text(crate::theme::BODY)) > field[2], "the whole placeholder is wider than the message box {field:?}");
+    let line = k.text(crate::theme::BODY).size;
+    assert!(field[3] >= 2.0 * line, "the message box {field:?} is tall enough for the wrapped placeholder");
+    let send = rect(&rt, "send");
+    assert!(field[1] + field[3] <= send[1] + 0.5, "the message box {field:?} ends above Send {send:?}");
 }
 
 #[test]
@@ -551,6 +553,31 @@ fn the_settings_tabs_show_which_side_has_more_when_larger_text_makes_them_scroll
     press(&mut rt, "settings-tabs-before");
     settle(&mut rt);
     assert!(first(&rt) > scrolled + 50.0 && rt.state.tab == 0, "after a scroll by hand the left chevron still moves the strip: {scrolled} -> {}", first(&rt));
+}
+
+#[test]
+fn now_keeps_every_toolbar_button_clear_of_the_title_and_fade_at_every_width() {
+    if !isolated("text_scale::now_keeps_every_toolbar_button_clear_of_the_title_and_fade_at_every_width") {
+        return;
+    }
+    let dir = Dir::new("text-scale-now-widths");
+    for scale in [1.0, 1.5, 1.6] {
+        let k = rune_kit::Kit::neutral(true).with_text_scale(scale);
+        let (floor, fade) = (k.text_size(96.0), k.text_size(16.0).max(16.0));
+        for (screen, w) in ["now", "brief"].into_iter().flat_map(|screen| (1100..=1440).step_by(20).map(move |w| (screen, w))) {
+            let mut rt = laid_out_in(scale, screen, &dir, (w as f32, 900.0), None);
+            rt.update(|s, _| s.ov.hands_on = vec!["a".into(), "b".into(), "q".into()]);
+            for _ in 0..4 {
+                rt.frame(DT);
+            }
+            let (title, buttons) = (rect(&rt, "now-leading"), rect(&rt, "now-trailing"));
+            assert!(buttons[0] >= title[0] + title[2].max(floor) + fade - 0.5, "{scale} {screen} at {w}: the buttons {buttons:?} start clear of the title's room {title:?} and the fade");
+            for _ in 0..4 {
+                rt.frame(DT);
+                assert_eq!(rect(&rt, "now-trailing"), buttons, "{scale} {screen} at {w}: the buttons hold still once laid out");
+            }
+        }
+    }
 }
 
 #[test]
